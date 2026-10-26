@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
-description = "Bit-exact M31/CM31/QM31, Blake2sM31Channel, CirclePoint and SASH 23-segment grid verifier for Ethereum EVM settlement"
+description = "Bit-exact M31/CM31/QM31, Blake2sM31Channel and SASH 23-segment grid verifier for Ethereum EVM settlement"
 
 [[bin]]
 name = "export_vectors"

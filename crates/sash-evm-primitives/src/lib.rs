@@ -3,7 +3,6 @@
 
 pub mod blake2s;
 pub mod channel;
-pub mod circle;
 pub mod field;
 pub mod grid;
 pub mod tinyllama_fixture;

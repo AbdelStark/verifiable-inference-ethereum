@@ -121,22 +121,6 @@ pub fn blake2s_m31(data: &[u8]) -> [u8; 32] {
     reduce_to_m31(blake2s256(data))
 }
 
-/// Computes `Blake2sMerkleHasherGeneric<true>::hash_node(children, column_values)`.
-pub fn hash_merkle_node_m31(
-    children: Option<([u8; 32], [u8; 32])>,
-    column_values: &[M31],
-) -> [u8; 32] {
-    let mut buf = Vec::with_capacity(64 + 4 * column_values.len());
-    if let Some((left, right)) = children {
-        buf.extend_from_slice(&left);
-        buf.extend_from_slice(&right);
-    }
-    for v in column_values {
-        buf.extend_from_slice(&v.0.to_le_bytes());
-    }
-    blake2s_m31(&buf)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

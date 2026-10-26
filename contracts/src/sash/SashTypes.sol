@@ -8,8 +8,7 @@ import {QM31} from "../field/QM31.sol";
 library SashTypes {
     enum VerifierKind {
         DEV_TRANSCRIPT_ONLY,
-        ZKVM_GROTH16,
-        NATIVE_CIRCLE_STARK
+        ZKVM_GROTH16
     }
 
     struct ModelManifest {
