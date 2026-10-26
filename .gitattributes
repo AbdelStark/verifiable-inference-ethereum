@@ -1,0 +1,2 @@
+# Generated with LF endings; `make check` compares it byte for byte with the Rust export.
+contracts/src/sash/TinyLlamaFixture.sol text eol=lf

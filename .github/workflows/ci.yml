@@ -29,7 +29,7 @@ jobs:
         run: |
           tmp="$(mktemp)"
           cargo run --locked --quiet -p sash-evm-primitives --bin export_vectors -- "$tmp"
-          cmp -s "$tmp" contracts/src/sash/TinyLlamaFixture.sol
+          cmp -s "$tmp" contracts/src/sash/TinyLlamaFixture.sol || { echo "::error file=contracts/src/sash/TinyLlamaFixture.sol::TinyLlamaFixture.sol drift detected; run 'make vectors'"; exit 1; }
           rm -f "$tmp"
 
   solidity:

@@ -147,4 +147,19 @@ mod tests {
         assert_eq!(drawn.len(), 9);
         assert_eq!(ch.n_draws(), 6);
     }
+
+    // Same constants as `testTinyLlamaFiatShamirWResidualStreamParity` in Foundry.
+    #[test]
+    fn tinyllama_w_residual_stream_parity() {
+        let segs = crate::tinyllama_fixture::tinyllama_segments();
+        let w = |s: &crate::grid::SegmentClaim| {
+            derive_sash_w_residual_stream(s.pre_root, s.model_root, s.trace_root, s.relation_draws)
+                .to_u32_array()
+        };
+        assert_eq!(w(&segs[0]), [1259081484, 630063634, 1062868201, 1393098785]);
+        assert_eq!(
+            w(&segs[22]),
+            [1297757949, 994229370, 1478950871, 2099916732]
+        );
+    }
 }

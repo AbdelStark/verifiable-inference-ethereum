@@ -163,5 +163,10 @@ mod tests {
         assert_eq!(u32::from_le_bytes(red[4..8].try_into().unwrap()), 1);
         assert_eq!(u32::from_le_bytes(red[8..12].try_into().unwrap()), 0);
         assert_eq!(u32::from_le_bytes(red[12..16].try_into().unwrap()), 1);
+
+        assert_eq!(
+            hex::encode(blake2s_m31(b"a")),
+            "4b0d121873403037c3cd9b1049203607f7233f3674895660349bd43210ec3e10"
+        );
     }
 }

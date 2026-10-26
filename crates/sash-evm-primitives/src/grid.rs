@@ -226,8 +226,8 @@ mod tests {
 
     #[test]
     fn real_tinyllama_23_segment_grid_accepts() {
-        let manifest = tinyllama_manifest();
         let segs = tinyllama_segments();
+        let manifest = tinyllama_manifest(&segs);
         verify_sash_grid(
             &manifest,
             &segs,
@@ -241,8 +241,8 @@ mod tests {
 
     #[test]
     fn negative_controls_reject_all_tampered_bundles() {
-        let manifest = tinyllama_manifest();
         let base_segs = tinyllama_segments();
+        let manifest = tinyllama_manifest(&base_segs);
 
         // 1. Forged model_root on layer 7
         {

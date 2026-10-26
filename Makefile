@@ -22,7 +22,7 @@ forge-test:
 
 check: rust-check
 	@tmp=$$(mktemp); \
-	cargo run --locked --quiet -p sash-evm-primitives --bin export_vectors -- "$$tmp"; \
+	cargo run --locked --quiet -p sash-evm-primitives --bin export_vectors -- "$$tmp" || { rm -f "$$tmp"; exit 1; }; \
 	cmp -s "$$tmp" contracts/src/sash/TinyLlamaFixture.sol || { rm -f "$$tmp"; echo "ERROR: TinyLlamaFixture.sol drift detected; run 'make vectors'"; exit 1; }; \
 	rm -f "$$tmp"
 	@if command -v forge >/dev/null 2>&1; then \

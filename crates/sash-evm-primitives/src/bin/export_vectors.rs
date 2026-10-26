@@ -3,15 +3,12 @@
 use std::env;
 use std::fmt::{self, Write};
 use std::fs;
-use std::path::PathBuf;
-
-use sha2::{Digest, Sha256};
 
 use sash_evm_primitives::grid::{SegmentClaim, compute_public_digest};
 use sash_evm_primitives::tinyllama_fixture::{
     TINYLLAMA_ANSWER_IDS, TINYLLAMA_B0_REL_DRAWS, TINYLLAMA_EOS_TOKEN_ID, TINYLLAMA_HEAD_REL_DRAWS,
     TINYLLAMA_PROMPT, TINYLLAMA_PROMPT_IDS, TINYLLAMA_RESPONSE, TINYLLAMA_TOK_IN,
-    TINYLLAMA_TOK_OUT, tinyllama_manifest, tinyllama_segments,
+    TINYLLAMA_TOK_OUT, tinyllama_manifest, tinyllama_model_id, tinyllama_segments,
 };
 
 fn hex0x(bytes: [u8; 32]) -> String {
@@ -70,10 +67,9 @@ fn write_segments(out: &mut String, segs: &[SegmentClaim]) -> fmt::Result {
 }
 
 fn render() -> Result<String, fmt::Error> {
-    let model_id: [u8; 32] =
-        Sha256::digest(b"TinyLlama/TinyLlama-1.1B-Chat-v1.0@fe8a4ea1ffedaf415f4da2f062534de366a451e6:y-attnout-w12").into();
-    let manifest = tinyllama_manifest();
+    let model_id = tinyllama_model_id();
     let segs = tinyllama_segments();
+    let manifest = tinyllama_manifest(&segs);
     let public_digest = compute_public_digest(model_id, &segs);
 
     let mut out = String::new();
@@ -140,8 +136,7 @@ fn render() -> Result<String, fmt::Error> {
 fn main() {
     let out_path = env::args()
         .nth(1)
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("contracts/src/sash/TinyLlamaFixture.sol"));
+        .expect("usage: export_vectors <output .sol path>");
     let rendered = render().expect("render Solidity fixture");
-    fs::write(&out_path, rendered).expect("write Solidity fixture");
+    fs::write(out_path, rendered).expect("write Solidity fixture");
 }

@@ -4,8 +4,18 @@
 //! over TinyLlama/TinyLlama-1.1B-Chat-v1.0 @ fe8a4ea1ffedaf415f4da2f062534de366a451e6
 //! (profile y-attnout-w12, S = 32 tokens: 25 prompt + 8 answer tokens ending at EOS = 2).
 
+use sha2::{Digest, Sha256};
+
 use crate::field::QM31;
 use crate::grid::{ModelManifest, SegmentClaim};
+
+/// `modelId = sha256("<model>@<revision>:<profile>")`.
+pub fn tinyllama_model_id() -> [u8; 32] {
+    Sha256::digest(
+        b"TinyLlama/TinyLlama-1.1B-Chat-v1.0@fe8a4ea1ffedaf415f4da2f062534de366a451e6:y-attnout-w12",
+    )
+    .into()
+}
 
 pub const TINYLLAMA_PROMPT: &str = "Name the capital of France in one short sentence.";
 pub const TINYLLAMA_RESPONSE: &str = "The capital of France is Paris.";
@@ -722,10 +732,9 @@ pub fn tinyllama_segments() -> Vec<SegmentClaim> {
     ]
 }
 
-pub fn tinyllama_manifest() -> ModelManifest {
-    let segs = tinyllama_segments();
+pub fn tinyllama_manifest(segs: &[SegmentClaim]) -> ModelManifest {
     ModelManifest::from_segments(
-        &segs,
+        segs,
         32,
         TINYLLAMA_EOS_TOKEN_ID,
         TINYLLAMA_B0_REL_DRAWS,
