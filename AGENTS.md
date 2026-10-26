@@ -90,7 +90,7 @@ When asked to work/implement/do/resolve issue #N:
 ## 8. Current state (mutable)
 
 - **CI** (`.github/workflows/ci.yml`) runs on pushes to `main` and on every PR, in two jobs:
-  - `rust`: `cargo fmt --check`, `clippy --locked -D warnings`, `cargo test --locked --workspace`, and the fixture byte-sync check (`--locked`).
+  - `rust`: `cargo fmt --check`, `cargo clippy --locked --workspace --all-targets -- -D warnings`, `cargo test --locked --workspace`, and the fixture byte-sync check (`--locked`).
   - `solidity` (Foundry `v1.8.6`): `forge fmt --check`, `forge build --locked --sizes` (`foundry.lock`, `EIP-170`), `forge lint --deny warnings`, `forge test -vvv --gas-report`, and a dry run of `DeployDevAnvil.s.sol`.
   - **`ci.yml` spells out its steps; it does not call `make`.** A gate added to `make check` must be added to `ci.yml` too, and the other way round. `make check` skips the Anvil dry run (`make anvil-demo` runs it locally).
 
