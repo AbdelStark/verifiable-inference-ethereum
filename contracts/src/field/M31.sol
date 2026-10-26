@@ -11,12 +11,14 @@ library M31 {
     error ZeroInverse();
 
     function checkCanonical(uint32 a) internal pure {
+        // forge-lint: disable-next-line(require-revert-in-loop)
         if (a >= P) revert NonCanonicalM31(a);
     }
 
     /// @notice Exact reduction of `val` in `[0, P^2)` modulo `P = 2^31 - 1` (matches Stwo `M31::reduce`).
     function reduceU64(uint64 val) internal pure returns (uint32) {
         unchecked {
+            // forge-lint: disable-next-line(unsafe-typecast)
             return uint32((((((val >> 31) + val + 1) >> 31) + val) & uint64(P)));
         }
     }

@@ -38,21 +38,11 @@ library QM31 {
     }
 
     function add(Elem memory x, Elem memory y) internal pure returns (Elem memory) {
-        return Elem(
-            M31.add(x.a0, y.a0),
-            M31.add(x.a1, y.a1),
-            M31.add(x.b0, y.b0),
-            M31.add(x.b1, y.b1)
-        );
+        return Elem(M31.add(x.a0, y.a0), M31.add(x.a1, y.a1), M31.add(x.b0, y.b0), M31.add(x.b1, y.b1));
     }
 
     function sub(Elem memory x, Elem memory y) internal pure returns (Elem memory) {
-        return Elem(
-            M31.sub(x.a0, y.a0),
-            M31.sub(x.a1, y.a1),
-            M31.sub(x.b0, y.b0),
-            M31.sub(x.b1, y.b1)
-        );
+        return Elem(M31.sub(x.a0, y.a0), M31.sub(x.a1, y.a1), M31.sub(x.b0, y.b0), M31.sub(x.b1, y.b1));
     }
 
     function mul(Elem memory x, Elem memory y) internal pure returns (Elem memory) {
@@ -111,9 +101,13 @@ library QM31 {
     }
 
     function writeU32LE(bytes memory buf, uint256 offset, uint32 v) internal pure {
+        // forge-lint: disable-next-line(unsafe-typecast)
         buf[offset] = bytes1(uint8(v));
+        // forge-lint: disable-next-line(unsafe-typecast)
         buf[offset + 1] = bytes1(uint8(v >> 8));
+        // forge-lint: disable-next-line(unsafe-typecast)
         buf[offset + 2] = bytes1(uint8(v >> 16));
+        // forge-lint: disable-next-line(unsafe-typecast)
         buf[offset + 3] = bytes1(uint8(v >> 24));
     }
 }

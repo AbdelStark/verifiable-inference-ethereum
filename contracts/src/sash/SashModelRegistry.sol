@@ -11,14 +11,12 @@ contract SashModelRegistry {
     mapping(bytes32 => SashTypes.ModelManifest) private _manifests;
 
     event ModelEnrolled(
-        bytes32 indexed modelId,
-        uint16 numSegments,
-        uint16 seqLen,
-        uint32 eosTokenId,
-        bytes32 manifestRootsHash
+        bytes32 indexed modelId, uint16 numSegments, uint16 seqLen, uint32 eosTokenId, bytes32 manifestRootsHash
     );
     event ModelActiveUpdated(bytes32 indexed modelId, bool active);
 
+    // the deploy scripts pass msg.sender; OWNER only gates enrollment
+    // forge-lint: disable-next-line(missing-zero-check)
     constructor(address initialOwner) {
         OWNER = initialOwner;
     }

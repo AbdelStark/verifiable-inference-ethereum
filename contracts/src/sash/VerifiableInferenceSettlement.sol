@@ -26,11 +26,7 @@ contract VerifiableInferenceSettlement {
         SashTypes.VerifierKind verifierKind
     );
 
-    constructor(
-        address registry,
-        address segmentVerifier,
-        bool allowDevVerifier
-    ) {
+    constructor(address registry, address segmentVerifier, bool allowDevVerifier) {
         REGISTRY = SashModelRegistry(registry);
         SEGMENT_VERIFIER = ISashSegmentVerifier(segmentVerifier);
         ALLOW_DEV_VERIFIER = allowDevVerifier;
@@ -73,6 +69,8 @@ contract VerifiableInferenceSettlement {
         SashGridVerifier.verifyGrid(manifest, segments, tokIn, tokOut, promptIds, answerIds);
 
         settledRuns[runId] = true;
+        // the external calls before this event are view calls (STATICCALL) and cannot reenter
+        // forge-lint: disable-next-line(reentrancy-events)
         emit InferenceVerified(runId, modelId, publicDigest, promptHash, answerHash, kind);
     }
 }

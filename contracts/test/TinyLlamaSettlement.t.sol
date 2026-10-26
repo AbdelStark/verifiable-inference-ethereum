@@ -21,11 +21,11 @@ contract StubSp1Gateway is ISP1Verifier {
         EXPECTED_VKEY = vkey;
     }
 
-    function verifyProof(
-        bytes32 programVKey,
-        bytes calldata publicValues,
-        bytes calldata proofBytes
-    ) external view override {
+    function verifyProof(bytes32 programVKey, bytes calldata publicValues, bytes calldata proofBytes)
+        external
+        view
+        override
+    {
         bytes32 expectedProof = keccak256(abi.encodePacked(EXPECTED_VKEY, publicValues));
         if (programVKey != EXPECTED_VKEY || proofBytes.length != 32 || bytes32(proofBytes) != expectedProof) {
             revert BadSp1Proof();
@@ -473,11 +473,7 @@ contract TinyLlamaSettlementTest is Test {
         return devVerifier.computeDevProof(digest);
     }
 
-    function externalDigest(bytes32 modelId, SashTypes.SegmentClaim[] calldata segs)
-        external
-        pure
-        returns (bytes32)
-    {
+    function externalDigest(bytes32 modelId, SashTypes.SegmentClaim[] calldata segs) external pure returns (bytes32) {
         return SashGridVerifier.computePublicDigest(modelId, segs);
     }
 

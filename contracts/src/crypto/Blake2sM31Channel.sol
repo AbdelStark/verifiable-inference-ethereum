@@ -41,9 +41,13 @@ library Blake2sM31Channel {
             msgBuf[i] = ch.digest[i];
         }
         uint32 c = ch.nDraws;
+        // forge-lint: disable-next-line(unsafe-typecast)
         msgBuf[32] = bytes1(uint8(c));
+        // forge-lint: disable-next-line(unsafe-typecast)
         msgBuf[33] = bytes1(uint8(c >> 8));
+        // forge-lint: disable-next-line(unsafe-typecast)
         msgBuf[34] = bytes1(uint8(c >> 16));
+        // forge-lint: disable-next-line(unsafe-typecast)
         msgBuf[35] = bytes1(uint8(c >> 24));
         msgBuf[36] = 0x00;
         unchecked {
@@ -74,12 +78,9 @@ library Blake2sM31Channel {
     }
 
     /// @notice Consumes `ceil(4 * nFelts / 8)` batches of 8 base felts (exact Stwo `draw_secure_felts`).
-    function drawSecureFelts(State memory ch, uint256 nFelts)
-        internal
-        pure
-        returns (QM31.Elem[] memory out)
-    {
+    function drawSecureFelts(State memory ch, uint256 nFelts) internal pure returns (QM31.Elem[] memory out) {
         uint256 batches = (4 * nFelts + 7) / 8;
+        // forge-lint: disable-next-line(divide-before-multiply)
         uint32[] memory base = new uint32[](8 * batches);
         for (uint256 b = 0; b < batches; ++b) {
             uint32[8] memory f = drawBaseFelts(ch);
@@ -89,22 +90,16 @@ library Blake2sM31Channel {
         }
         out = new QM31.Elem[](nFelts);
         for (uint256 i = 0; i < nFelts; ++i) {
-            out[i] = QM31.Elem(
-                base[4 * i],
-                base[4 * i + 1],
-                base[4 * i + 2],
-                base[4 * i + 3]
-            );
+            out[i] = QM31.Elem(base[4 * i], base[4 * i + 1], base[4 * i + 2], base[4 * i + 3]);
         }
     }
 
     /// @notice Replays SASH's segment transcript up to `w_residual_stream` (`f[3]`).
-    function deriveWResidualStream(
-        bytes32 preRoot,
-        bytes32 modelRoot,
-        bytes32 traceRoot,
-        uint16 relationDraws
-    ) internal pure returns (QM31.Elem memory) {
+    function deriveWResidualStream(bytes32 preRoot, bytes32 modelRoot, bytes32 traceRoot, uint16 relationDraws)
+        internal
+        pure
+        returns (QM31.Elem memory)
+    {
         State memory ch = init();
         QM31.Elem[] memory pcsCfg = new QM31.Elem[](2);
         pcsCfg[0] = QM31.Elem(0, 1, 100, 0);

@@ -13,12 +13,7 @@ import {TinyLlamaFixture} from "../src/sash/TinyLlamaFixture.sol";
 contract DeployDevAnvil is Script {
     function run()
         external
-        returns (
-            address registryAddr,
-            address devVerifierAddr,
-            address settlementAddr,
-            bytes32 settledRunId
-        )
+        returns (address registryAddr, address devVerifierAddr, address settlementAddr, bytes32 settledRunId)
     {
         vm.startBroadcast();
 

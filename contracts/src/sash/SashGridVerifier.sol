@@ -11,11 +11,7 @@ import {SashTypes} from "./SashTypes.sol";
 ///         boundary links, `Blake2sM31Channel` Fiat-Shamir `w_residual_stream` derivation, `QM31` Horner
 ///         token commitments, prompt prefix equality, autoregressive loop closure, and EOS termination.
 library SashGridVerifier {
-    function computeManifestRootsHash(SashTypes.SegmentClaim[] calldata segments)
-        internal
-        pure
-        returns (bytes32)
-    {
+    function computeManifestRootsHash(SashTypes.SegmentClaim[] calldata segments) internal pure returns (bytes32) {
         uint256 n = segments.length;
         bytes memory buf = new bytes(64 * n);
         for (uint256 i = 0; i < n; ++i) {
@@ -30,29 +26,26 @@ library SashGridVerifier {
         return sha256(buf);
     }
 
-    function computePublicDigest(
-        bytes32 modelId,
-        SashTypes.SegmentClaim[] calldata segments
-    ) internal pure returns (bytes32) {
+    function computePublicDigest(bytes32 modelId, SashTypes.SegmentClaim[] calldata segments)
+        internal
+        pure
+        returns (bytes32)
+    {
         uint256 n = segments.length;
         // 32 B modelId + 4 B BE len + n * 180 B per SegmentClaim
         bytes memory buf = new bytes(36 + 180 * n);
-        uint32 len32 = uint32(n);
         assembly ("memory-safe") {
             mstore(add(buf, 32), modelId)
         }
-        buf[32] = bytes1(uint8(len32 >> 24));
-        buf[33] = bytes1(uint8(len32 >> 16));
-        buf[34] = bytes1(uint8(len32 >> 8));
-        buf[35] = bytes1(uint8(len32));
+        // casting to 'uint32' is safe because a calldata array cannot hold 2^32 180-byte claims
+        // forge-lint: disable-next-line(unsafe-typecast)
+        writeU32BE(buf, 32, uint32(n));
 
         for (uint256 i = 0; i < n; ++i) {
             SashTypes.SegmentClaim calldata s = segments[i];
             uint256 o = 36 + 180 * i;
-            buf[o] = bytes1(uint8(s.segmentIndex >> 8));
-            buf[o + 1] = bytes1(uint8(s.segmentIndex));
-            buf[o + 2] = bytes1(uint8(s.relationDraws >> 8));
-            buf[o + 3] = bytes1(uint8(s.relationDraws));
+            writeU16BE(buf, o, s.segmentIndex);
+            writeU16BE(buf, o + 2, s.relationDraws);
 
             bytes32 preRt = s.preRoot;
             bytes32 modelRt = s.modelRoot;
@@ -90,6 +83,7 @@ library SashGridVerifier {
 
         for (uint256 pos = 0; pos < expectedN; ++pos) {
             if (segments[pos].segmentIndex != pos) {
+                // forge-lint: disable-next-line(require-revert-in-loop)
                 revert SashTypes.InvalidSegmentIndex(pos, segments[pos].segmentIndex);
             }
             QM31.checkCanonical(segments[pos].tokenHornerClaim);
@@ -103,6 +97,7 @@ library SashGridVerifier {
         uint256 last = expectedN - 1;
         for (uint256 i = 0; i < last; ++i) {
             if (segments[i].residualOutRoot != segments[i + 1].residualInRoot) {
+                // forge-lint: disable-next-line(require-revert-in-loop)
                 revert SashTypes.ResidualBoundaryMismatch(i);
             }
         }
@@ -114,11 +109,7 @@ library SashGridVerifier {
             revert SashTypes.RelationDrawCountMismatch(0, segments[0].relationDraws, manifest.b0RelDraws);
         }
         if (segments[last].relationDraws != manifest.headRelDraws) {
-            revert SashTypes.RelationDrawCountMismatch(
-                last,
-                segments[last].relationDraws,
-                manifest.headRelDraws
-            );
+            revert SashTypes.RelationDrawCountMismatch(last, segments[last].relationDraws, manifest.headRelDraws);
         }
 
         uint256 s = manifest.seqLen;
@@ -134,16 +125,19 @@ library SashGridVerifier {
         for (uint256 j = 0; j < pLen; ++j) {
             uint32 pt = promptIds[j];
             M31.checkCanonical(pt);
+            // forge-lint: disable-next-line(require-revert-in-loop)
             if (tokIn[j] != pt) revert SashTypes.PromptTokenMismatch(j);
         }
         for (uint256 j = 0; j < aLen - 1; ++j) {
             if (tokIn[pLen + j] != tokOut[pLen - 1 + j]) {
+                // forge-lint: disable-next-line(require-revert-in-loop)
                 revert SashTypes.AutoregressiveLoopMismatch(j);
             }
         }
         for (uint256 j = 0; j < aLen; ++j) {
             uint32 at = answerIds[j];
             M31.checkCanonical(at);
+            // forge-lint: disable-next-line(require-revert-in-loop)
             if (tokOut[pLen - 1 + j] != at) revert SashTypes.AnswerTokenMismatch(j);
         }
         uint32 finalTok = tokOut[pLen + aLen - 2];
@@ -153,10 +147,7 @@ library SashGridVerifier {
 
         // Replay Fiat-Shamir channel on segment 0 (`B0L0`) and check ascending Horner(tokIn).
         QM31.Elem memory wB0 = Blake2sM31Channel.deriveWResidualStream(
-            segments[0].preRoot,
-            segments[0].modelRoot,
-            segments[0].traceRoot,
-            segments[0].relationDraws
+            segments[0].preRoot, segments[0].modelRoot, segments[0].traceRoot, segments[0].relationDraws
         );
         QM31.Elem memory embedHorner = QM31.hornerAsc(tokIn, wB0);
         if (!QM31.eq(embedHorner, segments[0].tokenHornerClaim)) {
@@ -165,10 +156,7 @@ library SashGridVerifier {
 
         // Replay Fiat-Shamir channel on final segment (`head`) and check descending Horner(tokOut).
         QM31.Elem memory wHead = Blake2sM31Channel.deriveWResidualStream(
-            segments[last].preRoot,
-            segments[last].modelRoot,
-            segments[last].traceRoot,
-            segments[last].relationDraws
+            segments[last].preRoot, segments[last].modelRoot, segments[last].traceRoot, segments[last].relationDraws
         );
         QM31.Elem memory headHorner = QM31.hornerDesc(tokOut, wHead);
         if (!QM31.eq(headHorner, segments[last].tokenHornerClaim)) {
@@ -176,10 +164,17 @@ library SashGridVerifier {
         }
     }
 
+    function writeU16BE(bytes memory buf, uint256 offset, uint16 v) private pure {
+        bytes2 b = bytes2(v);
+        buf[offset] = b[0];
+        buf[offset + 1] = b[1];
+    }
+
     function writeU32BE(bytes memory buf, uint256 offset, uint32 v) private pure {
-        buf[offset] = bytes1(uint8(v >> 24));
-        buf[offset + 1] = bytes1(uint8(v >> 16));
-        buf[offset + 2] = bytes1(uint8(v >> 8));
-        buf[offset + 3] = bytes1(uint8(v));
+        bytes4 b = bytes4(v);
+        buf[offset] = b[0];
+        buf[offset + 1] = b[1];
+        buf[offset + 2] = b[2];
+        buf[offset + 3] = b[3];
     }
 }
