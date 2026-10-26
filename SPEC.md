@@ -55,27 +55,6 @@ For a SASH segment with fixed security parameters `(pow_bits = 0, log_blowup = 1
   - `w_residual_stream`: `QM31(1297757949, 994229370, 1478950871, 2099916732)`
   - `head_tok`: `QM31(754377417, 2109312062, 1514847, 2019687017)`
 
-## 4. `SASHBIN1` compact binary segment format (`crates/sash-repack`)
-
-To avoid 84.61 MB JSON DOM allocations inside a 32-bit RISC-V zkVM guest, `sash-repack` encodes each validated segment into a deterministic little-endian byte stream:
-
-```text
-Offset  Size    Field
-0       8       Magic bytes: b"SASHBIN1"
-8       2       segment_index (u16 LE)
-10      2       relation_draws (u16 LE)
-12      32      pre_root ([u8; 32])
-44      32      model_root ([u8; 32])
-76      32      trace_root ([u8; 32])
-108     32      residual_in_root ([u8; 32])
-140     32      residual_out_root ([u8; 32], all-zero on head)
-172     16      token_horner_claim (4 x u32 LE, M31 canonical)
-188     4       fixed_len (u32 LE) + fixed_bytes
-...     4       claims_no_gkr_len (u32 LE) + claims_no_gkr_bytes
-...     4       gkr_len (u32 LE) + raw gkr Vec<u8> bytes
-...     4       stark_bin_len (u32 LE) + packed binary StarkProof
-```
-
 ## 5. Solidity contract interfaces and 20 negative controls
 
 1. **`SashModelRegistry.sol`:** Enrolls `ModelManifest { uint16 numSegments; uint16 seqLen; uint32 eosTokenId; uint16 b0RelDraws; uint16 headRelDraws; bytes32 manifestRootsHash; bool active; }` where `manifestRootsHash = keccak256(abi.encodePacked(preRoot[0], modelRoot[0], ..., preRoot[N-1], modelRoot[N-1]))`.

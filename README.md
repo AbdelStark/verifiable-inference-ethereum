@@ -13,8 +13,8 @@ On Ethereum Mainnet, Sepolia (`11155111`), and Hoodi (`560048`):
 
 Direct monolithic raw verification of all 23 wide segments in one EVM transaction is therefore consensus-impossible (>1,200x above `EIP-7825`). `verifiable-inference-ethereum` solves this cleanly without weakening SASH's execution relation by splitting work across two explicit layers:
 
-1. **Off-chain segment verification & compression (`crates/sash-repack` + zkVM BN254 adapter):**
-   Repacks SASH JSON segments into compact deterministic `SASHBIN1` binary slices (cutting `head` from 84.61 MB JSON to 34.42 MB binary so guest RAM stays `< 128 MiB`), verifies SASH's unmodified `verify_composed` per segment using pre-enrolled `pre_root` manifests, and compresses segment verdicts into succinct BN254 Groth16 proof(s) (`SP1SashSegmentVerifier.sol`, ~270k gas).
+1. **Off-chain segment verification & compression (zkVM BN254 adapter):**
+   Verifies SASH's unmodified `verify_composed` per segment using pre-enrolled `pre_root` manifests, and compresses segment verdicts into succinct BN254 Groth16 proof(s) (`SP1SashSegmentVerifier.sol`, ~270k gas).
 2. **Native Solidity Circle STARK primitives & SASH grid settlement (`contracts/src/`):**
    Enforces on-chain in pure Solidity:
    - Enrolled 23-segment `(pre_root, model_root)` manifest membership (`SashModelRegistry.sol`),
@@ -57,7 +57,6 @@ This runs:
 - Stwo `Blake2sM31Channel` reference vector tests,
 - Real 23-segment `TinyLlama-1.1B-Chat-v1.0` SASH grid verification (`22` residual Merkle links + exact Fiat-Shamir `w_residual_stream` derivation + ascending/descending `QM31` Horner token bindings for `"Name the capital of France in one short sentence."` -> `"The capital of France is Paris."`),
 - All 20 adversarial mutation rejection tests,
-- `SASHBIN1` binary segment repacking round-trip and tamper tests.
 
 ### 2. Run Foundry Solidity unit, gas & local Anvil settlement tests
 
@@ -79,7 +78,7 @@ forge script script/DeployTestnet.s.sol:DeployTestnet --rpc-url "$SEPOLIA_RPC_UR
 
 - [SPEC.md](SPEC.md): Bit-exact protocol, wire format, contract interfaces, gas table, and 20-case negative-control matrix.
 - [SECURITY.md](SECURITY.md): Threat model, transparent-STARK vs BN254-wrapper assumption shift, and dev-verifier isolation.
-- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): System dataflow across SASH, `sash-repack`, zkVM compression, and EVM contracts.
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): System dataflow across SASH, zkVM compression, and EVM contracts.
 - [docs/EVM-GAS-MODEL.md](docs/EVM-GAS-MODEL.md): Empirical 23-segment TinyLlama-1.1B proof measurements and `EIP-7825` / `EIP-7623` math.
 - [docs/ROADMAP.md](docs/ROADMAP.md): Milestones `M0` through `M4`.
 

@@ -51,7 +51,6 @@ User-decided rules with the same bar as the invariants.
 - `docs/EVM-GAS-MODEL.md`: Empirical TinyLlama-1.1B SASH sizing and `EIP-7825` / `EIP-7623` arithmetic.
 - `docs/ROADMAP.md`: Milestones `M0` through `M4` (Foundry -> Anvil -> Sepolia/Hoodi).
 - `crates/sash-evm-primitives`: Pure Rust reference implementation of `M31`/`CM31`/`QM31`, RFC 7693 `BLAKE2s-256`, `Blake2sM31Channel`, SASH 23-segment grid verifier, and TinyLlama-1.1B vector exporter.
-- `crates/sash-repack`: `SASHBIN1` binary segment codec (encode/decode with truncation, magic and canonical-`M31` checks) and security-parameter header validator. It does not read SASH JSON bundles.
 - `contracts/`: Foundry Solidity verifier suite (`M31`, `CM31`, `QM31`, `Blake2s`, `Blake2sM31Channel`, `SashModelRegistry`, `SashGridVerifier`, `Sp1SashSegmentVerifier`, `DevTranscriptSegmentVerifier`, `VerifiableInferenceSettlement`), deployment scripts, and 20-mutation test suite.
 
 ## 5. Testing and verification
@@ -64,7 +63,7 @@ make check
 
 `make check` enforces `cargo fmt`, `cargo clippy -- -D warnings`, `cargo test --workspace` (including Stwo reference vectors, real TinyLlama-1.1B 23-segment Fiat-Shamir Horner vectors, and negative controls 1 to 16; controls 17 to 20 are settlement-level and exist only in Foundry), byte-exact vector sync with `contracts/test/vectors/tinyllama_23seg_fixture.json`, and `forge build && forge test` whenever Foundry is installed in `PATH`.
 
-- **Write tests when a change touches the protocol**: the field tower, `Blake2s` / `reduce_to_m31`, `Blake2sM31Channel`, Horner bindings, the `SASHBIN1` format, grid checks, and settlement guards. Assert against `SPEC.md` and the primary-source vectors, not against the implementation.
+- **Write tests when a change touches the protocol**: the field tower, `Blake2s` / `reduce_to_m31`, `Blake2sM31Channel`, Horner bindings, grid checks, and settlement guards. Assert against `SPEC.md` and the primary-source vectors, not against the implementation.
 - **Don't add tests for docs, cosmetic changes, trivial wiring or config.**
 - **A failing invariant test is a real regression: fix the code, never weaken the test.** Never regenerate the fixture (`make vectors`) or edit a primary-source vector to make a failing test pass; the fixture changes only with an intended Rust primitive change (§2.4).
 - **A grid-level negative control lands in both suites**, Rust and Foundry, never on one side only. Settlement-level controls (proof bytes, verifier gating, replay) run in Foundry only (`SPEC.md` negative-control section).
