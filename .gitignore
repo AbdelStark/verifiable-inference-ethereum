@@ -6,7 +6,6 @@
 /contracts/out/
 /contracts/cache/
 /contracts/broadcast/
-/contracts/lib/
 /contracts/lcov.info
 
 # Local proof bundles, weights & scratch runs
