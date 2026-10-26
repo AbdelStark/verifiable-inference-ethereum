@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-pragma solidity ^0.8.24;
+pragma solidity ^0.8.38;
 
 /// @title M31
 /// @notice Mersenne-31 base field arithmetic (`P = 2^31 - 1`) matching Stwo / `NitrooZK-stwo`.

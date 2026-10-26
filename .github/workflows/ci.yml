@@ -11,13 +11,14 @@ permissions:
 jobs:
   rust:
     name: Rust primitives, repacker & vector sync
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install Rust toolchain from rust-toolchain.toml
+        run: rustup toolchain install
+      - name: Print toolchain versions
+        run: rustc --version
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - name: Format check
         run: cargo fmt --all -- --check
       - name: Clippy
@@ -33,13 +34,18 @@ jobs:
 
   solidity:
     name: Foundry Solidity verifier & gas gates
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install Foundry
-        uses: foundry-rs/foundry-toolchain@v1
+        uses: foundry-rs/foundry-toolchain@dba66c27052e63476d886f22216e119ba7e615bf # v1.9.2
         with:
-          version: nightly
+          version: v1.8.6
+      - name: Print toolchain versions
+        working-directory: contracts
+        run: |
+          forge --version
+          forge compiler resolve
       - name: Compile contracts & check EIP-170 code size (< 24,576 B)
         working-directory: contracts
         run: forge build --sizes

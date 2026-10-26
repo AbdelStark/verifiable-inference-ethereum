@@ -32,6 +32,14 @@ An emitted `InferenceVerified` event establishes **execution integrity** for one
 
 ## Quickstart
 
+### 0. Install the pinned toolchains
+
+| Tool | Version | How to get it |
+| --- | --- | --- |
+| Rust | `1.99.1` | Install [rustup](https://rustup.rs); it reads `rust-toolchain.toml` and installs `1.99.1` with `rustfmt` and `clippy` on the first `cargo` call in the repo. |
+| Foundry | `v1.8.6` | Install [foundryup](https://getfoundry.sh), then `foundryup --install v1.8.6`. |
+| solc | `0.8.38` | Nothing to do: `forge` downloads the version set in `contracts/foundry.toml`. |
+
 ### 1. Run Rust reference primitives, TinyLlama-1.1B 23-segment fixture & negative controls
 
 ```bash

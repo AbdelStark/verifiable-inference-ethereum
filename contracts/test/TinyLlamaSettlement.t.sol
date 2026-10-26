@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-pragma solidity ^0.8.24;
+pragma solidity ^0.8.38;
 
 import {TestBase} from "./TestBase.sol";
 import {M31} from "../src/field/M31.sol";

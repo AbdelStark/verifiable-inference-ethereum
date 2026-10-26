@@ -7,13 +7,13 @@ use std::path::PathBuf;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
-use sash_evm_primitives::blake2s::{blake2s256, blake2s_m31};
+use sash_evm_primitives::blake2s::{blake2s_m31, blake2s256};
 use sash_evm_primitives::channel::derive_sash_w_residual_stream;
 use sash_evm_primitives::grid::compute_public_digest;
 use sash_evm_primitives::tinyllama_fixture::{
-    tinyllama_manifest, tinyllama_segments, TINYLLAMA_ANSWER_IDS, TINYLLAMA_B0_REL_DRAWS,
-    TINYLLAMA_EOS_TOKEN_ID, TINYLLAMA_HEAD_REL_DRAWS, TINYLLAMA_PROMPT, TINYLLAMA_PROMPT_IDS,
-    TINYLLAMA_RESPONSE, TINYLLAMA_TOK_IN, TINYLLAMA_TOK_OUT,
+    TINYLLAMA_ANSWER_IDS, TINYLLAMA_B0_REL_DRAWS, TINYLLAMA_EOS_TOKEN_ID, TINYLLAMA_HEAD_REL_DRAWS,
+    TINYLLAMA_PROMPT, TINYLLAMA_PROMPT_IDS, TINYLLAMA_RESPONSE, TINYLLAMA_TOK_IN,
+    TINYLLAMA_TOK_OUT, tinyllama_manifest, tinyllama_segments,
 };
 
 #[derive(Serialize)]
