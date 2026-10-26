@@ -1,12 +1,11 @@
 //! Reference SASH 23-segment grid, manifest, Fiat-Shamir channel, and Horner verifier.
 
-use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::channel::derive_sash_w_residual_stream;
 use crate::field::{P, QM31};
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SegmentClaim {
     pub segment_index: u16,
     pub relation_draws: u16,
@@ -18,7 +17,7 @@ pub struct SegmentClaim {
     pub token_horner_claim: QM31,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ModelManifest {
     pub num_segments: u16,
     pub seq_len: u16,
