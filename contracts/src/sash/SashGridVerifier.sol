@@ -83,6 +83,7 @@ library SashGridVerifier {
 
         for (uint256 pos = 0; pos < expectedN; ++pos) {
             if (segments[pos].segmentIndex != pos) {
+                // one mismatch rejects the whole run, so the loop fails fast
                 // forge-lint: disable-next-line(require-revert-in-loop)
                 revert SashTypes.InvalidSegmentIndex(pos, segments[pos].segmentIndex);
             }
@@ -97,6 +98,7 @@ library SashGridVerifier {
         uint256 last = expectedN - 1;
         for (uint256 i = 0; i < last; ++i) {
             if (segments[i].residualOutRoot != segments[i + 1].residualInRoot) {
+                // one mismatch rejects the whole run, so the loop fails fast
                 // forge-lint: disable-next-line(require-revert-in-loop)
                 revert SashTypes.ResidualBoundaryMismatch(i);
             }
@@ -125,11 +127,13 @@ library SashGridVerifier {
         for (uint256 j = 0; j < pLen; ++j) {
             uint32 pt = promptIds[j];
             M31.checkCanonical(pt);
+            // one mismatch rejects the whole run, so the loop fails fast
             // forge-lint: disable-next-line(require-revert-in-loop)
             if (tokIn[j] != pt) revert SashTypes.PromptTokenMismatch(j);
         }
         for (uint256 j = 0; j < aLen - 1; ++j) {
             if (tokIn[pLen + j] != tokOut[pLen - 1 + j]) {
+                // one mismatch rejects the whole run, so the loop fails fast
                 // forge-lint: disable-next-line(require-revert-in-loop)
                 revert SashTypes.AutoregressiveLoopMismatch(j);
             }
@@ -137,6 +141,7 @@ library SashGridVerifier {
         for (uint256 j = 0; j < aLen; ++j) {
             uint32 at = answerIds[j];
             M31.checkCanonical(at);
+            // one mismatch rejects the whole run, so the loop fails fast
             // forge-lint: disable-next-line(require-revert-in-loop)
             if (tokOut[pLen - 1 + j] != at) revert SashTypes.AnswerTokenMismatch(j);
         }

@@ -460,6 +460,11 @@ contract TinyLlamaSettlementTest is Test {
         );
     }
 
+    function testRegistryRejectsZeroOwner() public {
+        vm.expectRevert(SashTypes.ZeroOwner.selector);
+        new SashModelRegistry(address(0));
+    }
+
     function _devProofFor(SashTypes.SegmentClaim[] memory segs) internal view returns (bytes memory) {
         return _devProofForModel(TinyLlamaFixture.MODEL_ID, segs);
     }

@@ -15,9 +15,9 @@ contract SashModelRegistry {
     );
     event ModelActiveUpdated(bytes32 indexed modelId, bool active);
 
-    // the deploy scripts pass msg.sender; OWNER only gates enrollment
-    // forge-lint: disable-next-line(missing-zero-check)
     constructor(address initialOwner) {
+        // OWNER is immutable, so a zero owner would leave enrollment locked forever
+        if (initialOwner == address(0)) revert SashTypes.ZeroOwner();
         OWNER = initialOwner;
     }
 

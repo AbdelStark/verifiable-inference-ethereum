@@ -32,6 +32,7 @@ library SashTypes {
         QM31.Elem tokenHornerClaim;
     }
 
+    error ZeroOwner();
     error UnauthorizedOwner(address caller);
     error ModelAlreadyEnrolled(bytes32 modelId);
     error ModelNotActive(bytes32 modelId);
