@@ -13,7 +13,6 @@
 /artifacts/
 *.tar.gz
 *.safetensors
-*.sashbin
 
 # Python / Node local environments if used
 .venv/

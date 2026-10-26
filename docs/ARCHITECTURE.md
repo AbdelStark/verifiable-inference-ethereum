@@ -11,14 +11,6 @@
                                      |
                                      v
 +-------------------------------------------------------------------------+
-| Host Binary Repacker (crates/sash-repack)                               |
-|   - Validates (log_blowup=1, n_queries=100, pow_bits=0)                 |
-|   - Validates enrolled (pre_root, model_root) & 22 residual links       |
-|   - Repacks JSON -> SASHBIN1 binary (296.5 MB total, <= 34.5 MB/seg)    |
-+------------------------------------+------------------------------------+
-                                     |
-                                     v
-+-------------------------------------------------------------------------+
 | Off-Chain Proof Compression (RISC-V zkVM Guest -> BN254 Groth16)        |
 |   - Runs SASH verify_composed (no-cuda, pre-enrolled shape roots)       |
 |   - Emits 23 SegmentClaim structs; aggregates into publicDigest         |

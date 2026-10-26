@@ -120,17 +120,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "sash-repack"
-version = "0.1.0"
-dependencies = [
- "hex",
- "sash-evm-primitives",
- "serde",
- "serde_json",
- "sha2",
-]
-
-[[package]]
 name = "serde"
 version = "1.0.229"
 source = "registry+https://github.com/rust-lang/crates.io-index"
