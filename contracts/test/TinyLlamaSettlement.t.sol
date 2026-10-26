@@ -94,7 +94,13 @@ contract TinyLlamaSettlementTest is Test {
         SashTypes.SegmentClaim[] memory segs = TinyLlamaFixture.segments();
         segs[7].modelRoot ^= bytes32(uint256(1));
         bytes memory proof = _devProofFor(segs);
-        vm.expectRevert(SashTypes.ManifestRootMismatch.selector);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                SashTypes.ManifestRootMismatch.selector,
+                this.externalRootsHash(segs),
+                TinyLlamaFixture.MANIFEST_ROOTS_HASH
+            )
+        );
         settlement.verifyAndSettle(
             TinyLlamaFixture.MODEL_ID,
             segs,
@@ -110,7 +116,13 @@ contract TinyLlamaSettlementTest is Test {
         SashTypes.SegmentClaim[] memory segs = TinyLlamaFixture.segments();
         segs[0].preRoot ^= bytes32(uint256(1));
         bytes memory proof = _devProofFor(segs);
-        vm.expectRevert(SashTypes.ManifestRootMismatch.selector);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                SashTypes.ManifestRootMismatch.selector,
+                this.externalRootsHash(segs),
+                TinyLlamaFixture.MANIFEST_ROOTS_HASH
+            )
+        );
         settlement.verifyAndSettle(
             TinyLlamaFixture.MODEL_ID,
             segs,
@@ -126,7 +138,7 @@ contract TinyLlamaSettlementTest is Test {
         SashTypes.SegmentClaim[] memory segs = TinyLlamaFixture.segments();
         segs[5].segmentIndex = 6;
         bytes memory proof = _devProofFor(segs);
-        vm.expectRevert(SashTypes.InvalidSegmentIndex.selector);
+        vm.expectRevert(abi.encodeWithSelector(SashTypes.InvalidSegmentIndex.selector, 5, 6));
         settlement.verifyAndSettle(
             TinyLlamaFixture.MODEL_ID,
             segs,
@@ -142,7 +154,7 @@ contract TinyLlamaSettlementTest is Test {
         SashTypes.SegmentClaim[] memory segs = TinyLlamaFixture.segments();
         segs[10].residualOutRoot ^= bytes32(uint256(0xff));
         bytes memory proof = _devProofFor(segs);
-        vm.expectRevert(SashTypes.ResidualBoundaryMismatch.selector);
+        vm.expectRevert(abi.encodeWithSelector(SashTypes.ResidualBoundaryMismatch.selector, 10));
         settlement.verifyAndSettle(
             TinyLlamaFixture.MODEL_ID,
             segs,
@@ -224,7 +236,11 @@ contract TinyLlamaSettlementTest is Test {
         SashTypes.SegmentClaim[] memory segs = TinyLlamaFixture.segments();
         segs[22].relationDraws = 25;
         bytes memory proof = _devProofFor(segs);
-        vm.expectRevert(SashTypes.RelationDrawCountMismatch.selector);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                SashTypes.RelationDrawCountMismatch.selector, 22, 25, TinyLlamaFixture.HEAD_REL_DRAWS
+            )
+        );
         settlement.verifyAndSettle(
             TinyLlamaFixture.MODEL_ID,
             segs,
@@ -240,7 +256,7 @@ contract TinyLlamaSettlementTest is Test {
         uint32[] memory pr = TinyLlamaFixture.promptIds();
         pr[4] = 9999;
         bytes memory proof = devVerifier.computeDevProof(TinyLlamaFixture.PUBLIC_DIGEST);
-        vm.expectRevert(SashTypes.PromptTokenMismatch.selector);
+        vm.expectRevert(abi.encodeWithSelector(SashTypes.PromptTokenMismatch.selector, 4));
         settlement.verifyAndSettle(
             TinyLlamaFixture.MODEL_ID,
             TinyLlamaFixture.segments(),
@@ -256,7 +272,11 @@ contract TinyLlamaSettlementTest is Test {
         uint32[] memory ti = TinyLlamaFixture.tokIn();
         ti[27] = 1111;
         bytes memory proof = devVerifier.computeDevProof(TinyLlamaFixture.PUBLIC_DIGEST);
-        vm.expectRevert(SashTypes.AutoregressiveLoopMismatch.selector);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                SashTypes.AutoregressiveLoopMismatch.selector, 27 - TinyLlamaFixture.promptIds().length
+            )
+        );
         settlement.verifyAndSettle(
             TinyLlamaFixture.MODEL_ID,
             TinyLlamaFixture.segments(),
@@ -281,7 +301,9 @@ contract TinyLlamaSettlementTest is Test {
         );
         SashTypes.SegmentClaim[] memory segs = TinyLlamaFixture.segments();
         bytes memory proof = _devProofForModel(altModel, segs);
-        vm.expectRevert(SashTypes.MissingEosTermination.selector);
+        vm.expectRevert(
+            abi.encodeWithSelector(SashTypes.MissingEosTermination.selector, TinyLlamaFixture.EOS_TOKEN_ID, 999)
+        );
         settlement.verifyAndSettle(
             altModel,
             segs,
@@ -297,7 +319,7 @@ contract TinyLlamaSettlementTest is Test {
         uint32[] memory ans = TinyLlamaFixture.answerIds();
         ans[3] = 777;
         bytes memory proof = devVerifier.computeDevProof(TinyLlamaFixture.PUBLIC_DIGEST);
-        vm.expectRevert(SashTypes.AnswerTokenMismatch.selector);
+        vm.expectRevert(abi.encodeWithSelector(SashTypes.AnswerTokenMismatch.selector, 3));
         settlement.verifyAndSettle(
             TinyLlamaFixture.MODEL_ID,
             TinyLlamaFixture.segments(),
@@ -313,7 +335,7 @@ contract TinyLlamaSettlementTest is Test {
         SashTypes.SegmentClaim[] memory segs = TinyLlamaFixture.segments();
         segs[1].tokenHornerClaim = QM31.Elem(0x7fffffff, 0, 0, 0);
         bytes memory proof = _devProofFor(segs);
-        vm.expectRevert(M31.NonCanonicalM31.selector);
+        vm.expectRevert(abi.encodeWithSelector(M31.NonCanonicalM31.selector, 0x7fffffff));
         settlement.verifyAndSettle(
             TinyLlamaFixture.MODEL_ID,
             segs,
@@ -329,7 +351,7 @@ contract TinyLlamaSettlementTest is Test {
         uint32[] memory pr = TinyLlamaFixture.promptIds();
         pr[0] = 0x7fffffff;
         bytes memory proof = devVerifier.computeDevProof(TinyLlamaFixture.PUBLIC_DIGEST);
-        vm.expectRevert(M31.NonCanonicalM31.selector);
+        vm.expectRevert(abi.encodeWithSelector(M31.NonCanonicalM31.selector, 0x7fffffff));
         settlement.verifyAndSettle(
             TinyLlamaFixture.MODEL_ID,
             TinyLlamaFixture.segments(),
@@ -348,7 +370,9 @@ contract TinyLlamaSettlementTest is Test {
             shortSegs[i] = full[i];
         }
         bytes memory proof = _devProofFor(shortSegs);
-        vm.expectRevert(SashTypes.InvalidSegmentCount.selector);
+        vm.expectRevert(
+            abi.encodeWithSelector(SashTypes.InvalidSegmentCount.selector, 22, TinyLlamaFixture.NUM_SEGMENTS)
+        );
         settlement.verifyAndSettle(
             TinyLlamaFixture.MODEL_ID,
             shortSegs,
@@ -401,7 +425,7 @@ contract TinyLlamaSettlementTest is Test {
 
         vm.chainId(11155111);
         bytes memory proof = devVerifier.computeDevProof(TinyLlamaFixture.PUBLIC_DIGEST);
-        vm.expectRevert(SashTypes.DevChainOnly.selector);
+        vm.expectRevert(abi.encodeWithSelector(SashTypes.DevChainOnly.selector, 11155111));
         settlement.verifyAndSettle(
             TinyLlamaFixture.MODEL_ID,
             TinyLlamaFixture.segments(),
@@ -415,7 +439,7 @@ contract TinyLlamaSettlementTest is Test {
 
     function testNegative20_DuplicateRunReplayReverts() public {
         bytes memory proof = devVerifier.computeDevProof(TinyLlamaFixture.PUBLIC_DIGEST);
-        settlement.verifyAndSettle(
+        bytes32 runId = settlement.verifyAndSettle(
             TinyLlamaFixture.MODEL_ID,
             TinyLlamaFixture.segments(),
             TinyLlamaFixture.tokIn(),
@@ -424,7 +448,7 @@ contract TinyLlamaSettlementTest is Test {
             TinyLlamaFixture.answerIds(),
             proof
         );
-        vm.expectRevert(SashTypes.RunAlreadySettled.selector);
+        vm.expectRevert(abi.encodeWithSelector(SashTypes.RunAlreadySettled.selector, runId));
         settlement.verifyAndSettle(
             TinyLlamaFixture.MODEL_ID,
             TinyLlamaFixture.segments(),
@@ -455,5 +479,9 @@ contract TinyLlamaSettlementTest is Test {
         returns (bytes32)
     {
         return SashGridVerifier.computePublicDigest(modelId, segs);
+    }
+
+    function externalRootsHash(SashTypes.SegmentClaim[] calldata segs) external pure returns (bytes32) {
+        return SashGridVerifier.computeManifestRootsHash(segs);
     }
 }
