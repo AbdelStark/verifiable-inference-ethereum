@@ -19,7 +19,7 @@ Reference LLM target: `TinyLlama/TinyLlama-1.1B-Chat-v1.0` (`fe8a4ea1ffedaf415f4
 1. **No overclaiming.** An accepted verification proves **quantized execution integrity** for one declared run of an enrolled `(pre_root, model_root)` manifest under SASH's `y-attnout-w12` relation. Never claim output safety, alignment, floating-point equivalence, or zero-knowledge hiding (SASH inner proofs use `LOG_BLOWUP = 1` without trace blinding, and public settlement opens prompt/response tokens).
 2. **Explicit cryptographic assumption tracking.** Raw SASH segment proofs rely on `BLAKE2s` Circle STARK + GKR (~100 conjectured security bits, post-quantum candidate). Compressing 23 wide segments through an SP1 or RISC Zero BN254 Groth16 wrapper shifts the outer assumption to classical BN254 pairing soundness, Groth16 SRS ceremony integrity, and zkVM circuit soundness. Keep `VerifierKind` explicit in every contract, event, and receipt.
 3. **Hard separation of dev-mode mocks.** `DevTranscriptSegmentVerifier` is strictly restricted to `block.chainid == 31337` (Foundry / Anvil) AND blocked whenever `VerifiableInferenceSettlement.allowDevVerifier == false`. Never weaken either guard.
-4. **Bit-exact cross-language parity.** Rust (`crates/sash-evm-primitives`) and Solidity (`contracts/src/`) must agree bit-for-bit on `M31`, `CM31`, `QM31`, `Blake2s`, `reduce_to_m31`, `Blake2sM31Channel` (`0x00` domain byte, `< 2P` rejection sampling, `draw_secure_felts(2)` single-batch semantics), `CirclePoint`, and `QM31` Horner evaluation (`asc` on `B0L0`, `desc` on `head`). Any change to Rust primitives must regenerate and verify `contracts/test/vectors/tinyllama_23seg_fixture.json` (`make check`).
+4. **Bit-exact cross-language parity.** Rust (`crates/sash-evm-primitives`) and Solidity (`contracts/src/`) must agree bit-for-bit on `M31`, `CM31`, `QM31`, `Blake2s`, `reduce_to_m31`, `Blake2sM31Channel` (`0x00` domain byte, `< 2P` rejection sampling, `draw_secure_felts(2)` single-batch semantics), and `QM31` Horner evaluation (`asc` on `B0L0`, `desc` on `head`). Any change to Rust primitives must regenerate and verify `contracts/test/vectors/tinyllama_23seg_fixture.json` (`make check`).
 5. **EVM consensus discipline.** Osaka (mainnet, Hoodi) binds:
    - every settlement transaction stays safely below the `EIP-7825` cap of `16,777,216` gas;
    - it accounts for the `EIP-7623` calldata floor, where gas is `max(standard + execution, floor)` and the floor is `10` / `40` gas per zero / non-zero byte;
@@ -47,12 +47,12 @@ User-decided rules with the same bar as the invariants.
 
 - `SPEC.md`: Canonical protocol, wire format, contract ABI, gas budget, and 20-case negative-control specification.
 - `SECURITY.md`: Threat model, cryptographic assumption boundary, and audit checklist.
-- `docs/ARCHITECTURE.md`: Two-layer hybrid design (zkVM segment compression + native Solidity SASH grid & Fiat-Shamir verifier) and native Circle STARK path.
+- `docs/ARCHITECTURE.md`: Two-layer hybrid design (zkVM segment compression + native Solidity SASH grid & Fiat-Shamir verifier).
 - `docs/EVM-GAS-MODEL.md`: Empirical TinyLlama-1.1B SASH sizing and `EIP-7825` / `EIP-7623` arithmetic.
-- `docs/ROADMAP.md`: Milestones `M0` through `M4` (Foundry -> Anvil -> Sepolia/Hoodi) and `M5` (Stwo-in-Stwo recursion).
-- `crates/sash-evm-primitives`: Pure Rust reference implementation of `M31`/`CM31`/`QM31`, RFC 7693 `BLAKE2s-256`, `Blake2sM31Channel`, `CirclePoint`, `Blake2sM31MerkleVerifier`, SASH 23-segment grid verifier, and TinyLlama-1.1B vector exporter.
+- `docs/ROADMAP.md`: Milestones `M0` through `M4` (Foundry -> Anvil -> Sepolia/Hoodi).
+- `crates/sash-evm-primitives`: Pure Rust reference implementation of `M31`/`CM31`/`QM31`, RFC 7693 `BLAKE2s-256`, `Blake2sM31Channel`, SASH 23-segment grid verifier, and TinyLlama-1.1B vector exporter.
 - `crates/sash-repack`: `SASHBIN1` binary segment codec (encode/decode with truncation, magic and canonical-`M31` checks) and security-parameter header validator. It does not read SASH JSON bundles.
-- `contracts/`: Foundry Solidity verifier suite (`M31`, `CM31`, `QM31`, `Blake2s`, `Blake2sM31Channel`, `Blake2sM31MerkleVerifier`, `CirclePoint`, `SashModelRegistry`, `SashGridVerifier`, `Sp1SashSegmentVerifier`, `DevTranscriptSegmentVerifier`, `VerifiableInferenceSettlement`), deployment scripts, and 20-mutation test suite.
+- `contracts/`: Foundry Solidity verifier suite (`M31`, `CM31`, `QM31`, `Blake2s`, `Blake2sM31Channel`, `SashModelRegistry`, `SashGridVerifier`, `Sp1SashSegmentVerifier`, `DevTranscriptSegmentVerifier`, `VerifiableInferenceSettlement`), deployment scripts, and 20-mutation test suite.
 
 ## 5. Testing and verification
 
@@ -64,7 +64,7 @@ make check
 
 `make check` enforces `cargo fmt`, `cargo clippy -- -D warnings`, `cargo test --workspace` (including Stwo reference vectors, real TinyLlama-1.1B 23-segment Fiat-Shamir Horner vectors, and negative controls 1 to 16; controls 17 to 20 are settlement-level and exist only in Foundry), byte-exact vector sync with `contracts/test/vectors/tinyllama_23seg_fixture.json`, and `forge build && forge test` whenever Foundry is installed in `PATH`.
 
-- **Write tests when a change touches the protocol**: the field tower, `Blake2s` / `reduce_to_m31`, `Blake2sM31Channel`, `CirclePoint`, Merkle verification, Horner bindings, the `SASHBIN1` format, grid checks, and settlement guards. Assert against `SPEC.md` and the primary-source vectors, not against the implementation.
+- **Write tests when a change touches the protocol**: the field tower, `Blake2s` / `reduce_to_m31`, `Blake2sM31Channel`, Horner bindings, the `SASHBIN1` format, grid checks, and settlement guards. Assert against `SPEC.md` and the primary-source vectors, not against the implementation.
 - **Don't add tests for docs, cosmetic changes, trivial wiring or config.**
 - **A failing invariant test is a real regression: fix the code, never weaken the test.** Never regenerate the fixture (`make vectors`) or edit a primary-source vector to make a failing test pass; the fixture changes only with an intended Rust primitive change (§2.4).
 - **A grid-level negative control lands in both suites**, Rust and Foundry, never on one side only. Settlement-level controls (proof bytes, verifier gating, replay) run in Foundry only (`SPEC.md` negative-control section).

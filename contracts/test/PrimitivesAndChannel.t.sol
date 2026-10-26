@@ -6,25 +6,8 @@ import {M31} from "../src/field/M31.sol";
 import {QM31} from "../src/field/QM31.sol";
 import {Blake2s} from "../src/crypto/Blake2s.sol";
 import {Blake2sM31Channel} from "../src/crypto/Blake2sM31Channel.sol";
-import {Blake2sM31MerkleVerifier} from "../src/crypto/Blake2sM31MerkleVerifier.sol";
-import {CirclePoint} from "../src/crypto/CirclePoint.sol";
 import {TinyLlamaFixture} from "../src/sash/TinyLlamaFixture.sol";
 import {SashTypes} from "../src/sash/SashTypes.sol";
-
-contract MerkleWrapper {
-    function verify(
-        bytes32 root,
-        uint256 index,
-        uint32[] calldata leaf,
-        bytes32[] calldata siblings
-    ) external pure returns (bool) {
-        return Blake2sM31MerkleVerifier.verifyOpening(root, index, leaf, siblings);
-    }
-
-    function leafHash(uint32[] calldata leaf) external pure returns (bytes32) {
-        return Blake2sM31MerkleVerifier.hashLeafM31(leaf);
-    }
-}
 
 contract PrimitivesAndChannelTest is Test {
     function testBlake2sRfc7693AndStwoVectors() public pure {
@@ -52,18 +35,6 @@ contract PrimitivesAndChannelTest is Test {
         assertTrue(QM31.eq(prod, QM31.one()));
     }
 
-    function testCircleGeneratorOrder16() public pure {
-        CirclePoint.PointM31 memory g = CirclePoint.generatorM31();
-        assertTrue(CirclePoint.isOnCurveM31(g));
-        CirclePoint.PointM31 memory g4 = CirclePoint.subgroupGen(4);
-        assertTrue(CirclePoint.isOnCurveM31(g4));
-        for (uint256 i = 0; i < 4; ++i) {
-            g4 = CirclePoint.doubleM31(g4);
-        }
-        assertEq(g4.x, 1);
-        assertEq(g4.y, 0);
-    }
-
     function testTinyLlamaFiatShamirWResidualStreamParity() public pure {
         SashTypes.SegmentClaim[] memory segs = TinyLlamaFixture.segments();
 
@@ -82,24 +53,5 @@ contract PrimitivesAndChannelTest is Test {
             segs[22].relationDraws
         );
         assertTrue(QM31.eq(wHead, QM31.Elem(1297757949, 994229370, 1478950871, 2099916732)));
-    }
-
-    function testMerkleOpeningAcceptsAndRejects() public {
-        MerkleWrapper w = new MerkleWrapper();
-        uint32[] memory l0 = new uint32[](2);
-        l0[0] = 10;
-        l0[1] = 20;
-        uint32[] memory l1 = new uint32[](2);
-        l1[0] = 30;
-        l1[1] = 40;
-
-        bytes32 h0 = w.leafHash(l0);
-        bytes32 h1 = w.leafHash(l1);
-        bytes32 root = Blake2s.hashPairM31(h0, h1);
-
-        bytes32[] memory sibs = new bytes32[](1);
-        sibs[0] = h0;
-        assertTrue(w.verify(root, 1, l1, sibs));
-        assertTrue(!w.verify(root, 0, l1, sibs));
     }
 }

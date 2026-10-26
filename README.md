@@ -22,7 +22,6 @@ Direct monolithic raw verification of all 23 wide segments in one EVM transactio
    - Bit-exact `Blake2sM31Channel` Fiat-Shamir replay on `B0L0` (`29` relation pairs) and `head` (`24` relation pairs) from `(pre_root, model_root, trace_root)` to derive `w_residual_stream` on-chain,
    - `QM31` Horner polynomial verification (`hornerAsc(tok_in, w) == embed_tok` and `hornerDesc(tok_out, w) == head_tok`),
    - Public prompt prefix matching, autoregressive teacher-forcing loop closure (`tok_in[P+j] == tok_out[P-1+j]`), and EOS (`2`) termination (`SashGridVerifier.sol`, ~185k gas),
-   - Plus `CirclePoint.sol` and `Blake2sM31MerkleVerifier.sol` primitives ready for narrow direct Circle STARK proofs (`< 85 KiB`, `< 12M` gas) and future transparent Stwo-in-Stwo recursion.
 
 Total single-transaction settlement gas in aggregated mode is **~565k gas** (**3.4%** of the `EIP-7825` cap).
 
@@ -82,7 +81,7 @@ forge script script/DeployTestnet.s.sol:DeployTestnet --rpc-url "$SEPOLIA_RPC_UR
 - [SECURITY.md](SECURITY.md): Threat model, transparent-STARK vs BN254-wrapper assumption shift, and dev-verifier isolation.
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): System dataflow across SASH, `sash-repack`, zkVM compression, and EVM contracts.
 - [docs/EVM-GAS-MODEL.md](docs/EVM-GAS-MODEL.md): Empirical 23-segment TinyLlama-1.1B proof measurements and `EIP-7825` / `EIP-7623` math.
-- [docs/ROADMAP.md](docs/ROADMAP.md): Milestones `M0` through `M5`.
+- [docs/ROADMAP.md](docs/ROADMAP.md): Milestones `M0` through `M4`.
 
 ## License
 
