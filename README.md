@@ -15,15 +15,14 @@ Direct monolithic raw verification of all 23 wide segments in one EVM transactio
 
 1. **Off-chain segment verification & compression (zkVM BN254 adapter):**
    Verifies SASH's unmodified `verify_composed` per segment using pre-enrolled `pre_root` manifests, and compresses segment verdicts into succinct BN254 Groth16 proof(s) (`SP1SashSegmentVerifier.sol`, ~270k gas).
-2. **Native Solidity Circle STARK primitives & SASH grid settlement (`contracts/src/`):**
+2. **Native Solidity SASH grid settlement (`contracts/src/`):**
    Enforces on-chain in pure Solidity:
    - Enrolled 23-segment `(pre_root, model_root)` manifest membership (`SashModelRegistry.sol`),
    - All 22 inter-layer residual-stream Merkle root links (`out_root[L] == in_root[L+1]`),
-   - Bit-exact `Blake2sM31Channel` Fiat-Shamir replay on `B0L0` (`29` relation pairs) and `head` (`24` relation pairs) from `(pre_root, model_root, trace_root)` to derive `w_residual_stream` on-chain,
-   - `QM31` Horner polynomial verification (`hornerAsc(tok_in, w) == embed_tok` and `hornerDesc(tok_out, w) == head_tok`),
-   - Public prompt prefix matching, autoregressive teacher-forcing loop closure (`tok_in[P+j] == tok_out[P-1+j]`), and EOS (`2`) termination (`SashGridVerifier.sol`, ~185k gas),
+   - A sha256 `publicDigest` over the segment claims and the `tok_in` / `tok_out` vectors, which the segment proof must attest, so the tokens are the ones SASH's own `embed_tok` / `head_tok` checks used ([SPEC.md](SPEC.md) §1),
+   - Public prompt prefix matching, autoregressive teacher-forcing loop closure (`tok_in[P+j] == tok_out[P-1+j]`), and EOS (`2`) termination (`SashGridVerifier.sol`, ~22k gas, estimated).
 
-Total single-transaction settlement gas in aggregated mode is **~565k gas** (**3.4%** of the `EIP-7825` cap).
+Total single-transaction settlement gas in aggregated mode is an estimated **~402k gas** (**2.4%** of the `EIP-7825` cap).
 
 ## Exact claim boundary
 
@@ -45,18 +44,16 @@ The Foundry dependencies (`forge-std`, `sp1-contracts`) are git submodules under
 git submodule update --init --recursive
 ```
 
-### 1. Run Rust reference primitives, TinyLlama-1.1B 23-segment fixture & negative controls
+### 1. Run the Rust reference grid, TinyLlama-1.1B 23-segment fixture & negative controls
 
 ```bash
 make rust-check
 ```
 
 This runs:
-- `M31`, `CM31`, `QM31` field-tower arithmetic and inversion tests,
-- RFC 7693 `BLAKE2s-256` and Stwo `Blake2sM31Hasher` (`reduce_to_m31`) differential tests,
-- Stwo `Blake2sM31Channel` reference vector tests,
-- Real 23-segment `TinyLlama-1.1B-Chat-v1.0` SASH grid verification (`22` residual Merkle links + exact Fiat-Shamir `w_residual_stream` derivation + ascending/descending `QM31` Horner token bindings for `"Name the capital of France in one short sentence."` -> `"The capital of France is Paris."`),
-- All 20 adversarial mutation rejection tests,
+- Real 23-segment `TinyLlama-1.1B-Chat-v1.0` SASH grid verification (`22` residual Merkle links + prompt, teacher-forcing, answer and EOS checks for `"Name the capital of France in one short sentence."` -> `"The capital of France is Paris."`),
+- The sha256 `manifestRootsHash`, token hashes and `publicDigest` checked against [SPEC.md](SPEC.md) §1.4,
+- The grid-level adversarial mutation rejection tests (controls 1 to 5, 10 to 13 and 16).
 
 ### 2. Run Foundry Solidity unit, gas & local Anvil settlement tests
 

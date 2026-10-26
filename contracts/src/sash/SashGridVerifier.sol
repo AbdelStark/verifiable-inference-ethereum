@@ -1,16 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 pragma solidity ^0.8.38;
 
-import {M31} from "../field/M31.sol";
-import {QM31} from "../field/QM31.sol";
-import {Blake2sM31Channel} from "../crypto/Blake2sM31Channel.sol";
 import {SashTypes} from "./SashTypes.sol";
 
 /// @title SashGridVerifier
-/// @notice Pure on-chain verifier enforcing SASH's 23-segment manifest roots, 22 residual-stream Merkle
-///         boundary links, `Blake2sM31Channel` Fiat-Shamir `w_residual_stream` derivation, `QM31` Horner
-///         token commitments, prompt prefix equality, autoregressive loop closure, and EOS termination.
+/// @notice Pure on-chain checks of SASH's 23-segment manifest roots, 22 residual-stream boundary links,
+///         prompt prefix, autoregressive loop closure, answer and EOS termination, plus the sha256
+///         `publicDigest` that binds the segment claims and both token vectors to the proof (`SPEC.md` §1).
 library SashGridVerifier {
+    /// @notice `sha256` over token ids, each encoded as a 32-byte big-endian word.
+    function computeTokenHash(uint32[] calldata ids) internal pure returns (bytes32) {
+        return sha256(abi.encodePacked(ids));
+    }
+
     function computeManifestRootsHash(SashTypes.SegmentClaim[] calldata segments) internal pure returns (bytes32) {
         uint256 n = segments.length;
         bytes memory buf = new bytes(64 * n);
@@ -26,44 +28,47 @@ library SashGridVerifier {
         return sha256(buf);
     }
 
-    function computePublicDigest(bytes32 modelId, SashTypes.SegmentClaim[] calldata segments)
-        internal
-        pure
-        returns (bytes32)
-    {
+    function computePublicDigest(
+        bytes32 modelId,
+        SashTypes.SegmentClaim[] calldata segments,
+        uint32[] calldata tokIn,
+        uint32[] calldata tokOut
+    ) internal pure returns (bytes32) {
         uint256 n = segments.length;
-        // 32 B modelId + 4 B BE len + n * 180 B per SegmentClaim
-        bytes memory buf = new bytes(36 + 180 * n);
+        // 32 B modelId + 4 B BE len + n * 130 B per SegmentClaim + 2 * 32 B token hashes
+        bytes memory buf = new bytes(100 + 130 * n);
         assembly ("memory-safe") {
             mstore(add(buf, 32), modelId)
         }
-        // casting to 'uint32' is safe because a calldata array cannot hold 2^32 180-byte claims
+        // casting to 'uint32' is safe because a calldata array cannot hold 2^32 130-byte claims
         // forge-lint: disable-next-line(unsafe-typecast)
         writeU32BE(buf, 32, uint32(n));
 
         for (uint256 i = 0; i < n; ++i) {
             SashTypes.SegmentClaim calldata s = segments[i];
-            uint256 o = 36 + 180 * i;
+            uint256 o = 36 + 130 * i;
             writeU16BE(buf, o, s.segmentIndex);
-            writeU16BE(buf, o + 2, s.relationDraws);
 
             bytes32 preRt = s.preRoot;
             bytes32 modelRt = s.modelRoot;
-            bytes32 traceRt = s.traceRoot;
             bytes32 resIn = s.residualInRoot;
             bytes32 resOut = s.residualOutRoot;
             assembly ("memory-safe") {
-                let ptr := add(add(buf, 32), add(o, 4))
+                let ptr := add(add(buf, 32), add(o, 2))
                 mstore(ptr, preRt)
                 mstore(add(ptr, 32), modelRt)
-                mstore(add(ptr, 64), traceRt)
-                mstore(add(ptr, 96), resIn)
-                mstore(add(ptr, 128), resOut)
+                mstore(add(ptr, 64), resIn)
+                mstore(add(ptr, 96), resOut)
             }
-            writeU32BE(buf, o + 164, s.tokenHornerClaim.a0);
-            writeU32BE(buf, o + 168, s.tokenHornerClaim.a1);
-            writeU32BE(buf, o + 172, s.tokenHornerClaim.b0);
-            writeU32BE(buf, o + 176, s.tokenHornerClaim.b1);
+        }
+
+        bytes32 tokInHash = computeTokenHash(tokIn);
+        bytes32 tokOutHash = computeTokenHash(tokOut);
+        uint256 tail = 36 + 130 * n;
+        assembly ("memory-safe") {
+            let ptr := add(add(buf, 32), tail)
+            mstore(ptr, tokInHash)
+            mstore(add(ptr, 32), tokOutHash)
         }
         return sha256(buf);
     }
@@ -87,7 +92,6 @@ library SashGridVerifier {
                 // forge-lint: disable-next-line(require-revert-in-loop)
                 revert SashTypes.InvalidSegmentIndex(pos, segments[pos].segmentIndex);
             }
-            QM31.checkCanonical(segments[pos].tokenHornerClaim);
         }
 
         bytes32 rootsHash = computeManifestRootsHash(segments);
@@ -107,13 +111,6 @@ library SashGridVerifier {
             revert SashTypes.HeadMustNotCarryOutRoot();
         }
 
-        if (segments[0].relationDraws != manifest.b0RelDraws) {
-            revert SashTypes.RelationDrawCountMismatch(0, segments[0].relationDraws, manifest.b0RelDraws);
-        }
-        if (segments[last].relationDraws != manifest.headRelDraws) {
-            revert SashTypes.RelationDrawCountMismatch(last, segments[last].relationDraws, manifest.headRelDraws);
-        }
-
         uint256 s = manifest.seqLen;
         if (tokIn.length != s || tokOut.length != s) {
             revert SashTypes.InvalidSequenceLength();
@@ -125,11 +122,9 @@ library SashGridVerifier {
         }
 
         for (uint256 j = 0; j < pLen; ++j) {
-            uint32 pt = promptIds[j];
-            M31.checkCanonical(pt);
             // one mismatch rejects the whole run, so the loop fails fast
             // forge-lint: disable-next-line(require-revert-in-loop)
-            if (tokIn[j] != pt) revert SashTypes.PromptTokenMismatch(j);
+            if (tokIn[j] != promptIds[j]) revert SashTypes.PromptTokenMismatch(j);
         }
         for (uint256 j = 0; j < aLen - 1; ++j) {
             if (tokIn[pLen + j] != tokOut[pLen - 1 + j]) {
@@ -139,33 +134,13 @@ library SashGridVerifier {
             }
         }
         for (uint256 j = 0; j < aLen; ++j) {
-            uint32 at = answerIds[j];
-            M31.checkCanonical(at);
             // one mismatch rejects the whole run, so the loop fails fast
             // forge-lint: disable-next-line(require-revert-in-loop)
-            if (tokOut[pLen - 1 + j] != at) revert SashTypes.AnswerTokenMismatch(j);
+            if (tokOut[pLen - 1 + j] != answerIds[j]) revert SashTypes.AnswerTokenMismatch(j);
         }
         uint32 finalTok = tokOut[pLen + aLen - 2];
         if (finalTok != manifest.eosTokenId) {
             revert SashTypes.MissingEosTermination(finalTok, manifest.eosTokenId);
-        }
-
-        // Replay Fiat-Shamir channel on segment 0 (`B0L0`) and check ascending Horner(tokIn).
-        QM31.Elem memory wB0 = Blake2sM31Channel.deriveWResidualStream(
-            segments[0].preRoot, segments[0].modelRoot, segments[0].traceRoot, segments[0].relationDraws
-        );
-        QM31.Elem memory embedHorner = QM31.hornerAsc(tokIn, wB0);
-        if (!QM31.eq(embedHorner, segments[0].tokenHornerClaim)) {
-            revert SashTypes.EmbedTokenHornerMismatch();
-        }
-
-        // Replay Fiat-Shamir channel on final segment (`head`) and check descending Horner(tokOut).
-        QM31.Elem memory wHead = Blake2sM31Channel.deriveWResidualStream(
-            segments[last].preRoot, segments[last].modelRoot, segments[last].traceRoot, segments[last].relationDraws
-        );
-        QM31.Elem memory headHorner = QM31.hornerDesc(tokOut, wHead);
-        if (!QM31.eq(headHorner, segments[last].tokenHornerClaim)) {
-            revert SashTypes.HeadTokenHornerMismatch();
         }
     }
 

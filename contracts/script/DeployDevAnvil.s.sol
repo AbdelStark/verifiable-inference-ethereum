@@ -23,8 +23,6 @@ contract DeployDevAnvil is Script {
             TinyLlamaFixture.NUM_SEGMENTS,
             TinyLlamaFixture.SEQ_LEN,
             TinyLlamaFixture.EOS_TOKEN_ID,
-            TinyLlamaFixture.B0_REL_DRAWS,
-            TinyLlamaFixture.HEAD_REL_DRAWS,
             TinyLlamaFixture.MANIFEST_ROOTS_HASH
         );
 

@@ -23,7 +23,7 @@ jobs:
         run: cargo fmt --all -- --check
       - name: Clippy
         run: cargo clippy --locked --workspace --all-targets -- -D warnings
-      - name: Workspace tests (Stwo + TinyLlama 23-segment + negative controls 1 to 16)
+      - name: Workspace tests (TinyLlama 23-segment grid + grid-level negative controls)
         run: cargo test --locked --workspace
       - name: Check TinyLlamaFixture.sol is byte-identical to the Rust export
         run: |
@@ -57,7 +57,7 @@ jobs:
       - name: Lint
         working-directory: contracts
         run: forge lint --deny warnings
-      - name: Run unit, TinyLlama 23-segment settlement & 20 negative-control tests
+      - name: Run TinyLlama 23-segment settlement & negative-control tests
         working-directory: contracts
         run: forge test -vvv --gas-report
       - name: Dry-run local Anvil settlement script
