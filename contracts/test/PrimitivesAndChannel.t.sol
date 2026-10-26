@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 pragma solidity ^0.8.38;
 
-import {TestBase} from "./TestBase.sol";
+import {Test} from "forge-std/Test.sol";
 import {M31} from "../src/field/M31.sol";
 import {QM31} from "../src/field/QM31.sol";
 import {Blake2s} from "../src/crypto/Blake2s.sol";
@@ -26,7 +26,7 @@ contract MerkleWrapper {
     }
 }
 
-contract PrimitivesAndChannelTest is TestBase {
+contract PrimitivesAndChannelTest is Test {
     function testBlake2sRfc7693AndStwoVectors() public pure {
         // Stwo `single_hash_test` vector for "a":
         assertEq(

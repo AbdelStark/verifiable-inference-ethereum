@@ -2,7 +2,8 @@
 pragma solidity ^0.8.38;
 
 import {SashTypes} from "./SashTypes.sol";
-import {ISP1Verifier, ISashSegmentVerifier} from "./ISashSegmentVerifier.sol";
+import {ISP1Verifier} from "@sp1-contracts/ISP1Verifier.sol";
+import {ISashSegmentVerifier} from "./ISashSegmentVerifier.sol";
 
 /// @title Sp1SashSegmentVerifier
 /// @notice Production/testnet adapter verifying BN254 Groth16/Plonk proofs of SASH `verify_composed`

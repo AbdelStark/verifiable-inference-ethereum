@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 pragma solidity ^0.8.38;
 
-import {TestBase} from "./TestBase.sol";
+import {Test} from "forge-std/Test.sol";
 import {M31} from "../src/field/M31.sol";
 import {QM31} from "../src/field/QM31.sol";
 import {SashTypes} from "../src/sash/SashTypes.sol";
-import {ISP1Verifier} from "../src/sash/ISashSegmentVerifier.sol";
+import {ISP1Verifier} from "@sp1-contracts/ISP1Verifier.sol";
 import {DevTranscriptSegmentVerifier} from "../src/sash/DevTranscriptSegmentVerifier.sol";
 import {Sp1SashSegmentVerifier} from "../src/sash/Sp1SashSegmentVerifier.sol";
 import {SashModelRegistry} from "../src/sash/SashModelRegistry.sol";
@@ -33,7 +33,7 @@ contract StubSp1Gateway is ISP1Verifier {
     }
 }
 
-contract TinyLlamaSettlementTest is TestBase {
+contract TinyLlamaSettlementTest is Test {
     SashModelRegistry internal registry;
     DevTranscriptSegmentVerifier internal devVerifier;
     VerifiableInferenceSettlement internal settlement;

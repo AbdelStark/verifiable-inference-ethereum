@@ -40,6 +40,12 @@ An emitted `InferenceVerified` event establishes **execution integrity** for one
 | Foundry | `v1.8.6` | Install [foundryup](https://getfoundry.sh), then `foundryup --install v1.8.6`. |
 | solc | `0.8.38` | Nothing to do: `forge` downloads the version set in `contracts/foundry.toml`. |
 
+The Foundry dependencies (`forge-std`, `sp1-contracts`) are git submodules under `contracts/lib/`, locked in `contracts/foundry.lock`. Fetch them before any `forge` or `make` target, either by cloning with `git clone --recursive` or, in an existing clone, with:
+
+```bash
+git submodule update --init --recursive
+```
+
 ### 1. Run Rust reference primitives, TinyLlama-1.1B 23-segment fixture & negative controls
 
 ```bash

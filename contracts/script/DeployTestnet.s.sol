@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 pragma solidity ^0.8.38;
 
-import {Vm} from "../test/TestBase.sol";
+import {Script} from "forge-std/Script.sol";
 import {Sp1SashSegmentVerifier} from "../src/sash/Sp1SashSegmentVerifier.sol";
 import {SashModelRegistry} from "../src/sash/SashModelRegistry.sol";
 import {VerifiableInferenceSettlement} from "../src/sash/VerifiableInferenceSettlement.sol";
@@ -11,9 +11,7 @@ import {TinyLlamaFixture} from "../src/sash/TinyLlamaFixture.sol";
 /// @notice Deploys the production-gated SASH EVM settlement stack (`allowDevVerifier = false`)
 ///         to Ethereum Sepolia (`11155111`) or Hoodi (`560048`) using `SP1_VERIFIER_GATEWAY` and
 ///         `SASH_AGGREGATOR_VKEY` from environment variables.
-contract DeployTestnet {
-    Vm private constant vm = Vm(address(uint160(uint256(keccak256("hevm cheat code")))));
-
+contract DeployTestnet is Script {
     function run()
         external
         returns (
