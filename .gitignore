@@ -1,0 +1,28 @@
+# Rust build artifacts
+/target/
+**/*.rs.bk
+
+# Foundry build artifacts & caches
+/contracts/out/
+/contracts/cache/
+/contracts/broadcast/
+/contracts/lib/
+/contracts/lcov.info
+
+# Local proof bundles, weights & scratch runs
+/runs/
+/artifacts/
+*.tar.gz
+*.safetensors
+*.sashbin
+
+# Python / Node local environments if used
+.venv/
+__pycache__/
+node_modules/
+
+# OS & editor files
+.DS_Store
+.env
+.env.*
+!.env.example

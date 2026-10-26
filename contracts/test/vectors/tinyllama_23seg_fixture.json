@@ -1,0 +1,479 @@
+{
+  "schema": "verifiable-inference-ethereum.tinyllama-fixture/1",
+  "model_id": "0x3def3a0832d3d82a82283200010c182132ac7d9eec681b772a95834f29e43c2a",
+  "prompt": "Name the capital of France in one short sentence.",
+  "response": "The capital of France is Paris.",
+  "num_segments": 23,
+  "seq_len": 32,
+  "eos_token_id": 2,
+  "b0_rel_draws": 29,
+  "head_rel_draws": 24,
+  "manifest_roots_hash": "0xfd8ecd8c79795b3a79e426d60a912d0a8a160188539c9b12dd3803b249c55b26",
+  "public_digest": "0x3be033a69fa7b682dda5bc0a3fb507a886e2ebd0fb77ae26e6c16408ecc4be10",
+  "blake2s_a_hex": "0x4a0d129873403037c2cd9b9048203687f6233fb6738956e0349bd4320fec3e90",
+  "blake2s_m31_a_hex": "0x4b0d121873403037c3cd9b1049203607f7233f3674895660349bd43210ec3e10",
+  "b0_w_residual_stream": [
+    1259081484,
+    630063634,
+    1062868201,
+    1393098785
+  ],
+  "head_w_residual_stream": [
+    1297757949,
+    994229370,
+    1478950871,
+    2099916732
+  ],
+  "prompt_ids": [
+    529,
+    29989,
+    1792,
+    29989,
+    29958,
+    13,
+    1170,
+    278,
+    7483,
+    310,
+    3444,
+    297,
+    697,
+    3273,
+    10541,
+    29889,
+    2,
+    13,
+    29966,
+    29989,
+    465,
+    22137,
+    29989,
+    29958,
+    13
+  ],
+  "answer_ids": [
+    1576,
+    7483,
+    310,
+    3444,
+    338,
+    3681,
+    29889,
+    2
+  ],
+  "tok_in": [
+    529,
+    29989,
+    1792,
+    29989,
+    29958,
+    13,
+    1170,
+    278,
+    7483,
+    310,
+    3444,
+    297,
+    697,
+    3273,
+    10541,
+    29889,
+    2,
+    13,
+    29966,
+    29989,
+    465,
+    22137,
+    29989,
+    29958,
+    13,
+    1576,
+    7483,
+    310,
+    3444,
+    338,
+    3681,
+    29889
+  ],
+  "tok_out": [
+    12739,
+    5205,
+    29989,
+    29958,
+    13,
+    4391,
+    263,
+    2211,
+    4272,
+    278,
+    322,
+    278,
+    10541,
+    10541,
+    29889,
+    13,
+    29871,
+    29958,
+    29989,
+    465,
+    22137,
+    29989,
+    29958,
+    13,
+    1576,
+    7483,
+    310,
+    3444,
+    338,
+    3681,
+    29889,
+    2
+  ],
+  "segments": [
+    {
+      "segment_index": 0,
+      "relation_draws": 29,
+      "pre_root": "0x7da3534f535fe416c9d9aa0e8f765e3da5ac8c772d0ef35e6f303103c099466f",
+      "model_root": "0xa45136572e13045f3415eb12e82c437a0a83f276fb2699765b32f70c00c3de34",
+      "trace_root": "0xd937eb517f80d61ed39333010dd9f12fc64a9a07d2706675d75dda2715dc6e57",
+      "residual_in_root": "0x91d1a7303ec5ab248298bd5a6581c229759fa25b6058a10ae13cf6302bb23c46",
+      "residual_out_root": "0x2205996986dfe255cf1f5b5e53ad4a439ef2e45ad712e15c0ce09d495acd3d57",
+      "token_horner_claim": [
+        1205748927,
+        962712399,
+        1890095260,
+        1449788258
+      ]
+    },
+    {
+      "segment_index": 1,
+      "relation_draws": 0,
+      "pre_root": "0x5be40f222f8d2732d415252791bb2230ce8e506cd0913d392ed26f42e74c727e",
+      "model_root": "0x51a9264b1e87696045cfc754df73780eb58d3027f4e8cf7526cf7d4635d7c112",
+      "trace_root": "0x2482547c4a26a10a51ea1c29204f9b3fcf646868530b325f40d7943fc6399903",
+      "residual_in_root": "0x2205996986dfe255cf1f5b5e53ad4a439ef2e45ad712e15c0ce09d495acd3d57",
+      "residual_out_root": "0xf7996a5c81ad29219ea3b1088356d17fdc14ae4cca97e12ac4926206a3ff4173",
+      "token_horner_claim": [
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "segment_index": 2,
+      "relation_draws": 0,
+      "pre_root": "0x077e5d63e3d04e472068a60a036d4a382a956f0f7f08820c73b07207ad54c52b",
+      "model_root": "0x5dc85d1ed891fb1063de9945e830b6281f996867713a166d684c4c650993ca70",
+      "trace_root": "0x55b5bb685b650174e7a08d0d1eb6f34d4deb227026caca01ff6c98414db32b29",
+      "residual_in_root": "0xf7996a5c81ad29219ea3b1088356d17fdc14ae4cca97e12ac4926206a3ff4173",
+      "residual_out_root": "0xd2a08b54178749148012f917a59d8b301ab4153a960605320e77a547849b5049",
+      "token_horner_claim": [
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "segment_index": 3,
+      "relation_draws": 0,
+      "pre_root": "0x09d0d9627a332933303d0537aafa320f6608e82748d409020bfb781479474c37",
+      "model_root": "0xf8154b1d7bab8d6dc3625c6b1f379c1559b232218e3a983aa77a550a65277d01",
+      "trace_root": "0x462d103da400ec42578d544d7e3af943f5e17d2ffb388c40d5fa9e32a3ee1513",
+      "residual_in_root": "0xd2a08b54178749148012f917a59d8b301ab4153a960605320e77a547849b5049",
+      "residual_out_root": "0x05876521ef07fe286afd1c5e0d2702673e2cec6a16c2306a35560f5dd58f107d",
+      "token_horner_claim": [
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "segment_index": 4,
+      "relation_draws": 0,
+      "pre_root": "0xbd1fc61f5f982a2e73d17d72e99f9c131b77ac2bcf52184f980065274cc85274",
+      "model_root": "0x433b4e05076a621c562d5a2a39e2d476456cf4626f4dcb7683d941747ff2fa06",
+      "trace_root": "0x8683970cc5c8e1729ce073652fa23b5e265fd530053cc91b5265dd7f6068f45b",
+      "residual_in_root": "0x05876521ef07fe286afd1c5e0d2702673e2cec6a16c2306a35560f5dd58f107d",
+      "residual_out_root": "0x8dd3c33d34360a2daf65153c291f4044f8fdb74d67e42a01dab3f779229e1554",
+      "token_horner_claim": [
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "segment_index": 5,
+      "relation_draws": 0,
+      "pre_root": "0x2064a826aa1fad1dc204651340e1545512bb0f40745e053b1122fd3ef0e53517",
+      "model_root": "0x0373d747a042004fa42b0f38e9aba2495f75f16406575407c6390d3b80218926",
+      "trace_root": "0xcfb0930ac9b7130f3830f96750eac024e50fbf1c2a6e43687084c56578bb6962",
+      "residual_in_root": "0x8dd3c33d34360a2daf65153c291f4044f8fdb74d67e42a01dab3f779229e1554",
+      "residual_out_root": "0x9bf4164186b8b655af562f7a049cfb0d5f0c0a422378945f6e60227843783119",
+      "token_horner_claim": [
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "segment_index": 6,
+      "relation_draws": 0,
+      "pre_root": "0x20dcc71db910e3266f154f6b67b191785f3aea1e37e33228d434404ad6844301",
+      "model_root": "0x90e0c66ac9749860d82b085bd709fb741f9c3c007c15b47f36d8673ba9bc3362",
+      "trace_root": "0xdc6a426f94a1ce5399f23e3cee336145bb03797fedc1cb45d1d72062a245ca16",
+      "residual_in_root": "0x9bf4164186b8b655af562f7a049cfb0d5f0c0a422378945f6e60227843783119",
+      "residual_out_root": "0x1f5d5d487e92af63eae4884e80822727ad6de40f51037c4046f5c22969898813",
+      "token_horner_claim": [
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "segment_index": 7,
+      "relation_draws": 0,
+      "pre_root": "0x9055d94ba3b3884c8e79c935d26d960511a6666e57d34119a64a5c48efb05a0e",
+      "model_root": "0x69d21e224e749a2ae6916034d981922c890904076302ee7d17899438312a0504",
+      "trace_root": "0xdc82630c7ebbdc4374cef000bef6394ddc470f715f7334475768e87b9a10bb10",
+      "residual_in_root": "0x1f5d5d487e92af63eae4884e80822727ad6de40f51037c4046f5c22969898813",
+      "residual_out_root": "0xe835062f146adb7c7cc0e8107e80724b05252e4e2bc69220d1577137baf8a307",
+      "token_horner_claim": [
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "segment_index": 8,
+      "relation_draws": 0,
+      "pre_root": "0xb529454de00f9104eecfe77997e69025d763c925ec021944dc15772013dd8f1b",
+      "model_root": "0x32d2615fec3a33171283676c7c53681d28c52752db3004270cc4e847f6983055",
+      "trace_root": "0x8ae0271271fedf6c06e28c2bb7fd2d42a690ba498ba0641206da2064abebb11c",
+      "residual_in_root": "0xe835062f146adb7c7cc0e8107e80724b05252e4e2bc69220d1577137baf8a307",
+      "residual_out_root": "0xfbec217047197929f165de6ed34b865af65a9c1baf069675c8629371d3c98849",
+      "token_horner_claim": [
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "segment_index": 9,
+      "relation_draws": 0,
+      "pre_root": "0x286cab2c78867c5aff90ac1ddc979b360418c71dadd46225d3b5e92f22429334",
+      "model_root": "0xcdba4b3ccace4b48312bf64d87506169419d4e3ec9833f37b843e64fc1ff9e20",
+      "trace_root": "0xaa37ac2a09a6be1a3e7ea361f73b1f026b806b424f03f46aa84ba33fb836104b",
+      "residual_in_root": "0xfbec217047197929f165de6ed34b865af65a9c1baf069675c8629371d3c98849",
+      "residual_out_root": "0xad4e5d73a96be83b2e501920c42a5578eec8dc3b5d8b6c460e14e9740fc9796e",
+      "token_horner_claim": [
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "segment_index": 10,
+      "relation_draws": 0,
+      "pre_root": "0x1d8d4104f1a331433c64fe39096a083ad8adbf482b8dde726d94636a856bb009",
+      "model_root": "0x017e121ef98b930e8df4d511e3bdb472dbf03f1c747a6f3db1cbe40a59248431",
+      "trace_root": "0x9e5fed73464d6f750023714682aa571eb1df90322f22ac4955572e60cfe4aa25",
+      "residual_in_root": "0xad4e5d73a96be83b2e501920c42a5578eec8dc3b5d8b6c460e14e9740fc9796e",
+      "residual_out_root": "0xcdb3dd6be02bb80d98eb674056980655dd598c1fa19a1a26e72ce2387c5ddd7f",
+      "token_horner_claim": [
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "segment_index": 11,
+      "relation_draws": 0,
+      "pre_root": "0xa498b7365e9da476b4df22287e39144a743eee0865d58e3effa2ac76219d095a",
+      "model_root": "0x097c62612879a51c2ec0087258477d352562173b0b02c64529ad5a2c259c6c77",
+      "trace_root": "0xa5d55b3d25d4d75f341f022b93331122122c3246de799c78ce86c7535ea3f44c",
+      "residual_in_root": "0xcdb3dd6be02bb80d98eb674056980655dd598c1fa19a1a26e72ce2387c5ddd7f",
+      "residual_out_root": "0x764fb3011523f1556ff6464e3bd89778aaed5f5acb3c266484aa622ec93e185d",
+      "token_horner_claim": [
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "segment_index": 12,
+      "relation_draws": 0,
+      "pre_root": "0x94e17779c22b263094fa6b2e90ebb11572014c4e56eb175fce23b962d813ea26",
+      "model_root": "0x1ace801a02679610ebe5c512d70cee16fab9ec6d234a081e649877289b3f8c7c",
+      "trace_root": "0x6453cd7539688240b1c8747b6395eb23bd76683db60266675ea9f023c2e91624",
+      "residual_in_root": "0x764fb3011523f1556ff6464e3bd89778aaed5f5acb3c266484aa622ec93e185d",
+      "residual_out_root": "0x43fa1b4f884f277ab001372006e2d05922637b4406e81d4f0d0a03038466d130",
+      "token_horner_claim": [
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "segment_index": 13,
+      "relation_draws": 0,
+      "pre_root": "0x0764d647d02b6d1691aa1b2fc694c935b7745214b788e32ac9ca8835b93e4c2d",
+      "model_root": "0xfac0a223d7e5787dcb9d05007108d26797836e7d5d7d15609f47815883312a49",
+      "trace_root": "0x36df796aebf0b50208843f296997ef4c15f98b2fdc851e1ca0a8e23290e65a2f",
+      "residual_in_root": "0x43fa1b4f884f277ab001372006e2d05922637b4406e81d4f0d0a03038466d130",
+      "residual_out_root": "0xffcf72112f740c45b9240c29353ebc7ae9f164427cdef82b7f51746edc671918",
+      "token_horner_claim": [
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "segment_index": 14,
+      "relation_draws": 0,
+      "pre_root": "0xfa811661bb74d42ceac9521267705045c18e027defa3db6b0ed73b7a07e05a3c",
+      "model_root": "0x1dcd8411b339156a9807277313e2b55279928e0b61b9d571e2c807229238a04f",
+      "trace_root": "0xd25ef77926621b53aba71d39a74ca01dcf646b1059eaa603bc6a615329d9657b",
+      "residual_in_root": "0xffcf72112f740c45b9240c29353ebc7ae9f164427cdef82b7f51746edc671918",
+      "residual_out_root": "0xc495b67d744a1411b6c15e576baac96b5af1551275acd53641e9197ce6c1716b",
+      "token_horner_claim": [
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "segment_index": 15,
+      "relation_draws": 0,
+      "pre_root": "0x63195358dcf82d30d834b7460ac5227822bb9b09e99e9f4965d414047945df73",
+      "model_root": "0x2003e608127d4463bc9540352efe876c27a2067f1c38756236e4e8366eb8dc51",
+      "trace_root": "0x9e464e3fabc7cc2c659a5c399c534e542127257d614de97b1a8f2d5263b9324c",
+      "residual_in_root": "0xc495b67d744a1411b6c15e576baac96b5af1551275acd53641e9197ce6c1716b",
+      "residual_out_root": "0x56a6804257a1883b59dce61beb01561bb633536cd1308013e442e03192fad52c",
+      "token_horner_claim": [
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "segment_index": 16,
+      "relation_draws": 0,
+      "pre_root": "0x7630d431e0bf797993f5a171d80cc70dc4591446137d48180f5f4164f06ea268",
+      "model_root": "0x88819c0d6e9727231a93704cf4954e1286a95226e24f162fed218a0c5989f23a",
+      "trace_root": "0x2eb855493af4151332e95f2bae7f430a963a0576226e454ec689ce4164bbf21d",
+      "residual_in_root": "0x56a6804257a1883b59dce61beb01561bb633536cd1308013e442e03192fad52c",
+      "residual_out_root": "0xeca1dd7e2c52df35f190d928f2b7b8186fb3681a69feec12b510f822f5e99774",
+      "token_horner_claim": [
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "segment_index": 17,
+      "relation_draws": 0,
+      "pre_root": "0x06c8a320b1ded47d68582b73a6b26657d10956586633866a27b6ff1ceb526b54",
+      "model_root": "0xae540044d4576c7460ac6976c5fd6868ccf00f0f9d1f043bd927d371dc2c7650",
+      "trace_root": "0xfb2ac4080a86c46f765086701cbb667745d4495a4c017d3bb1ffa5310ec4ec0a",
+      "residual_in_root": "0xeca1dd7e2c52df35f190d928f2b7b8186fb3681a69feec12b510f822f5e99774",
+      "residual_out_root": "0x4540ee334611a77072d0501834d34261d7722451e069d00ebff467099de3dd2d",
+      "token_horner_claim": [
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "segment_index": 18,
+      "relation_draws": 0,
+      "pre_root": "0xe29ee538b0353b2ed4599512b5529464d312445b049a3135ec70c925bab2be02",
+      "model_root": "0xc9dafc665a1aa75d353b0d1ab2478f51582cb517d38412765b5779455342af56",
+      "trace_root": "0x8fbece577db95c0ed4b8530d9d793f7f17a4f71356365b2a7d63690812b1e068",
+      "residual_in_root": "0x4540ee334611a77072d0501834d34261d7722451e069d00ebff467099de3dd2d",
+      "residual_out_root": "0xeefab97547debc178419596a4a83a97f12ba1d64258f2c7b23c8094ab328e211",
+      "token_horner_claim": [
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "segment_index": 19,
+      "relation_draws": 0,
+      "pre_root": "0xc1fbe864087ead6284c25a6b2767e941ed528b6339bf357922887f011df4f821",
+      "model_root": "0x4b3e771b48de502d93502c2e6971a454535b6f1203260d5de78f2a6bb0576743",
+      "trace_root": "0x081691395a4b703923d16354d819f82fb3017c3e31c73f7b53ac244aa20bf940",
+      "residual_in_root": "0xeefab97547debc178419596a4a83a97f12ba1d64258f2c7b23c8094ab328e211",
+      "residual_out_root": "0x7867bb7700da9b12d72d362702bdd35ba7f4dc39ff42b737e7df2e1a5c507b19",
+      "token_horner_claim": [
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "segment_index": 20,
+      "relation_draws": 0,
+      "pre_root": "0xba8b805846d9aa0bba01e936a7ef114aea99e7303a9a1b76f71b287d4fe39357",
+      "model_root": "0x1bb49a1a9dbf6a4ec11db3057c276319f186dd3f510db70e0ccc227cf2613258",
+      "trace_root": "0xf47cb3131ac63468cc28d826e4a5552ba6e4a72792a25d2f355bc46f7931db66",
+      "residual_in_root": "0x7867bb7700da9b12d72d362702bdd35ba7f4dc39ff42b737e7df2e1a5c507b19",
+      "residual_out_root": "0xaa13da41a635d22ee808c46983c7df0f2876e040f4d7b720e67ecc7ba037bb44",
+      "token_horner_claim": [
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "segment_index": 21,
+      "relation_draws": 0,
+      "pre_root": "0x465cba2077dbf67cbd803b284bf9c82177d3425b15bf98730f73f97f7da3f20a",
+      "model_root": "0x32e9fe4814b0b03ef85ba94ac682ef41cea0744664db161c6bbac91857abc466",
+      "trace_root": "0xd3d6805a886a3b74b49a490b63e20879df86944838253c721135e82a6a356469",
+      "residual_in_root": "0xaa13da41a635d22ee808c46983c7df0f2876e040f4d7b720e67ecc7ba037bb44",
+      "residual_out_root": "0x9ce87154ce7ff652133b8455f646bb4afd6ff83cf839d85a7d9ce76551b29225",
+      "token_horner_claim": [
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "segment_index": 22,
+      "relation_draws": 24,
+      "pre_root": "0x3119373feaf0611ffaa7275ba4a6d031e33eeb3e2710ff41b1a9582431a8e73f",
+      "model_root": "0xe26a2e1be19e2b6d3f1ea17dc311e16c8fb1b523633e4e6a754720486220ce12",
+      "trace_root": "0x8eeda8657770717a942bd218b852681bc76de5181169332bfa62586264b15a14",
+      "residual_in_root": "0x9ce87154ce7ff652133b8455f646bb4afd6ff83cf839d85a7d9ce76551b29225",
+      "residual_out_root": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "token_horner_claim": [
+        754377417,
+        2109312062,
+        1514847,
+        2019687017
+      ]
+    }
+  ]
+}

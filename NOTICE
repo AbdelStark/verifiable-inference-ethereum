@@ -1,0 +1,19 @@
+verifiable-inference-ethereum
+Copyright 2026 Abdel (@AbdelStark)
+
+This project implements clean-room Rust and Solidity verification components
+and test vectors interoperating with the following Apache-2.0 open-source
+projects:
+
+1. SASH zk-inference-prover (https://github.com/sg-ai-safety-hub/zk-inference-prover)
+   Pinned reference revision: eb95bfa887299d1637550228d42086c27cbb2b3b
+   License: Apache-2.0
+
+2. Stwo / NitrooZK-stwo (https://github.com/starkware-libs/stwo and
+   https://github.com/AntChainOpenLabs/NitrooZK-stwo)
+   Pinned reference revision: 41c2a05bdb1fc3e3762bc7804108e8bc269bb6fc
+   License: Apache-2.0
+
+3. TinyLlama-1.1B-Chat-v1.0 (https://huggingface.co/TinyLlama/TinyLlama-1.1B-Chat-v1.0)
+   Pinned reference revision: fe8a4ea1ffedaf415f4da2f062534de366a451e6
+   License: Apache-2.0
