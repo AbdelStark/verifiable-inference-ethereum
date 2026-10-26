@@ -92,7 +92,7 @@ When asked to work/implement/do/resolve issue #N:
 
 - **CI** (`.github/workflows/ci.yml`) runs on pushes to `main` and on every PR, in two jobs:
   - `rust`: `cargo fmt --check`, `clippy -D warnings`, `cargo test --workspace`, and the fixture byte-sync check.
-  - `solidity` (Foundry `nightly`): `forge build --sizes` (`EIP-170`), `forge test -vvv --gas-report`, and a dry run of `DeployDevAnvil.s.sol`.
+  - `solidity` (Foundry `v1.8.6`): `forge build --sizes` (`EIP-170`), `forge test -vvv --gas-report`, and a dry run of `DeployDevAnvil.s.sol`.
   - **`ci.yml` spells out its steps; it does not call `make`.** A gate added to `make check` must be added to `ci.yml` too, and the other way round. `make check` skips the Anvil dry run (`make anvil-demo` runs it locally).
 
 ## 9. Discrepancies to confirm

@@ -1,6 +1,6 @@
 //! Exact Stwo `Blake2sChannelGeneric<IS_M31_OUTPUT>` and SASH Fiat-Shamir replay.
 
-use crate::blake2s::{blake2s256, blake2s_m31};
+use crate::blake2s::{blake2s_m31, blake2s256};
 use crate::field::{M31, QM31, TWO_P};
 
 pub type Blake2sChannel = Blake2sChannelGeneric<false>;

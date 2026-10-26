@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-pragma solidity ^0.8.24;
+pragma solidity ^0.8.38;
 
 import {M31} from "../field/M31.sol";
 import {SashTypes} from "./SashTypes.sol";

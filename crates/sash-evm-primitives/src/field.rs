@@ -209,12 +209,12 @@ impl QM31 {
 
     #[inline]
     pub const fn to_m31_array(self) -> [M31; 4] {
-        [self.0 .0, self.0 .1, self.1 .0, self.1 .1]
+        [self.0.0, self.0.1, self.1.0, self.1.1]
     }
 
     #[inline]
     pub const fn to_u32_array(self) -> [u32; 4] {
-        [self.0 .0 .0, self.0 .1 .0, self.1 .0 .0, self.1 .1 .0]
+        [self.0.0.0, self.0.1.0, self.1.0.0, self.1.1.0]
     }
 
     #[inline]

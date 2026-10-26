@@ -3,8 +3,8 @@ use std::process;
 
 use sash_evm_primitives::grid::{compute_public_digest, verify_sash_grid};
 use sash_evm_primitives::tinyllama_fixture::{
-    tinyllama_manifest, tinyllama_segments, TINYLLAMA_ANSWER_IDS, TINYLLAMA_PROMPT,
-    TINYLLAMA_PROMPT_IDS, TINYLLAMA_RESPONSE, TINYLLAMA_TOK_IN, TINYLLAMA_TOK_OUT,
+    TINYLLAMA_ANSWER_IDS, TINYLLAMA_PROMPT, TINYLLAMA_PROMPT_IDS, TINYLLAMA_RESPONSE,
+    TINYLLAMA_TOK_IN, TINYLLAMA_TOK_OUT, tinyllama_manifest, tinyllama_segments,
 };
 use sha2::{Digest, Sha256};
 
