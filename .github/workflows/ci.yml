@@ -25,11 +25,11 @@ jobs:
         run: cargo clippy --locked --workspace --all-targets -- -D warnings
       - name: Workspace tests (Stwo + TinyLlama 23-segment + negative controls 1 to 16)
         run: cargo test --locked --workspace
-      - name: Check Foundry test vectors are byte-identical to Rust reference
+      - name: Check TinyLlamaFixture.sol is byte-identical to the Rust export
         run: |
           tmp="$(mktemp)"
           cargo run --locked --quiet -p sash-evm-primitives --bin export_vectors -- "$tmp"
-          cmp -s "$tmp" contracts/test/vectors/tinyllama_23seg_fixture.json
+          cmp -s "$tmp" contracts/src/sash/TinyLlamaFixture.sol || { echo "::error file=contracts/src/sash/TinyLlamaFixture.sol::TinyLlamaFixture.sol drift detected; run 'make vectors'"; exit 1; }
           rm -f "$tmp"
 
   solidity:

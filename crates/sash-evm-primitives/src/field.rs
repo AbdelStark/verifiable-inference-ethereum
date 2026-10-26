@@ -1,7 +1,6 @@
 //! Mersenne-31 field tower (`M31`, `CM31`, `QM31`) matching Stwo / `NitrooZK-stwo`.
 
 use core::ops::{Add, Mul, Neg, Sub};
-use serde::{Deserialize, Serialize};
 
 /// Mersenne-31 prime modulus `P = 2^31 - 1`.
 pub const P: u32 = 0x7fff_ffff;
@@ -12,7 +11,7 @@ pub const TWO_P: u32 = 0xffff_fffe;
 pub struct NonCanonicalM31(pub u32);
 
 /// Canonical element of `GF(2^31 - 1)` in `[0, P - 1]`.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 #[repr(transparent)]
 pub struct M31(pub u32);
 
@@ -113,7 +112,7 @@ impl Mul for M31 {
 }
 
 /// Complex quadratic extension `CM31 = M31[i] / (i^2 + 1)`.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub struct CM31(pub M31, pub M31);
 
 impl CM31 {
@@ -183,7 +182,7 @@ impl Mul for CM31 {
 }
 
 /// Quartic secure extension `QM31 = CM31[u] / (u^2 - (2 + i))` (`SecureField`).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub struct QM31(pub CM31, pub CM31);
 
 impl QM31 {

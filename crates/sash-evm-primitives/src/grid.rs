@@ -1,12 +1,11 @@
 //! Reference SASH 23-segment grid, manifest, Fiat-Shamir channel, and Horner verifier.
 
-use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::channel::derive_sash_w_residual_stream;
 use crate::field::{P, QM31};
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SegmentClaim {
     pub segment_index: u16,
     pub relation_draws: u16,
@@ -18,7 +17,7 @@ pub struct SegmentClaim {
     pub token_horner_claim: QM31,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ModelManifest {
     pub num_segments: u16,
     pub seq_len: u16,
@@ -227,8 +226,8 @@ mod tests {
 
     #[test]
     fn real_tinyllama_23_segment_grid_accepts() {
-        let manifest = tinyllama_manifest();
         let segs = tinyllama_segments();
+        let manifest = tinyllama_manifest(&segs);
         verify_sash_grid(
             &manifest,
             &segs,
@@ -242,8 +241,8 @@ mod tests {
 
     #[test]
     fn negative_controls_reject_all_tampered_bundles() {
-        let manifest = tinyllama_manifest();
         let base_segs = tinyllama_segments();
+        let manifest = tinyllama_manifest(&base_segs);
 
         // 1. Forged model_root on layer 7
         {
