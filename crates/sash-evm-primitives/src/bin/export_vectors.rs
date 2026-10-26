@@ -3,6 +3,7 @@
 use std::env;
 use std::fmt::{self, Write};
 use std::fs;
+use std::process;
 
 use sash_evm_primitives::grid::{SegmentClaim, compute_public_digest};
 use sash_evm_primitives::tinyllama_fixture::{
@@ -134,9 +135,10 @@ fn render() -> Result<String, fmt::Error> {
 }
 
 fn main() {
-    let out_path = env::args()
-        .nth(1)
-        .expect("usage: export_vectors <output .sol path>");
+    let Some(out_path) = env::args().nth(1) else {
+        eprintln!("usage: export_vectors <output .sol path>");
+        process::exit(2);
+    };
     let rendered = render().expect("render Solidity fixture");
     fs::write(out_path, rendered).expect("write Solidity fixture");
 }
