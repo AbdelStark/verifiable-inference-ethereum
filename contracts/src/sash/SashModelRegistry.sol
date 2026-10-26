@@ -11,15 +11,13 @@ contract SashModelRegistry {
     mapping(bytes32 => SashTypes.ModelManifest) private _manifests;
 
     event ModelEnrolled(
-        bytes32 indexed modelId,
-        uint16 numSegments,
-        uint16 seqLen,
-        uint32 eosTokenId,
-        bytes32 manifestRootsHash
+        bytes32 indexed modelId, uint16 numSegments, uint16 seqLen, uint32 eosTokenId, bytes32 manifestRootsHash
     );
     event ModelActiveUpdated(bytes32 indexed modelId, bool active);
 
     constructor(address initialOwner) {
+        // OWNER is immutable, so a zero owner would leave enrollment locked forever
+        if (initialOwner == address(0)) revert SashTypes.ZeroOwner();
         OWNER = initialOwner;
     }
 

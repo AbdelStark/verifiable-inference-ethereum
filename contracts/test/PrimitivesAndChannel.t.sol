@@ -12,15 +12,9 @@ import {SashTypes} from "../src/sash/SashTypes.sol";
 contract PrimitivesAndChannelTest is Test {
     function testBlake2sRfc7693AndStwoVectors() public pure {
         // Stwo `single_hash_test` vector for "a":
-        assertEq(
-            Blake2s.hash(bytes("a")),
-            0x4a0d129873403037c2cd9b9048203687f6233fb6738956e0349bd4320fec3e90
-        );
+        assertEq(Blake2s.hash(bytes("a")), 0x4a0d129873403037c2cd9b9048203687f6233fb6738956e0349bd4320fec3e90);
         // Empty input RFC 7693 BLAKE2s-256 vector:
-        assertEq(
-            Blake2s.hash(bytes("")),
-            0x69217a3079908094e11121d042354a7c1f55b6482ca1a51e1b250dfd1ed0eef9
-        );
+        assertEq(Blake2s.hash(bytes("")), 0x69217a3079908094e11121d042354a7c1f55b6482ca1a51e1b250dfd1ed0eef9);
     }
 
     function testM31AndQM31Inverses() public pure {
@@ -39,18 +33,12 @@ contract PrimitivesAndChannelTest is Test {
         SashTypes.SegmentClaim[] memory segs = TinyLlamaFixture.segments();
 
         QM31.Elem memory wB0 = Blake2sM31Channel.deriveWResidualStream(
-            segs[0].preRoot,
-            segs[0].modelRoot,
-            segs[0].traceRoot,
-            segs[0].relationDraws
+            segs[0].preRoot, segs[0].modelRoot, segs[0].traceRoot, segs[0].relationDraws
         );
         assertTrue(QM31.eq(wB0, QM31.Elem(1259081484, 630063634, 1062868201, 1393098785)));
 
         QM31.Elem memory wHead = Blake2sM31Channel.deriveWResidualStream(
-            segs[22].preRoot,
-            segs[22].modelRoot,
-            segs[22].traceRoot,
-            segs[22].relationDraws
+            segs[22].preRoot, segs[22].modelRoot, segs[22].traceRoot, segs[22].relationDraws
         );
         assertTrue(QM31.eq(wHead, QM31.Elem(1297757949, 994229370, 1478950871, 2099916732)));
     }

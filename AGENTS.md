@@ -61,14 +61,14 @@ Before declaring any change complete, run:
 make check
 ```
 
-`make check` enforces `cargo fmt`, `cargo clippy -- -D warnings`, `cargo test --workspace` (including Stwo reference vectors, real TinyLlama-1.1B 23-segment Fiat-Shamir Horner vectors, and negative controls 1 to 16; controls 17 to 20 are settlement-level and exist only in Foundry), byte-exact vector sync with `contracts/test/vectors/tinyllama_23seg_fixture.json`, and `forge build && forge test` whenever Foundry is installed in `PATH`.
+`make check` enforces `cargo fmt`, `cargo clippy --locked --workspace --all-targets -- -D warnings`, `cargo test --locked --workspace` (including Stwo reference vectors, real TinyLlama-1.1B 23-segment Fiat-Shamir Horner vectors, and negative controls 1 to 16; controls 17 to 20 are settlement-level and exist only in Foundry), byte-exact vector sync with `contracts/test/vectors/tinyllama_23seg_fixture.json` (`export_vectors` run `--locked`), and, whenever Foundry is installed in `PATH`, `forge fmt --check`, `forge build --locked --sizes` (fails if a submodule differs from `contracts/foundry.lock`), `forge lint --deny warnings` and `forge test`.
 
 - **Write tests when a change touches the protocol**: the field tower, `Blake2s` / `reduce_to_m31`, `Blake2sM31Channel`, Horner bindings, grid checks, and settlement guards. Assert against `SPEC.md` and the primary-source vectors, not against the implementation.
 - **Don't add tests for docs, cosmetic changes, trivial wiring or config.**
 - **A failing invariant test is a real regression: fix the code, never weaken the test.** Never regenerate the fixture (`make vectors`) or edit a primary-source vector to make a failing test pass; the fixture changes only with an intended Rust primitive change (§2.4).
 - **A grid-level negative control lands in both suites**, Rust and Foundry, never on one side only. Settlement-level controls (proof bytes, verifier gating, replay) run in Foundry only (`SPEC.md` negative-control section).
 
-Other targets (`make help`): `make rust-check` (Rust gates only), `make vectors` (regenerate the fixture), `make forge-test` (`forge build --sizes && forge test -vvv --gas-report`), `make anvil-demo` (`DeployDevAnvil.s.sol` against chain `31337`), `make clean`.
+Other targets (`make help`): `make rust-check` (Rust gates only), `make vectors` (regenerate the fixture), `make forge-test` (`forge fmt --check && forge build --locked --sizes && forge lint --deny warnings && forge test -vvv --gas-report`), `make anvil-demo` (`DeployDevAnvil.s.sol` against chain `31337`), `make clean`.
 
 ## 6. Working an issue
 
@@ -90,8 +90,8 @@ When asked to work/implement/do/resolve issue #N:
 ## 8. Current state (mutable)
 
 - **CI** (`.github/workflows/ci.yml`) runs on pushes to `main` and on every PR, in two jobs:
-  - `rust`: `cargo fmt --check`, `clippy -D warnings`, `cargo test --workspace`, and the fixture byte-sync check.
-  - `solidity` (Foundry `v1.8.6`): `forge build --sizes` (`EIP-170`), `forge test -vvv --gas-report`, and a dry run of `DeployDevAnvil.s.sol`.
+  - `rust`: `cargo fmt --check`, `cargo clippy --locked --workspace --all-targets -- -D warnings`, `cargo test --locked --workspace`, and the fixture byte-sync check (`--locked`).
+  - `solidity` (Foundry `v1.8.6`): `forge fmt --check`, `forge build --locked --sizes` (`foundry.lock`, `EIP-170`), `forge lint --deny warnings`, `forge test -vvv --gas-report`, and a dry run of `DeployDevAnvil.s.sol`.
   - **`ci.yml` spells out its steps; it does not call `make`.** A gate added to `make check` must be added to `ci.yml` too, and the other way round. `make check` skips the Anvil dry run (`make anvil-demo` runs it locally).
 
 ## 9. Discrepancies to confirm

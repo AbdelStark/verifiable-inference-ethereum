@@ -31,6 +31,8 @@ contract DevTranscriptSegmentVerifier is ISashSegmentVerifier {
             revert SashTypes.DevChainOnly(block.chainid);
         }
         bytes32 expected = sha256(abi.encodePacked(DEV_DOMAIN_TAG, publicDigest));
+        // casting to 'bytes32' is safe because the left operand rejects any length other than 32
+        // forge-lint: disable-next-line(unsafe-typecast)
         if (proofBytes.length != 32 || bytes32(proofBytes) != expected) {
             revert SashTypes.InvalidDevProofTag();
         }

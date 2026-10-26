@@ -21,15 +21,7 @@ library Blake2s {
         }
     }
 
-    function g(
-        uint32[16] memory v,
-        uint256 a,
-        uint256 b,
-        uint256 c,
-        uint256 d,
-        uint32 x,
-        uint32 y
-    ) private pure {
+    function g(uint32[16] memory v, uint256 a, uint256 b, uint256 c, uint256 d, uint32 x, uint32 y) private pure {
         unchecked {
             v[a] = v[a] + v[b] + x;
             v[d] = rotr32(v[d] ^ v[a], 16);
@@ -53,12 +45,7 @@ library Blake2s {
         g(v, 3, 4, 9, 14, m[(s >> 56) & 0xf], m[(s >> 60) & 0xf]);
     }
 
-    function compress(
-        uint32[8] memory h,
-        uint32[16] memory m,
-        uint64 t,
-        bool isLast
-    ) private pure {
+    function compress(uint32[8] memory h, uint32[16] memory m, uint64 t, bool isLast) private pure {
         uint32[16] memory v;
         for (uint256 i = 0; i < 8; ++i) {
             v[i] = h[i];
@@ -67,7 +54,9 @@ library Blake2s {
         v[9] = IV1;
         v[10] = IV2;
         v[11] = IV3;
+        // forge-lint: disable-next-line(unsafe-typecast)
         v[12] = IV4 ^ uint32(t);
+        // forge-lint: disable-next-line(unsafe-typecast)
         v[13] = IV5 ^ uint32(t >> 32);
         v[14] = isLast ? ~IV6 : IV6;
         v[15] = IV7;
@@ -89,36 +78,20 @@ library Blake2s {
         }
     }
 
-    function loadBlockWords(bytes memory data, uint256 offset, uint256 rem)
-        private
-        pure
-        returns (uint32[16] memory m)
-    {
+    function loadBlockWords(bytes memory data, uint256 offset, uint256 rem) private pure returns (uint32[16] memory m) {
         uint8[64] memory blk;
         for (uint256 i = 0; i < rem; ++i) {
             blk[i] = uint8(data[offset + i]);
         }
         for (uint256 w = 0; w < 16; ++w) {
             uint256 j = 4 * w;
-            m[w] = uint32(blk[j])
-                | (uint32(blk[j + 1]) << 8)
-                | (uint32(blk[j + 2]) << 16)
-                | (uint32(blk[j + 3]) << 24);
+            m[w] = uint32(blk[j]) | (uint32(blk[j + 1]) << 8) | (uint32(blk[j + 2]) << 16) | (uint32(blk[j + 3]) << 24);
         }
     }
 
     /// @notice Unkeyed 32-byte RFC 7693 `BLAKE2s-256`.
     function hash(bytes memory data) internal pure returns (bytes32 out) {
-        uint32[8] memory h = [
-            IV0 ^ uint32(0x01010020),
-            IV1,
-            IV2,
-            IV3,
-            IV4,
-            IV5,
-            IV6,
-            IV7
-        ];
+        uint32[8] memory h = [IV0 ^ uint32(0x01010020), IV1, IV2, IV3, IV4, IV5, IV6, IV7];
 
         uint256 len = data.length;
         if (len == 0) {
@@ -129,18 +102,24 @@ library Blake2s {
             while (len - offset > 64) {
                 uint32[16] memory m = loadBlockWords(data, offset, 64);
                 offset += 64;
+                // forge-lint: disable-next-line(unsafe-typecast)
                 compress(h, m, uint64(offset), false);
             }
             uint32[16] memory lastBlock = loadBlockWords(data, offset, len - offset);
+            // forge-lint: disable-next-line(unsafe-typecast)
             compress(h, lastBlock, uint64(len), true);
         }
 
         bytes memory buf = new bytes(32);
         for (uint256 i = 0; i < 8; ++i) {
             uint32 w = h[i];
+            // forge-lint: disable-next-line(unsafe-typecast)
             buf[4 * i] = bytes1(uint8(w));
+            // forge-lint: disable-next-line(unsafe-typecast)
             buf[4 * i + 1] = bytes1(uint8(w >> 8));
+            // forge-lint: disable-next-line(unsafe-typecast)
             buf[4 * i + 2] = bytes1(uint8(w >> 16));
+            // forge-lint: disable-next-line(unsafe-typecast)
             buf[4 * i + 3] = bytes1(uint8(w >> 24));
         }
         assembly ("memory-safe") {
@@ -153,14 +132,16 @@ library Blake2s {
         bytes memory buf = new bytes(32);
         for (uint256 i = 0; i < 8; ++i) {
             uint256 j = 4 * i;
-            uint32 w = uint32(uint8(raw[j]))
-                | (uint32(uint8(raw[j + 1])) << 8)
-                | (uint32(uint8(raw[j + 2])) << 16)
+            uint32 w = uint32(uint8(raw[j])) | (uint32(uint8(raw[j + 1])) << 8) | (uint32(uint8(raw[j + 2])) << 16)
                 | (uint32(uint8(raw[j + 3])) << 24);
             uint32 r = M31.reduceU32(w);
+            // forge-lint: disable-next-line(unsafe-typecast)
             buf[j] = bytes1(uint8(r));
+            // forge-lint: disable-next-line(unsafe-typecast)
             buf[j + 1] = bytes1(uint8(r >> 8));
+            // forge-lint: disable-next-line(unsafe-typecast)
             buf[j + 2] = bytes1(uint8(r >> 16));
+            // forge-lint: disable-next-line(unsafe-typecast)
             buf[j + 3] = bytes1(uint8(r >> 24));
         }
         assembly ("memory-safe") {
@@ -180,10 +161,8 @@ library Blake2s {
     function extractWordsLE(bytes32 digest) internal pure returns (uint32[8] memory words) {
         for (uint256 i = 0; i < 8; ++i) {
             uint256 j = 4 * i;
-            words[i] = uint32(uint8(digest[j]))
-                | (uint32(uint8(digest[j + 1])) << 8)
-                | (uint32(uint8(digest[j + 2])) << 16)
-                | (uint32(uint8(digest[j + 3])) << 24);
+            words[i] = uint32(uint8(digest[j])) | (uint32(uint8(digest[j + 1])) << 8)
+                | (uint32(uint8(digest[j + 2])) << 16) | (uint32(uint8(digest[j + 3])) << 24);
         }
     }
 }
