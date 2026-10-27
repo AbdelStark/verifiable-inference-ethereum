@@ -17,7 +17,7 @@ Reference LLM target: `TinyLlama/TinyLlama-1.1B-Chat-v1.0` (`fe8a4ea1ffedaf415f4
 ## 2. Non-negotiable engineering invariants
 
 1. **No overclaiming.** An accepted verification proves **quantized execution integrity** for one declared run of an enrolled `(pre_root, model_root)` manifest under SASH's `y-attnout-w12` relation. Never claim output safety, alignment, floating-point equivalence, or zero-knowledge hiding (SASH inner proofs use `LOG_BLOWUP = 1` without trace blinding, and public settlement opens prompt/response tokens).
-2. **Explicit cryptographic assumption tracking.** Raw SASH segment proofs rely on `BLAKE2s` Circle STARK + GKR (~100 conjectured security bits, post-quantum candidate). Compressing 23 wide segments through an SP1 or RISC Zero BN254 Groth16 wrapper shifts the outer assumption to classical BN254 pairing soundness, Groth16 SRS ceremony integrity, and zkVM circuit soundness. Keep `VerifierKind` explicit in every contract, event, and receipt.
+2. **Explicit cryptographic assumption tracking.** Raw SASH segment proofs rely on `BLAKE2s` Circle STARK + GKR (~100 conjectured security bits, post-quantum candidate). Compressing 23 wide segments through an SP1 v6 BN254 wrapper (Groth16 or PLONK, chosen at M3 start) shifts the outer assumption to classical BN254 pairing soundness, the integrity of that wrap's setup ceremony, and zkVM circuit soundness. Keep `VerifierKind` explicit in every contract, event, and receipt.
 3. **Hard separation of dev-mode mocks.** `DevTranscriptSegmentVerifier` is strictly restricted to `block.chainid == 31337` (Foundry / Anvil) AND blocked whenever `VerifiableInferenceSettlement.allowDevVerifier == false`. Never weaken either guard.
 4. **Bit-exact cross-language parity.** Rust (`crates/sash-evm-primitives`) and Solidity (`contracts/src/`) must agree bit-for-bit on the grid checks and on the sha256 `manifestRootsHash`, token hashes and `publicDigest` byte layouts (`SPEC.md` §1.3). Any change to Rust primitives must regenerate `contracts/src/sash/TinyLlamaFixture.sol` (`make vectors`, generated from `tinyllama_fixture.rs`; never hand-edit it) and verify it (`make check`).
 5. **EVM consensus discipline.** Osaka (mainnet, Hoodi) binds:
@@ -45,10 +45,10 @@ User-decided rules with the same bar as the invariants.
 
 ## 4. Repository layout
 
-- `SPEC.md`: Canonical protocol, wire format, contract ABI, and the negative-control table (§2.1).
+- `SPEC.md`: Canonical protocol: the proved statement, sha256 digest layouts, contract ABI, and the negative-control table (§2.1).
 - `SECURITY.md`: Threat model, cryptographic assumption boundary, and audit checklist.
 - `docs/ARCHITECTURE.md`: Two-layer hybrid design (zkVM segment compression + native Solidity SASH grid verifier).
-- `docs/EVM-GAS-MODEL.md`: Empirical TinyLlama-1.1B SASH sizing and `EIP-7825` / `EIP-7623` arithmetic.
+- `docs/EVM-GAS-MODEL.md`: Sizes from the unpublished TinyLlama-1.1B SASH run, the Osaka / Amsterdam network rules, and gas estimates.
 - `docs/ROADMAP.md`: Milestones `M0` through `M4` (Foundry -> Anvil -> Sepolia/Hoodi).
 - `crates/sash-evm-primitives`: Pure Rust reference SASH 23-segment grid checks and sha256 settlement digests, and the TinyLlama-1.1B fixture and `TinyLlamaFixture.sol` generator.
 - `contracts/`: Foundry Solidity verifier suite (`SashModelRegistry`, `SashGridVerifier`, `Sp1SashSegmentVerifier`, `DevTranscriptSegmentVerifier`, `VerifiableInferenceSettlement`), deployment scripts, and the Foundry rows of the `SPEC.md` §2.1 negative-control table.
@@ -68,7 +68,7 @@ make check
 - **A failing invariant test is a real regression: fix the code, never weaken the test.** Never regenerate the fixture (`make vectors`) or edit a primary-source vector to make a failing test pass; the fixture changes only with an intended Rust primitive change (§2.4).
 - **A grid-level negative control lands in both suites**, Rust and Foundry, never on one side only. Settlement-level controls (token binding, proof bytes, verifier gating, replay) run in Foundry only (`SPEC.md` §2.1 table).
 
-Other targets (`make help`): `make rust-check` (Rust gates only), `make vectors` (regenerate the fixture), `make forge-test` (`forge fmt --check && forge build --locked --sizes && forge lint --deny warnings && forge test -vvv --gas-report`), `make anvil-demo` (`DeployDevAnvil.s.sol` against chain `31337`), `make clean`.
+Other targets (`make help`): `make rust-check` (Rust gates only), `make vectors` (regenerate the fixture), `make forge-test` (`forge fmt --check && forge build --locked --sizes && forge lint --deny warnings && forge test -vvv --gas-report`), `make anvil-demo` (`DeployDevAnvil.s.sol` in Forge's in-process EVM on chain `31337`), `make clean`.
 
 ## 6. Working an issue
 
