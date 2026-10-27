@@ -72,57 +72,57 @@ M2's comparison with S-two is a bounded microbenchmark: what S-two's Cairo AIR c
 
 ### Setup
 
-- **Machine:** Apple M3 Max, 14 cores (10 performance + 4 efficiency), 36 GiB, macOS 15.7.3. #38's SP1 runs share it, under a lock that keeps the timed runs apart. Each proof waits up to 3 minutes for the 1-minute load average to fall below 3, and records the load averages next to its timing.
+- **Machine:** Apple M3 Max, 14 cores (10 performance + 4 efficiency), 36 GiB, macOS 15.7.3. #38's SP1 runs share it; the runs recorded here did not overlap with them. Each proof waits up to 3 minutes for the 1-minute load average to fall below 3, and records the load averages next to its timing.
 - **Toolchain:** `starkware-libs/stwo-cairo@2b1fb4ded5496fb2db4e8261cd5ee5ef6b710839`, with its `rust-toolchain.toml` (`nightly-2026-01-15`, rustc 1.94.0-nightly `86a49fd71`) and `.tool-versions` (`scarb 2.18.0`).
 - **Prover:** `run_and_prove` from `crates/dev_utils`, built with `RUSTFLAGS="-C target-cpu=native"` and run with `--program_type executable --verify`. It uses the default production parameters (`crates/prover/src/prover.rs:409-424`): Blake2s channel, `log_blowup 1`, 70 queries, `pow_bits 26`, 96 bits. Every proof in the tables passed `--verify`.
 - **Benchmarks:** the Scarb executable `bench/stwo-cairo/` (`stwo_unit_costs`), compiled like stwo-cairo's `proving` profile (`enable-gas = false`, `unsafe-panic = true`). Its arguments select the benchmark and N:
   - `blake2s`: N chained `core::blake::blake2s_compress` calls, `byte_count += 64` each;
   - `qm31`: N chained fused mul-adds `acc * b + c` on `core::qm31::qm31`, as `verifier_core/src/fields/qm31/opcode.cairo:50` does;
-  - `m31`: N M31 values read from the arguments as `Array<core::qm31::m31>`, a range-checked deserialization, then summed.
+  - `m31`: N M31 values read from the arguments as `Array<core::qm31::m31>`: the range-checked deserialization only, with no work per value after it.
 - **One workaround:** at this commit, `run_and_prove --program_type executable` fails on any Scarb executable. The executable passes only the builtins it uses, but the prover reads all 11 public-segment pointers (the adapter's bootloader context), so it panics or reports "Constraints not satisfied". The script prepends a Standalone header that receives all 11 builtins and calls the executable's Bootloader entrypoint. That adds 15 steps (16 for the verifier, which uses `bitwise`). The tables give `scarb execute`'s step counts, without them.
-- **Reproduce:** `python3 -I bench/stwo-cairo/run.py` clones the pin into `runs/stwo-cairo/`, writes proofs and logs to `runs/stwo-unit-costs/`, and prints every table below. It takes about an hour; neither `make check` nor CI runs it.
+- **Reproduce:** `python3 -I bench/stwo-cairo/run.py` clones the pin into `runs/stwo-cairo/`, writes proofs and logs to `runs/stwo-unit-costs/`, and prints every table below. It asserts the two calibration step counts, and that the rows it derives from `get_execution_resources` give every growing component's log size in each proof's claim. It takes about an hour; neither `make check` nor CI runs it.
 
 ### Per-N measurements
 
-Steps and max memory address come from `scarb execute --print-resource-usage`. Time, peak RSS and peak footprint come from `/usr/bin/time -l` over prove + verify. Trace cells are the prover's "Witness trace cells" (base + interaction trees); the 543,100,528-cell preprocessed tree is the same in every run. Peak footprint includes memory that macOS compressed or swapped out, so it is the figure that has to fit in 36 GiB.
+Steps and max memory address come from `scarb execute --print-resource-usage`. Time, peak RSS and peak footprint come from `/usr/bin/time -l` over the whole `run_and_prove` command: the Cairo VM run, adaptation, proving, verification and writing the proof. The VM run and adaptation take about 3 s of the calibration's 48.6 s. Trace cells are the prover's "Witness trace cells" (base + interaction trees); the 543,100,528-cell preprocessed tree is the same in every run. Cells/step is that whole-run total over the steps. Peak footprint includes memory that macOS compressed or swapped out, so it is the figure that has to fit in 36 GiB.
 
 **BLAKE2s compressions:**
 
-| N | Steps | Max memory address | Trace cells | Prove + verify (s) | Steps/s | Peak RSS (GiB) | Peak footprint (GiB) | Load avg (1/5/15 min) | Status |
-|---:|---:|---:|---:|---:|---:|---:|---:|---|---|
-| 2^12 | 57,413 | 53,655 | 164,617,856 | 6.41 | 8,957 | 15.4 | 12.3 | 2.8/3.8/6.1 | verified |
-| 2^13 | 114,757 | 106,903 | 242,163,328 | 6.68 | 17,179 | 15.7 | 12.4 | 2.7/3.8/5.9 | verified |
-| 2^14 | 229,445 | 213,399 | 397,254,272 | 10.40 | 22,062 | 17.3 | 14.3 | 2.8/3.7/5.7 | verified |
-| 2^15 | 458,821 | 426,391 | 707,436,160 | 14.60 | 31,426 | 18.3 | 17.7 | 2.8/3.6/5.6 | verified |
-| 2^16 | 917,573 | 852,375 | 1,327,799,936 | 27.60 | 33,245 | 19.9 | 26.9 | 2.9/3.8/5.5 | verified |
-| 2^17 | 1,835,077 | 1,704,343 | — | — | — | — | 36.0 when stopped | 2.9/4.7/5.4 | out of memory |
-| 2^18 | | | | | | | | | not attempted |
+| N | Steps | Max memory address | Trace cells | Cells/step | Time (s) | Steps/s | Peak RSS (GiB) | Peak footprint (GiB) | Load avg (1/5/15 min) | Status |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---|
+| 2^12 | 57,414 | 53,633 | 164,617,856 | 2,867 | 5.74 | 10,002 | 15.3 | 12.2 | 3.0/3.6/3.5 | verified |
+| 2^13 | 114,758 | 106,881 | 242,163,328 | 2,110 | 6.20 | 18,509 | 15.7 | 12.2 | 2.8/3.5/3.5 | verified |
+| 2^14 | 229,446 | 213,377 | 397,254,272 | 1,731 | 8.41 | 27,283 | 18.0 | 13.8 | 2.7/3.5/3.4 | verified |
+| 2^15 | 458,822 | 426,369 | 707,436,160 | 1,542 | 13.19 | 34,786 | 19.8 | 18.3 | 2.9/3.5/3.5 | verified |
+| 2^16 | 917,574 | 852,353 | 1,327,799,936 | 1,447 | 25.57 | 35,885 | 20.3 | 26.9 | 3.0/3.6/3.5 | verified |
+| 2^17 | 1,835,078 | 1,704,321 | — | — | — | — | — | 37.0 when stopped | 3.0/3.7/3.6 | out of memory |
+| 2^18 | | | | | | | | | | not attempted |
 
 **Out of memory at N = 2^17:** the script stops a proof whose footprint passes 35 GiB. In an earlier pass without that limit, macOS killed the 2^17 proof at a peak footprint of 40.7 GiB, after its RSS reached 22.9 GiB. 2^18 needs more memory still and was not attempted. Proving them needs a larger machine, which needs explicit approval and a budget (AGENTS.md §2.6). The three points from 2^14 to 2^16 are enough for the fit.
 
 **QM31 fused mul-adds:**
 
-| N | Steps | Max memory address | Trace cells | Prove + verify (s) | Steps/s | Peak RSS (GiB) | Peak footprint (GiB) | Load avg (1/5/15 min) | Status |
-|---:|---:|---:|---:|---:|---:|---:|---:|---|---|
-| 2^12 | 32,850 | 29,104 | 40,859,536 | 5.52 | 5,951 | 14.6 | 11.6 | 2.9/12.7/11.2 | verified |
-| 2^13 | 65,618 | 57,776 | 44,971,920 | 6.40 | 10,253 | 14.6 | 11.6 | 2.9/10.9/10.6 | verified |
-| 2^14 | 131,154 | 115,120 | 53,196,688 | 5.86 | 22,381 | 14.7 | 11.6 | 2.8/9.7/10.2 | verified |
-| 2^15 | 262,226 | 229,808 | 69,646,224 | 6.29 | 41,689 | 14.6 | 11.6 | 2.7/7.9/9.5 | verified |
-| 2^16 | 524,370 | 459,184 | 102,545,296 | 6.38 | 82,190 | 14.8 | 11.6 | 2.8/7.0/9.0 | verified |
-| 2^17 | 1,048,658 | 917,936 | 168,343,440 | 6.75 | 155,357 | 15.2 | 12.1 | 2.8/6.3/8.6 | verified |
-| 2^18 | 2,097,234 | 1,835,440 | 299,939,728 | 8.41 | 249,374 | 16.4 | 12.9 | 2.9/5.6/8.1 | verified |
+| N | Steps | Max memory address | Trace cells | Cells/step | Time (s) | Steps/s | Peak RSS (GiB) | Peak footprint (GiB) | Load avg (1/5/15 min) | Status |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---|
+| 2^12 | 32,851 | 29,082 | 40,859,536 | 1,244 | 5.28 | 6,222 | 14.6 | 11.6 | 2.9/3.3/3.3 | verified |
+| 2^13 | 65,619 | 57,754 | 44,971,920 | 685 | 4.83 | 13,586 | 14.7 | 11.4 | 2.7/3.2/3.3 | verified |
+| 2^14 | 131,155 | 115,098 | 53,196,688 | 406 | 4.99 | 26,284 | 14.7 | 11.5 | 2.6/3.2/3.3 | verified |
+| 2^15 | 262,227 | 229,786 | 69,646,224 | 266 | 5.09 | 51,518 | 14.7 | 11.6 | 2.8/3.2/3.3 | verified |
+| 2^16 | 524,371 | 459,162 | 102,545,296 | 196 | 5.77 | 90,879 | 14.9 | 11.6 | 3.0/3.3/3.3 | verified |
+| 2^17 | 1,048,659 | 917,914 | 168,343,440 | 161 | 6.24 | 168,054 | 15.2 | 12.2 | 3.0/3.4/3.4 | verified |
+| 2^18 | 2,097,235 | 1,835,418 | 299,939,728 | 143 | 7.90 | 265,473 | 16.5 | 12.8 | 2.9/3.4/3.4 | verified |
 
 **M31 ingestion:**
 
-| N | Steps | Max memory address | Trace cells | Prove + verify (s) | Steps/s | Peak RSS (GiB) | Peak footprint (GiB) | Load avg (1/5/15 min) | Status |
-|---:|---:|---:|---:|---:|---:|---:|---:|---|---|
-| 2^12 | 102,472 | 86,423 | 46,415,744 | 5.28 | 19,408 | 14.6 | 11.6 | 2.9/5.5/8.1 | verified |
-| 2^13 | 204,872 | 172,439 | 56,090,496 | 5.72 | 35,817 | 14.7 | 11.6 | 2.6/4.9/7.6 | verified |
-| 2^14 | 409,672 | 344,471 | 75,440,000 | 6.07 | 67,491 | 14.8 | 11.7 | 2.8/4.7/7.4 | verified |
-| 2^15 | 819,272 | 688,535 | 114,139,008 | 7.11 | 115,228 | 15.1 | 11.9 | 2.8/4.5/7.1 | verified |
-| 2^16 | 1,638,472 | 1,376,663 | 191,537,024 | 7.05 | 232,407 | 15.5 | 12.1 | 3.0/4.3/7.0 | verified |
-| 2^17 | 3,276,872 | 2,752,919 | 346,333,056 | 9.19 | 356,569 | 17.3 | 13.2 | 2.7/4.1/6.6 | verified |
-| 2^18 | 6,553,672 | 5,505,431 | 655,925,120 | 15.06 | 435,171 | 18.7 | 17.0 | 2.7/4.0/6.4 | verified |
+| N | Steps | Max memory address | Trace cells | Cells/step | Time (s) | Steps/s | Peak RSS (GiB) | Peak footprint (GiB) | Load avg (1/5/15 min) | Status |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---|
+| 2^12 | 69,693 | 57,719 | 44,257,152 | 635 | 5.46 | 12,764 | 14.7 | 11.4 | 1.7/2.0/3.0 | verified |
+| 2^13 | 139,325 | 115,063 | 51,773,312 | 372 | 5.17 | 26,949 | 14.5 | 11.6 | 2.7/2.2/3.1 | verified |
+| 2^14 | 278,589 | 229,751 | 66,805,632 | 240 | 5.15 | 54,095 | 14.7 | 11.6 | 2.7/2.3/3.1 | verified |
+| 2^15 | 557,117 | 459,127 | 96,870,272 | 174 | 5.35 | 104,134 | 14.9 | 11.7 | 3.0/2.5/3.1 | verified |
+| 2^16 | 1,114,173 | 917,879 | 156,999,552 | 141 | 6.48 | 171,940 | 15.4 | 12.1 | 3.0/2.7/3.1 | verified |
+| 2^17 | 2,228,285 | 1,835,383 | 277,258,112 | 124 | 7.92 | 281,349 | 16.3 | 12.8 | 2.9/2.8/3.1 | verified |
+| 2^18 | 4,456,509 | 3,670,391 | 517,775,232 | 116 | 12.32 | 361,730 | 19.0 | 15.0 | 3.0/3.0/3.2 | verified |
 
 ### Fits: fixed cost plus per-op cost
 
@@ -130,23 +130,25 @@ Least squares over the points at N ≥ 2^14: 2^14 to 2^16 for BLAKE2s, 2^14 to 2
 
 | Per op | BLAKE2s compression | QM31 mul-add | M31 ingested |
 |---|---:|---:|---:|
-| Steps | 14 | 8 | 25 |
-| Memory addresses | 13 | 7 | 21 |
-| Trace cells, padded (base + interaction) | 18,932 | 1,004 | 2,362 |
-| Prove + verify time, fit | 356.6 µs | 9.7 µs | 35.8 µs |
-| Prove + verify time, marginal between the two largest N | 396.7 µs | 12.7 µs | 44.8 µs |
-| Peak footprint | 270.9 KiB | 5.9 KiB | 22.6 KiB |
-| **Fixed** (prove + verify; peak footprint) | 3.9 s; 9.8 GiB | 5.8 s; 11.4 GiB | 5.3 s; 11.0 GiB |
+| Steps | 14 | 8 | 17 |
+| Memory addresses | 13 | 7 | 14 |
+| Trace cells, padded at N = 2^k (base + interaction) | 18,932 | 1,004 | 1,835 |
+| Trace cells per step, marginal | 1,352 | 126 | 108 |
+| Time, fit | 353.2 µs | 11.7 µs | 29.3 µs |
+| Time, marginal between the two largest N | 377.8 µs | 12.7 µs | 33.6 µs |
+| Time fit residuals, N = 2^14, 2^15, … (s) | +0.40, −0.60, +0.20 | −0.01, −0.10, +0.20, −0.10, +0.02 | +0.20, −0.08, +0.09, −0.39, +0.17 |
+| Peak footprint | 277.5 KiB | 5.9 KiB | 14.7 KiB |
+| **Fixed** (time; peak footprint) | 2.2 s; 9.6 GiB | 4.8 s; 11.4 GiB | 4.5 s; 11.2 GiB |
 
-- **Fixed costs dominate.** Every run carries the preprocessed tree and the fixed-size lookup tables: about 37M base + interaction cells (87M with BLAKE2s's XOR tables), 4–6 s and 10–11 GiB of footprint.
+- **Fixed costs dominate.** Every run carries the preprocessed tree and the fixed-size lookup tables: 36,735,680 base + interaction cells (87,067,408 with BLAKE2s's XOR tables), 4–6 s and 10–11 GiB of footprint.
 - **Uncertainty.**
-  - The QM31 and M31 timings stay nearly flat up to 2^16, so their per-op times rest mainly on 2^17 and 2^18. The marginal slopes between those two points are 25–30% above the fits.
-  - The BLAKE2s 2^16 proof pushed about 5 GiB into swap, which may inflate it.
-  - An earlier BLAKE2s pass, at a 1-minute load of 11–13, fitted 318 µs per compression. The range is about 320–400 µs.
+  - The QM31 and M31 timings stay nearly flat up to 2^16, so their per-op times rest mainly on 2^17 and 2^18. The marginal slopes between those two points are 8% and 15% above the fits.
+  - The BLAKE2s curve is convex: its fit intercept (2.2 s) is below the measured 2^12 time (5.7 s), the residuals swing by ±0.6 s over three points, and the marginal slope rises from 292 µs (2^14 to 2^15) to 378 µs (2^15 to 2^16). The 2^16 proof pushed about 3.6 GiB into swap, which may inflate it.
+  - Two earlier BLAKE2s passes with an earlier build fitted 318 µs (at a 1-minute load of 11–13) and 357 µs per compression. The range is about 320–400 µs.
 - **Opcode mix per op:**
   - BLAKE2s: 1 `blake_compress_opcode` plus 13 ordinary instructions (loop, `byte_count` add with its range check).
   - QM31: 2 `qm_31_add_mul_opcode` instances, since the mul and the add are separate opcodes, plus 6 loop instructions.
-  - M31: 25 ordinary instructions per value, with no special opcode.
+  - M31: 17 ordinary instructions and 2 range-check builtin instances per value, with no special opcode. This is the deserialization alone; the benchmark does nothing with the values afterwards.
 
 ### Rows and cells per op
 
@@ -164,50 +166,68 @@ Per BLAKE2s compression, at N = 2^16 with 65,536 `blake_compress_opcode` instanc
 - **Padding:** at N = 2^k, padding to powers of two makes it 153 rows and 17,354 cells.
 - **Whole trace:** with the opcodes, memory and lookup components a compression also touches, it is 18,932 cells per compression (the fit above).
 - **QM31 mul-add:** 2 `qm_31_add_mul_opcode` rows of 73 + 24 columns, 194 cells, unpadded and padded alike (2^19 rows at N = 2^18). With everything else it is 1,004 cells.
-- **The extrapolation uses the padded whole-trace fits.** They are measured at N = 2^k, where every component is a power of two.
+- **What the extrapolation uses.** Padding depends on the final size, so the extrapolation doesn't scale the padded fits. It fits each growing component's unpadded rows: the opcode and builtin instance counts and memory table sizes from `get_execution_resources`, times the rows per instance above (16 addresses per `memory_address_to_id` row). It then applies the memory tables' limits: at most 2^24 small values, the rest becoming big values, in tables of at most 2^25 rows. Finally it pads each component to its power of two. The script checks this derivation on every proof: it reproduces each growing component's log size in the claim, and the remaining fixed-size components come to the same cell count in every run.
 
 ### Calibration against StarkWare's reference verifiers
 
-The two CI commands, run from `stwo_cairo_verifier/` with `--profile proving`, execute in exactly the CI's step counts. The `stwo_cairo_verifier` run was then proved:
+The two CI commands, run from `stwo_cairo_verifier/` with `--profile proving`, execute in exactly the CI's step counts; the script asserts both. The `stwo_cairo_verifier` run was then proved:
 
-| Program | Steps | Prove + verify (s) | Steps/s | Peak RSS (GiB) | Peak footprint (GiB) | Trace cells | Load avg | Status |
-|---|---:|---:|---:|---:|---:|---:|---|---|
-| `stwo_cairo_verifier` (`qm31_opcode`) | 18,152,624 | 48.6 | 373,204 | 19.2 | 32.5 | 1,939,445,536 | 3.0/4.0/5.2 | verified |
-| `stwo_circuit_verifier` (`qm31_opcode`) | 1,982,220 | executed only | | | | | | |
+| Program | Steps | Max memory address | Time (s) | Steps/s | Trace cells | Cells/step | Peak RSS (GiB) | Peak footprint (GiB) | Load avg | Status |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---|---|
+| `stwo_cairo_verifier` (`qm31_opcode`) | 18,152,624 | 18,556,598 | 48.6 | 373,204 | 1,939,445,536 | 107 | 19.2 | 32.5 | 3.0/4.0/5.2 | verified |
+| `stwo_circuit_verifier` (`qm31_opcode`) | 1,982,220 | 1,953,362 | executed only | | | | | | | |
 
-- **It agrees with StarkWare's "about 1 minute".** One M3 Max proves the Cairo verifier in 48.6 s, verification included.
+- **It agrees with StarkWare's "about 1 minute".** One M3 Max runs `run_and_prove` on the Cairo verifier in 48.6 s, VM run, adaptation and verification included.
 - **It only just fits.** The peak footprint is 32.5 GiB, and swap grew from 22.5 to 33.2 GiB during the run, so the time may be inflated.
-- **Steps/s depends on the opcode mix.** The verifier runs at 373k steps/s with 107 trace cells per step. At their largest N, the microbenchmarks run at 33k steps/s for BLAKE2s (1,352 cells per step), 249k for QM31 (126) and 435k for M31 ingestion (94).
+- **Steps/s depends on the opcode mix.** The verifier runs at 373k steps/s with 107 trace cells per step over the whole run. At their largest N, the microbenchmarks' whole runs reach 36k steps/s for BLAKE2s (1,447 cells per step), 265k for QM31 (143) and 362k for M31 ingestion (116).
+
+**The three ops are about half of a real verifier.** Applying the unit costs to the verifier's own op counts (22,925 `blake_compress_opcode`; 610,391 `qm_31_add_mul_opcode`, i.e. 305,196 mul-adds; 270,641 argument felts) predicts:
+
+| | Measured | Modelled from the three ops | Measured / modelled |
+|---|---:|---:|---:|
+| Steps | 18,152,624 | 7,363,494 | 2.47 |
+| Max memory address | 18,556,598 | 6,223,777 | 2.98 |
+| `MemoryAddressToId` uses | 71,827,552 | 39,277,054 | 1.83 |
+| Trace cells | 1,939,445,536 | 1,324,131,001 | 1.46 |
+| Time (s) | 48.6 | 24.4 | 1.99 |
+
+The rest is AIR evaluation, channel draws, FRI folding, Merkle path walking and control flow. The extrapolation below gives both the modelled figures and the figures scaled by these ratios. The verifier checks a Cairo AIR proof, not a SASH one, so the ratios are an indication, not a bound.
 
 ### Extrapolation to TinyLlama (estimate)
 
 From `docs/EVM-GAS-MODEL.md` §1 (65,967,346 leaf M31s, 519,784 OODS values, 501,197 columns, 518,489 internal hashes) and §3 (4,641,448 BLAKE2s compressions). Assumed multipliers:
 - **BLAKE2s compressions** = leaf M31s / 16 + internal hashes. This reproduces §3's 4,641,448 exactly, and gives 525,665 for `head`.
-- **QM31 mul-adds** = leaf M31s × OODS values / committed columns: one per queried value and sample point, as `accumulate_row_quotients` (`verifier_core/src/pcs/quotients.cairo:263`) does. That is 1.037 sample points per column on average, 1.016 for `head`.
+- **QM31 mul-adds** = 100 query positions × (OODS values + two-sample columns), with two-sample columns = OODS values − columns: one per query position and (column, sample) pair, as `accumulate_row_quotients` (`verifier_core/src/pcs/quotients.cairo:263`) does. SASH proves with 100 queries. A periodicity sample is added to every column sampled at two points (`build_samples_with_randomness_and_periodicity`, which the pinned Cairo verifier mirrors at `quotients.cairo:79-100`), and no column has more than two. This is the count #38's SP1 model uses: 53,837,100 for all 23 segments, 7,063,600 for `head`.
 - **Ingested felts** = leaf M31s + 4 × OODS values + 8 × internal hashes. Each costs one M31 ingestion, including the 32-bit hash words.
 - **Costs add linearly.** Each segment is its own proof, so it pays once the largest of the three fixed costs.
 
-| Workload | BLAKE2s | QM31 mul-adds | Ingested felts | Steps | Trace cells | Prove time: BLAKE2s / QM31 / ingestion / fixed (s) | Prove time | Peak footprint |
+| Workload | BLAKE2s | QM31 mul-adds | Ingested felts | Steps | Trace cells | Time, fit: BLAKE2s / QM31 / ingestion / fixed (s) | Time, modelled ops (s) | Time, scaled by the calibration (s) |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
-| Per inference (23 proofs) | 4,641,448 | 68,413,759 | 72,194,394 | 2,417,152,085 | 3.29 × 10^11 | 1,655 / 663 / 2,582 / 132 | 5,033 s (~84 min) | see `head` |
-| `head`, the largest segment | 525,665 | 8,227,075 | 8,533,469 | 286,512,720 | 3.85 × 10^10 | 187 / 80 / 305 / 6 | 578 s | ~377 GiB |
+| Per inference (23 proofs) | 4,641,448 | 53,837,100 | 72,194,394 | 1,722,983,681 | 1.99 × 10^11 unpadded | 1,639 / 632 / 2,117 / 111 | 4,499–4,990 (75–83 min) | 8,960 (~149 min) |
+| `head`, the largest segment | 525,665 | 7,063,600 | 8,533,469 | 208,937,170 | 3.31 × 10^10 padded (2.30 × 10^10 unpadded) | 186 / 83 / 250 / 5 | 524–830 | 1,043 |
+
+- **The time is a range.** Its low end uses the fits, the next the marginal slopes between the two largest N (4,969 s per inference, 579 s for `head`), and the high end the trace cells times the 25.1 ns per padded cell of the largest proof measured, the calibration (4,990 s on unpadded cells per inference, 830 s for `head`). The fits imply 383k–399k steps/s and 15.8 ns per padded cell for `head`, faster than every measured run, so they are the floor. The per-inference cells are unpadded because the model doesn't have each segment's op counts.
+- **The scaled column** multiplies the fit-based time by the calibration's measured / modelled time (1.99), for the work the three ops leave out.
+- **Ingestion dominates,** at about 47% of the fit-based time, against 36% for BLAKE2s and 14% for QM31.
 
 Checks for `head`:
 
-| Check | Estimate | Bound |
-|---|---:|---|
-| Cairo memory, execution plus ingested arguments | 243,626,454 addresses (2^27.86) | `LOG_MEMORY_ADDRESS_BOUND = 29` (`crates/common/src/memory.rs:2`): 536,870,912 |
-| Largest relation total uses, `MemoryAddressToId` | 1,305,486,035 (0.61 P) | below P (`crates/cairo-air/src/verifier.rs:63-66`) |
-| Largest component | `memory_id_to_small` and `blake_g`, log size 27 (93.1M and 67.3M padded rows) | |
-| Steps | 286,512,720 (2^28.09) | |
+| Check | Modelled ops only | Scaled by the calibration | Bound |
+|---|---:|---:|---|
+| Cairo memory, execution plus ingested arguments | 175,747,825 addresses (2^27.39) | 524,003,588 (2^28.97) | `LOG_MEMORY_ADDRESS_BOUND = 29` (`crates/common/src/memory.rs:2`): 536,870,912 |
+| Largest relation total uses, `MemoryAddressToId` | 1,086,725,042 (0.51 P) | 1,987,338,445 (0.93 P) | below P (`crates/cairo-air/src/verifier.rs:63-66`) |
+| Steps | 208,937,170 (2^27.64) | 515,075,845 (2^28.94) | |
+| Largest component | log size 26: `add_opcode_small` (51.3M rows), `blake_g` (42.1M), `assert_eq_opcode_double_deref` (34.7M), `jnz_opcode_taken` (33.7M) | | |
+| Memory tables | `memory_id_to_small` full at 2^24 values; 76.8M big values in three `memory_id_to_big` tables (2^25, 2^25 and 9.6M rows) | | |
+| Peak footprint | ~310 GiB | | |
 
 - **What the estimate covers.**
-  - It counts hashing, quotient accumulation and ingestion only. It excludes AIR evaluation, the out-of-domain evaluation of SASH's 20k–68k-column constraints that a real SASH verifier adds, and the mixed-degree Merkle tree walk. It also excludes the GKR verification, channel draws and FRI folding.
-  - It assumes per-op costs stay linear from the measured sizes (at most 2^23 rows) up to 2^27 rows. FFT and commitment costs grow as n log n, so the time is a floor.
-- **Ingestion dominates,** at about 51% of the time, against 33% for BLAKE2s and 13% for QM31.
-- **`head` passes both checks,** with a factor of 2.2 to spare on memory addresses and 1.6 on relation uses.
-- **`head` doesn't fit this machine.** Its ~377 GiB footprint is about 10x its RAM. The per-inference time is what M3-Max-class cores would take with enough memory: an estimate, not a run on this machine. Splitting a segment's verification across several proofs would lower the footprint and add fixed costs.
-- **Trace-length bound, unchecked context.** arXiv 2606.04311 (https://arxiv.org/pdf/2606.04311) reports a 2^29 + 1 trace-length bound for the S-two AIR. The `head` estimate, 2^28.09 steps with components at 2^27, would sit below it.
+  - The modelled column counts hashing, quotient accumulation and ingestion only. It excludes AIR evaluation, the out-of-domain evaluation of SASH's 20k–68k-column constraints that a real SASH verifier adds, and the mixed-degree Merkle tree walk. It also excludes the GKR verification, channel draws and FRI folding.
+  - It assumes per-op costs stay linear from the measured sizes (at most 2^23 rows) up to 2^26 rows. FFT and commitment costs grow as n log n.
+- **The modelled ops pass both checks** with a factor of 3.1 to spare on memory addresses and 2.0 on relation uses.
+- **Scaled by the calibration, `head` has no margin left:** 0.98 of the memory-address bound and 0.93 P. A SASH verifier spends more on AIR evaluation than the Cairo verifier does, so a single `head` proof would probably cross a bound. Its verification would likely need splitting across several proofs, each paying the fixed cost again.
+- **`head` doesn't fit this machine.** Its ~310 GiB footprint (modelled ops only) is about 9x its RAM. The per-inference time is what M3-Max-class cores would take with enough memory: an estimate, not a run on this machine.
+- **Trace-length bound, unchecked context.** arXiv 2606.04311 (https://arxiv.org/pdf/2606.04311) reports a 2^29 + 1 trace-length bound for the S-two AIR. The `head` estimate, 2^27.64 steps (2^28.94 scaled) with components at 2^26, would sit below it.
 
 ### Security parameters differ
 
@@ -260,6 +280,8 @@ stwo-cairo's default proves at 96 bits with 70 queries and `pow_bits 26`. SASH's
   - `crates/prover/src/prover.rs:409-424` (default proving parameters);
   - `crates/cairo-air/src/components/` (`blake_compress_opcode.rs`, `blake_round.rs`, `blake_g.rs`, `triple_xor_32.rs`, `qm_31_add_mul_opcode.rs`);
   - `crates/common/src/memory.rs:2` (`LOG_MEMORY_ADDRESS_BOUND`) and `crates/cairo-air/src/verifier.rs:63-66` (relation uses below P);
+  - memory table limits: `crates/cairo-air/src/components/memory_address_to_id.rs:29` (16 addresses per row), `crates/adapter/src/memory.rs:66` (2^24 small values), `crates/common/src/preprocessed_columns/preprocessed_trace.rs:20` (`MAX_SEQUENCE_LOG_SIZE = 25`, the `memory_id_to_big` table size);
+  - `stwo_cairo_verifier/crates/verifier_core/src/pcs/quotients.cairo` (`accumulate_row_quotients`, periodicity samples);
   - `crates/adapter/src/lib.rs` (`PublicSegmentContext::bootloader_context`, all 11 builtins);
   - `.github/workflows/cairo-ci.yaml:136-153` (reference verifier step counts).
 - S-two AIR trace-length bound (2^29 + 1, unchecked): https://arxiv.org/pdf/2606.04311
