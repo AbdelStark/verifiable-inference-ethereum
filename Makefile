@@ -78,6 +78,7 @@ sp1-check: sp1-vendor
 	cd sp1 && cargo test --locked --workspace
 	cd sp1 && cargo test --locked -p sp1-host --features profiling
 	cd sp1 && cargo clippy --locked --workspace --all-targets -- -D warnings
+	cd sp1 && cargo clippy --locked -p sp1-host --all-targets --features profiling -- -D warnings
 
 sp1-docker: sp1-vendor
 	cd sp1/segment-guest && cargo prove build --docker --tag v6.10.0 --locked --workspace-directory ../..
