@@ -1,4 +1,4 @@
-.PHONY: help check rust-check vectors forge-test anvil-demo clean
+.PHONY: help check rust-check vectors forge-test anvil-demo bundles-check clean
 
 help:
 	@echo "Targets:"
@@ -7,6 +7,8 @@ help:
 	@echo "  make vectors     - Regenerate contracts/src/sash/TinyLlamaFixture.sol from the Rust TinyLlama fixture"
 	@echo "  make forge-test  - Check Solidity format, build against foundry.lock, lint, run the Foundry suite with gas report, and check the gas snapshots against the index"
 	@echo "  make anvil-demo  - Mine the dev-mode TinyLlama-1.1B 23-segment settlement (DeployDevAnvil.s.sol) on a local Osaka anvil node, check the receipts and print their gas"
+	@echo "  make bundles-check"
+	@echo "                  - Check the 69 TinyLlama proof bundle files in BUNDLES (default runs/tinyllama) against sp1/pins/tinyllama.sha256"
 	@echo "  make clean       - Clean build outputs"
 
 rust-check:
@@ -36,6 +38,13 @@ check: rust-check
 
 anvil-demo:
 	contracts/script/anvil-settle.sh
+
+BUNDLES ?= runs/tinyllama
+
+bundles-check:
+	@test "$$(ls "$(BUNDLES)" | wc -l | tr -d ' ')" = 69 || { echo "ERROR: $(BUNDLES) must hold exactly the 69 pinned bundle files"; exit 1; }
+	cd "$(BUNDLES)" && shasum -a 256 --strict --quiet -c "$(CURDIR)/sp1/pins/tinyllama.sha256"
+	@echo "OK: the 69 bundle files in $(BUNDLES) match sp1/pins/tinyllama.sha256"
 
 clean:
 	cargo clean
