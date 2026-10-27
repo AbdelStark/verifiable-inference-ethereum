@@ -13,7 +13,7 @@ struct Run {
     public_values: Vec<u8>,
     stderr: String,
     cycles: u64,
-    gas: Option<u64>,
+    gas: u64,
 }
 
 fn run(ids: &[u32]) -> Run {
@@ -33,7 +33,7 @@ fn run(ids: &[u32]) -> Run {
         public_values: public_values.to_vec(),
         stderr: stderr_rx.borrow().clone(),
         cycles: report.total_instruction_count(),
-        gas: report.gas(),
+        gas: report.gas().expect("calculate_gas(true) reports PGU"),
     }
 }
 
@@ -43,7 +43,7 @@ fn commits_spec_token_hash_for_fixture_tok_in() {
     assert_eq!(run.exit_code, 0, "stderr: {}", run.stderr);
     assert_eq!(hex::encode(&run.public_values), SPEC_TOK_IN_HASH);
     println!(
-        "token-hash guest on the fixture tokIn: {} cycles, {:?} PGU",
+        "token-hash guest on the fixture tokIn: {} cycles, {} PGU",
         run.cycles, run.gas
     );
 }

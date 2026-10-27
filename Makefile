@@ -51,9 +51,9 @@ anvil-demo:
 
 SP1_IMAGE := ghcr.io/succinctlabs/sp1:v6.10.0
 
+# Tests before clippy: they build the guest ELF, which sp1-build skips under clippy but `include_elf!` needs.
 sp1-check:
 	cd sp1 && cargo fmt -- --check
-	# Tests first: they build the guest ELF, which sp1-build skips under clippy but `include_elf!` needs.
 	cd sp1 && cargo test --locked --workspace
 	cd sp1 && cargo clippy --locked --workspace --all-targets -- -D warnings
 
@@ -63,4 +63,6 @@ sp1-docker:
 
 clean:
 	cargo clean
-	rm -rf contracts/out contracts/cache sp1/target
+	rm -rf contracts/out contracts/cache
+	@# The Docker guest build runs as root, so on Linux its output under sp1/target can only be removed from a container.
+	rm -rf sp1/target 2>/dev/null || docker run --rm -v "$(CURDIR)/sp1:/sp1" --entrypoint rm $(SP1_IMAGE) -rf /sp1/target
