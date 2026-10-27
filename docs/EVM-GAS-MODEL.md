@@ -1,6 +1,6 @@
 # TinyLlama-1.1B SASH Sizing and EVM Gas Model
 
-Every gas figure here is an estimate until a milestone measures it: M1 measures the grid path and dev-mode settlement, M3 the SP1 verifier and the aggregated settlement.
+M1 has measured the grid path and the dev-mode settlement (§4). Every other gas figure here is an estimate until a milestone measures it: M3 the SP1 verifier and the aggregated settlement.
 
 ## 1. TinyLlama-1.1B SASH proof sizes
 
@@ -45,19 +45,53 @@ These figures derive from the §1 sizes, so they share their provenance.
    - Calldata floor alone under Osaka: ~10.53 billion gas, ~627x the cap.
 3. **One segment, `B0L0`** (`13,450,043` B): the Osaka calldata floor alone is ~477.5 million gas, ~28.5x the cap.
 
-## 4. Aggregated settlement gas breakdown (estimates, Osaka)
+## 4. Measured dev-mode settlement (Osaka)
 
-One transaction carrying `SegmentClaim[23]`, the four token arrays and one wrapped SP1 proof (7,492 B of ABI calldata with a 260 B Groth16-sized proof: 3,417 non-zero and 4,075 zero bytes). The floor is ~198,400 gas (~177,400 for the calldata plus the 21,000 intrinsic cost), below the table's ~409,100 total, so it does not bind.
+M1 measures the grid path and the dev-mode settlement on Foundry 1.8.6 (`evm_version = "osaka"`). Two sources, which agree on `verifyAndSettle`:
+- **anvil receipts:** `make anvil-demo` mines `DeployDevAnvil.s.sol` on `anvil --hardfork osaka --enable-tx-gas-limit` and prints this table.
+- **forge snapshots:** `contracts/snapshots/*.json`, which `make check` regenerates and compares with the commit. Under `isolate = true`, the `verifyAndSettle` snapshot is the whole transaction and equals its receipt.
 
-| Component | Gas (estimate) | Measured at |
+| Transaction (anvil receipt, Osaka, Foundry 1.8.6) | `gasUsed` | Gas limit | Calldata |
+|---|---:|---:|---:|
+| `SashModelRegistry` deployment | 291,752 | 379,277 | 1,292 B |
+| `SashModelRegistry.enrollModel` | 92,065 | 134,644 | 164 B |
+| `DevTranscriptSegmentVerifier` deployment | 223,223 | 290,189 | 837 B |
+| `VerifiableInferenceSettlement` deployment | 872,019 | 1,133,624 | 4,293 B |
+| `VerifiableInferenceSettlement.verifyAndSettle` | 201,052 | 277,702 | 7,236 B |
+
+**The settle transaction under `EIP-7623`.** Its calldata is 7,236 B: 4,048 zero and 3,188 non-zero bytes.
+
+| Part | Gas |
+|---|---:|
+| Intrinsic | 21,000 |
+| Standard calldata: 4 × 4,048 + 16 × 3,188 | 67,200 |
+| Execution: receipt − intrinsic − standard calldata | 112,852 |
+| **`gasUsed`** | **201,052** |
+| Floor: 21,000 + 10 × 4,048 + 40 × 3,188 | 189,000 |
+
+The floor doesn't bind, but it is only 12,052 gas below `gasUsed`: calldata, not execution, dominates the dev-mode settlement.
+
+| Component of the settle execution (Osaka, Foundry 1.8.6) | Gas | Source |
+|---|---:|---|
+| `SashModelRegistry.getManifest` | 7,080 | forge snapshot |
+| `SashGridVerifier.verifyGrid`: count and indices, `manifestRootsHash` (sha256 over 23 × 64 B), 22 residual links, prompt, teacher-forcing loop, answer and EOS | 37,106 | forge snapshot (`pure` harness) |
+| `SashGridVerifier.computePublicDigest`: sha256 over the 23 claims, `sha256(tokIn)`, `sha256(tokOut)` | 27,832 | forge snapshot (`pure` harness) |
+| Rest of `verifyAndSettle` (derived: 112,852 − the rows above): `runId` and prompt / answer hashes, the verifier calls, calldata decoding, the `settledRuns` cold `SSTORE` and the `InferenceVerified` event | 40,834 | derived |
+
+The harness snapshots include their own ABI decoding, so the split between rows is approximate. The total is the measured receipt.
+
+## 5. Aggregated settlement gas breakdown (Osaka)
+
+One transaction carrying `SegmentClaim[23]`, the four token arrays and one wrapped SP1 proof: 7,492 B of ABI calldata with a 260 B Groth16-sized proof, 3,417 non-zero and 4,075 zero bytes. The SP1 verifier is an estimate until M3 measures it; the rest is the measured dev-mode settlement (§4).
+
+| Component | Gas | Source |
 |---|---:|---|
 | Intrinsic tx gas | 21,000 | — |
-| Calldata (standard, 7,492 B) | ~71,000 | M3 |
-| `SashModelRegistry` manifest check (`sha256` + `SLOAD`) | ~5,500 | M1 |
-| `SashGridVerifier`: 22 residual boundary links + token loop + EOS | ~14,000 | M1 |
-| `publicDigest` token hashes: `sha256(tokIn)` + `sha256(tokOut)` | ~2,000 | M1 |
-| `Sp1SashSegmentVerifier` (BN254 wrap: ~270k Groth16, ~300k PLONK; chosen at M3 start) | ~270,000 | M3 |
-| `settledRuns[runId]` cold `SSTORE` + `InferenceVerified` event | ~25,600 | M1 |
-| **Total single-tx gas** | **~409,100** (2.4% of `EIP-7825`) | M3 |
+| Standard calldata: 4 × 4,075 + 16 × 3,417 | 70,972 | computed |
+| Dev-mode settle execution, 112,852, less the dev verifier's ~1,000 | ~111,850 | measured (§4) |
+| `Sp1SashSegmentVerifier` (BN254 wrap: ~270k Groth16, ~300k PLONK; chosen at M3 start) | ~270,000 | estimate, M3 measures it |
+| **Total single-tx gas** | **~473,800** (~2.8% of `EIP-7825`) | estimate, M3 measures it |
+
+The floor, 21,000 + 10 × 4,075 + 40 × 3,417 = 198,430 gas, is below the total, so it doesn't bind.
 
 Under Amsterdam the cold `SSTORE` alone rises to ~110,000 gas (§2); M1 and M3 record the Amsterdam figures.
