@@ -53,8 +53,9 @@ SP1_IMAGE := ghcr.io/succinctlabs/sp1:v6.10.0
 
 sp1-check:
 	cd sp1 && cargo fmt -- --check
-	cd sp1 && cargo clippy --locked --workspace --all-targets -- -D warnings
+	# Tests first: they build the guest ELF, which sp1-build skips under clippy but `include_elf!` needs.
 	cd sp1 && cargo test --locked --workspace
+	cd sp1 && cargo clippy --locked --workspace --all-targets -- -D warnings
 
 sp1-docker:
 	cd sp1/segment-guest && cargo prove build --docker --tag v6.10.0 --locked --workspace-directory ../..

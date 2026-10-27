@@ -105,12 +105,13 @@ jobs:
       - name: Format check
         working-directory: sp1
         run: cargo fmt -- --check
-      - name: Clippy
-        working-directory: sp1
-        run: cargo clippy --locked --workspace --all-targets -- -D warnings
+      # Tests before clippy: they build the guest ELF, which sp1-build skips under clippy but `include_elf!` needs.
       - name: Executor tests (token-hash guest, SPEC.md §1.1 rule 1)
         working-directory: sp1
         run: cargo test --locked --workspace
+      - name: Clippy
+        working-directory: sp1
+        run: cargo clippy --locked --workspace --all-targets -- -D warnings
       - name: Reproducible guest build in the pinned SP1 Docker image
         working-directory: sp1/segment-guest
         run: |
