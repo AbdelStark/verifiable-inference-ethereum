@@ -35,8 +35,7 @@
 |     +--> 3. [SashGridVerifier.sol]                                      |
 |               - Verifies 23 (preRoot, modelRoot) pairs == manifest      |
 |               - Verifies 22 residual links: outRoot[L] == inRoot[L+1]   |
-|               - Replays [Blake2sM31Channel.sol] on B0L0 & head          |
-|               - Verifies [QM31.sol] hornerAsc(tokIn) & hornerDesc       |
+|               - Hashes tokIn & tokOut into publicDigest (sha256)        |
 |               - Verifies prompt prefix, autoregressive loop, and EOS    |
 +-------------------------------------------------------------------------+
 ```
@@ -45,7 +44,7 @@
 
 A naive zkVM wrapper would collapse the entire 23-segment LLM run into a single opaque boolean (`true`) inside the RISC-V guest. While slightly cheaper in calldata (~3.5 KiB saved), opaque aggregation hides protocol structure from on-chain contracts and concentrates 100% of binding logic inside off-chain guest code.
 
-By keeping **manifest admission, 22-layer residual Merkle root chaining, `Blake2sM31Channel` `w_residual_stream` derivation, `QM31` Horner evaluation, prompt/response slicing, teacher-forcing loop closure, and EOS checking** native in Solidity (~185k gas total):
+By keeping **manifest admission, 22-layer residual Merkle root chaining, the sha256 `publicDigest` over the segment claims and both token vectors, prompt/response slicing, teacher-forcing loop closure, and EOS checking** native in Solidity (~22k gas total, estimated):
 1. Smart contracts inspect and bind per-layer `modelRoot` and `preRoot` commitments directly on-chain.
 2. Any bug in token indexing, prompt prefix slicing, or boundary chaining is prevented by small, auditable, unconditional EVM code.
 3. The segment proof interface (`ISashSegmentVerifier`) becomes completely modular: swapping BN254 Groth16 (`Sp1SashSegmentVerifier`) for RISC Zero requires **zero** changes to `SashModelRegistry`, `SashGridVerifier`, or downstream consumer contracts.

@@ -1,64 +1,75 @@
 # Protocol and Contract Specification (`SPEC.md`)
 
-Version: `0.1.0` (2026-10-26)
+Version: `0.2.0` (2026-10-27)
 Pinned upstream SASH revision: `sg-ai-safety-hub/zk-inference-prover @ eb95bfa887299d1637550228d42086c27cbb2b3b`
-Pinned upstream Circle STARK core: `AntChainOpenLabs/NitrooZK-stwo @ 41c2a05bdb1fc3e3762bc7804108e8bc269bb6fc`
+Stwo as run by SASH: the vendored `nitroo/` copy in `zk-inference-prover @ eb95bfa`. It equals `AntChainOpenLabs/NitrooZK-stwo @ 41c2a05bdb1fc3e3762bc7804108e8bc269bb6fc` for the field, channel, Merkle and FRI primitives, and differs in `nitroo/crates/stwo/src/core/pcs/verifier.rs`, `nitroo/crates/stwo/src/core/verifier.rs`, `nitroo/crates/stwo/src/core/air/components.rs` and `nitroo/crates/constraint-framework`.
 
-## 1. Field tower (`M31`, `CM31`, `QM31`)
+## 1. Proved statement and settlement digests
 
-1. **`M31`:** Prime modulus $P = 2^{31} - 1 = 2,147,483,647$ (`0x7fffffff`). Canonical elements satisfy $0 \le x < P$. Calldata decoders MUST revert with `NonCanonicalM31(uint32 value)` on any limb $\ge P$.
-2. **`CM31`:** $M_{31}[i]/(i^2 + 1)$, pair `(a0, a1)` with $(a_0 + a_1 i)(b_0 + b_1 i) = (a_0 b_0 - a_1 b_1) + (a_0 b_1 + a_1 b_0)i \pmod P$.
-3. **`QM31` (`SecureField`):** $CM_{31}[u]/(u^2 - (2 + i))$, quadruple `(a0, a1, b0, b1)` representing $(a_0 + a_1 i) + (b_0 + b_1 i)u$. Multiplication uses $u^2 = 2 + i$: for $x = (x_0, x_1) \in CM_{31}$, $(2 + i)x = (2 x_0 - x_1, x_0 + 2 x_1) \pmod P$. Little-endian byte encoding writes `le32(a0) || le32(a1) || le32(b0) || le32(b1)` (16 bytes).
+This section is the requirement the M2 segment guests and the M3 aggregator guest must meet. Neither guest exists yet. The contracts already implement their side of it (§1.3, §2).
 
-## 2. `Blake2sM31Hasher` and `Blake2sM31Channel`
+### 1.1 Segment guests (M2)
 
-SASH instantiates `Blake2sM31Channel` and `Blake2sM31MerkleChannel` (`IS_M31_OUTPUT = true`), **not** unreduced `Blake2sChannel`:
+Each segment guest runs SASH's unmodified `verify_composed` at `eb95bfa` on one segment and accepts only if `Verdict::accepts()` holds, which requires `embed_tok_ok && head_tok_ok` (`prover/src/compose.rs`). In addition, the guest MUST:
 
-1. **`blake2s256(data) -> [u8; 32]`:** Unkeyed RFC 7693 `BLAKE2s-256` (`IV[0] ^ 0x01010020 = 0x6b08e647`, 10 rounds, 64-byte blocks).
-2. **`reduce_to_m31(raw32) -> [u8; 32]`:** Unpack `raw32` into eight little-endian `u32` words $w_0 \dots w_7$, replace each $w_j \gets w_j \bmod P$, and pack back to 32 little-endian bytes.
-3. **Merkle node hashing (`Blake2sMerkleHasherGeneric<true>::hash_node`):**
-   - Leaf-only node: `reduce_to_m31(blake2s256(le32(col_0) || ... || le32(col_{k-1})))`.
-   - Internal binary node without column values: `reduce_to_m31(blake2s256(left_hash32 || right_hash32))`.
-   - Mixed internal node with column values: `reduce_to_m31(blake2s256(left_hash32 || right_hash32 || le32(col_0) || ...))`.
-4. **Channel mixing and drawing:**
-   - Initial state: `digest = [0u8; 32]`, `n_draws = 0u32`.
-   - `mix_root(root32)`: `digest = reduce_to_m31(blake2s256(digest || root32))`; `n_draws = 0`.
-   - `mix_felts(felts)`: `digest = reduce_to_m31(blake2s256(digest || le_qm31_bytes(felts)))`; `n_draws = 0`.
-   - `draw_base_felts() -> [M31; 8]`: Loop with `msg = digest (32 B) || le32(n_draws) (4 B) || 0x00 (1 B)`, `n_draws += 1`, `raw = blake2s256(msg)` (unreduced!). Unpack eight LE `u32` words; if all 8 satisfy $w_j < 2P = 4,294,967,294$ (`0xfffffffe`), return `[w_j % P]`; else retry.
-   - `draw_secure_felts(n) -> Vec<QM31>`: Draw $\lceil 4n / 8 \rceil$ batches of 8 base felts, truncate to $4n$, and group into `QM31` quadruples. Note that `draw_secure_felts(2)` consumes **1** batch of 8 `M31`s.
+1. **Reject any token id `>= P`** (`P = 2^31 - 1`) in the `tok_in` or `tok_out` vector it checks. SASH maps ids to field elements with `M31::from_u32_unchecked` (`m31_u32`, `prover/src/common.rs`), so an id `>= P` would alias a canonical id in the token Horner sum.
+2. **Output its segment claim** (§1.3) and, on `B0L0`, `tokenHash(tok_in)` of the exact vector its `embed_tok_ok` check used; on `head`, `tokenHash(tok_out)` of the exact vector its `head_tok_ok` check used.
 
-## 3. SASH Fiat-Shamir `w_residual_stream` and Horner token bindings
+### 1.2 Aggregator guest (M3) and settlement
 
-For a SASH segment with fixed security parameters `(pow_bits = 0, log_blowup = 1, n_queries = 100, log_last_layer = 0, line_fold_step = 1, lifting_log_size = 0)`:
+The aggregator verifies all `N` segment proofs and commits `publicDigest` (§1.3), built from the segment claims and the two token hashes from §1.1. The BN254 wrapper's public values are exactly the 32 bytes of `publicDigest`.
 
-1. `ch = Blake2sM31Channel::default()`
-2. `ch.mix_felts([QM31(0, 1, 100, 0), QM31(1, 0, 0, 0)])`
-3. `ch.mix_root(pre_root)`; `ch.mix_root(model_root)`; `ch.mix_root(trace_root)`
-4. Repeat `relation_draws` times: `ch.draw_secure_felts(2)` (`29` on `B0L0`, `24` on `head` for TinyLlama-1.1B `y-attnout-w12`).
-5. `f = ch.draw_secure_felts(5)`; `w_residual_stream = f[3]`.
-6. Token polynomial bindings:
-   - Segment `0` (`B0L0`, ascending): $\text{embed\_tok} = \sum_{k=0}^{S-1} \text{tok\_in}[k] \cdot w^{S-1-k} \in QM_{31}$.
-   - Segment `N-1` (`head`, descending): $\text{head\_tok} = \sum_{k=0}^{S-1} \text{tok\_out}[k] \cdot w^{k} \in QM_{31}$.
+`VerifiableInferenceSettlement` recomputes `publicDigest` from calldata (`modelId`, `segments`, `tokIn`, `tokOut`) and verifies the segment proof over it before any grid check. Any mutation of a segment claim, `tokIn` or `tokOut` therefore fails the segment-proof check: the SP1 proof with `Sp1SashSegmentVerifier`, or the dev tag with `DevTranscriptSegmentVerifier` (`chainid == 31337` only, no cryptographic binding).
 
-### Primary-source test vectors (`TinyLlama-1.1B-Chat-v1.0`, `y-attnout-w12`, `S = 32`)
+`publicDigest` does not fix where the prompt ends: `runId` (§1.3) binds the caller's `promptIds` / `answerIds` split, so one proof settles once per split that passes the grid checks (prompt lengths `19..32` for the TinyLlama fixture). Every split claims the same proved `tokIn` / `tokOut` forward pass, so no split claims more than the proof covers. Replay protection stays on `runId`: keying it on `publicDigest` would let anyone front-run a pending settlement under another split and block the intended one.
 
-- **`B0L0` (`segmentIndex = 0`, `relationDraws = 29`):**
-  - `preRoot`: `0x7da3534f535fe416c9d9aa0e8f765e3da5ac8c772d0ef35e6f303103c099466f`
-  - `modelRoot`: `0xa45136572e13045f3415eb12e82c437a0a83f276fb2699765b32f70c00c3de34`
-  - `traceRoot`: `0xd937eb517f80d61ed39333010dd9f12fc64a9a07d2706675d75dda2715dc6e57`
-  - `w_residual_stream`: `QM31(1259081484, 630063634, 1062868201, 1393098785)`
-  - `embed_tok`: `QM31(1205748927, 962712399, 1890095260, 1449788258)`
-- **`head` (`segmentIndex = 22`, `relationDraws = 24`):**
-  - `preRoot`: `0x3119373feaf0611ffaa7275ba4a6d031e33eeb3e2710ff41b1a9582431a8e73f`
-  - `modelRoot`: `0xe26a2e1be19e2b6d3f1ea17dc311e16c8fb1b523633e4e6a754720486220ce12`
-  - `traceRoot`: `0x8eeda8657770717a942bd218b852681bc76de5181169332bfa62586264b15a14`
-  - `w_residual_stream`: `QM31(1297757949, 994229370, 1478950871, 2099916732)`
-  - `head_tok`: `QM31(754377417, 2109312062, 1514847, 2019687017)`
+### 1.3 Encodings
 
-## 5. Solidity contract interfaces and 20 negative controls
+All hashes are `sha256`. `be16` / `be32` are big-endian `uint16` / `uint32`. sha256 is used rather than keccak256: keccak256 would save only an estimated ~2k gas per settlement.
 
-1. **`SashModelRegistry.sol`:** Enrolls `ModelManifest { uint16 numSegments; uint16 seqLen; uint32 eosTokenId; uint16 b0RelDraws; uint16 headRelDraws; bytes32 manifestRootsHash; bool active; }` where `manifestRootsHash = keccak256(abi.encodePacked(preRoot[0], modelRoot[0], ..., preRoot[N-1], modelRoot[N-1]))`.
-2. **`SashGridVerifier.sol`:** Verifies segment count, indices `0..N-1`, `manifestRootsHash`, 22 residual-stream boundary root equalities (`segments[i].residualOutRoot == segments[i+1].residualInRoot`), `segments[N-1].residualOutRoot == bytes32(0)`, `relationDraws` pin on `B0L0` and `head`, `Blake2sM31Channel.deriveWResidualStream` + `QM31.hornerAsc` / `hornerDesc` equalities, canonical `< P` checks on all tokens and `QM31` limbs, `promptIds` prefix match, autoregressive loop closure (`tokIn[P + j] == tokOut[P - 1 + j]`), `answerIds` match, and `tokOut[P + A - 2] == eosTokenId`.
-3. **`VerifiableInferenceSettlement.sol`:** Checks replay protection (`settledRuns[runId]`), checks `allowDevVerifier` against `segmentVerifier.verifierKind()`, verifies `segmentVerifier.verifyAggregatedSegments(publicDigest, proofBytes)` where `publicDigest = keccak256(abi.encode(modelId, segments))`, invokes `SashGridVerifier.verifyGrid`, records settlement, and emits `InferenceVerified`.
+- **Token ids:** `tokenHash(ids) = sha256(word(ids[0]) || ... || word(ids[k-1]))`, where `word(id)` is the 32-byte big-endian encoding of the `uint32` id (28 zero bytes, then `be32(id)`). This is Solidity's `sha256(abi.encodePacked(uint32[]))`. The same encoding gives `tokInHash = tokenHash(tokIn)`, `tokOutHash = tokenHash(tokOut)`, `promptHash = tokenHash(promptIds)` and `answerHash = tokenHash(answerIds)`.
+- **Segment claim** (`130` bytes): `claim(i) = be16(segmentIndex) || preRoot || modelRoot || residualInRoot || residualOutRoot`.
+- **`manifestRootsHash`** (`64 * N` bytes hashed): `sha256(preRoot[0] || modelRoot[0] || ... || preRoot[N-1] || modelRoot[N-1])`.
+- **`publicDigest`** (`100 + 130 * N` bytes hashed): `sha256(modelId || be32(N) || claim(0) || ... || claim(N-1) || tokInHash || tokOutHash)`.
+- **`runId`:** `sha256(modelId || publicDigest || promptHash || answerHash)`.
+- **`modelId`** (fixture convention): `sha256("<model>@<revision>:<profile>")`.
 
-All 20 negative controls (forged `modelRoot`, forged `preRoot`, out-of-order `segmentIndex`, broken residual boundary link, non-zero `head` out-root, mutated `tokIn` breaking `embed_tok`, mutated `tokOut` breaking `head_tok`, mutated `traceRoot` shifting `w_residual_stream`, wrong `relationDraws`, mismatched `promptIds`, broken teacher-forcing loop, missing `EOS`, mismatched `answerIds`, non-canonical `M31` in claim, non-canonical token ID, empty/wrong segment count, corrupted `publicDigest` / proof bytes, wrong `programVKey`, `DevTranscriptSegmentVerifier` on non-dev chain or `allowDevVerifier == false`, and duplicate `runId` replay) MUST revert deterministically in both Rust and Foundry test suites.
+### 1.4 TinyLlama values
+
+Taken from an unpublished SASH run that M2 checks against the proof bundles: `TinyLlama/TinyLlama-1.1B-Chat-v1.0 @ fe8a4ea1ffedaf415f4da2f062534de366a451e6`, profile `y-attnout-w12`, `N = 23`, `S = 32` (`25` prompt + `8` answer tokens ending at EOS `2`), prompt `"Name the capital of France in one short sentence."`, response `"The capital of France is Paris."`. `contracts/src/sash/TinyLlamaFixture.sol` is generated from `crates/sash-evm-primitives/src/tinyllama_fixture.rs` (`make vectors`).
+
+- `modelId` = `sha256("TinyLlama/TinyLlama-1.1B-Chat-v1.0@fe8a4ea1ffedaf415f4da2f062534de366a451e6:y-attnout-w12")` = `0x3def3a0832d3d82a82283200010c182132ac7d9eec681b772a95834f29e43c2a`
+- `manifestRootsHash` = `0xfd8ecd8c79795b3a79e426d60a912d0a8a160188539c9b12dd3803b249c55b26`
+- `tokInHash` = `0x3e683ee8603b85a4f5407e1af5f20a437ddadc9c098acc6aac357d533d3f32cb`
+- `tokOutHash` = `0x44c6f339d896d66ea25d0ca6e15214f596ef5c701db79be94232be51d29b6b1e`
+- `publicDigest` = `0x8c27cadf1bc21512bbb76eb63b23699b9af32d18b92d7cdf5a90a489b8000c6b`
+- `promptHash` = `0xb4d5730f21772191057fb4600dc73dfdf0350fab6996c7b12d1d1ca7b83b9ec1`
+- `answerHash` = `0xaed36ba9347820959ae88d81e8c45a733e404b199fb3c12a463e2301253934c8`
+- `runId` = `0x0f614a4f82d3c3656dc9b15b897a5b07f621b312f5e37ae58c42b7391223e430`
+
+## 2. Solidity contract interfaces and negative controls
+
+1. **`SashModelRegistry.sol`:** Enrolls `ModelManifest { uint16 numSegments; uint16 seqLen; uint32 eosTokenId; bytes32 manifestRootsHash; bool active; }`, with `manifestRootsHash` as in §1.3.
+2. **`SashGridVerifier.sol`:** Verifies the segment count, indices `0..N-1`, `manifestRootsHash`, the 22 residual-stream boundary root equalities (`segments[i].residualOutRoot == segments[i+1].residualInRoot`), `segments[N-1].residualOutRoot == bytes32(0)`, `tokIn.length == tokOut.length == seqLen`, the token window (`P + A - 1 == seqLen`), the `promptIds` prefix match, autoregressive loop closure (`tokIn[P + j] == tokOut[P - 1 + j]`), the `answerIds` match, and `tokOut[P + A - 2] == eosTokenId`. It does not range-check token ids: the guest statement covers them (§1.1).
+3. **`VerifiableInferenceSettlement.sol`:** Checks `allowDevVerifier` against `segmentVerifier.verifierKind()`, checks replay protection (`settledRuns[runId]`), verifies `segmentVerifier.verifyAggregatedSegments(publicDigest, proofBytes)` with `publicDigest` as in §1.3, invokes `SashGridVerifier.verifyGrid`, records settlement, and emits `InferenceVerified`.
+
+Negative controls (numbers 8, 9, 14 and 15 are retired and not reused):
+
+1. forged `modelRoot`;
+2. forged `preRoot`;
+3. out-of-order `segmentIndex`;
+4. broken residual boundary link;
+5. non-zero `head` out-root;
+6. mutated `tokIn`, submitted with the proof for the unmutated `publicDigest`;
+7. mutated `tokOut`, submitted with the proof for the unmutated `publicDigest`;
+10. mismatched `promptIds`;
+11. broken teacher-forcing loop;
+12. missing `EOS`;
+13. mismatched `answerIds`;
+16. wrong segment count;
+17. corrupted proof bytes;
+18. wrong `programVKey`;
+19. `DevTranscriptSegmentVerifier` on a non-dev chain or with `allowDevVerifier == false`;
+20. duplicate `runId` replay.
+
+All of them MUST revert deterministically in both Rust and Foundry test suites.

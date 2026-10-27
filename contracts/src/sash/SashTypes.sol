@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 pragma solidity ^0.8.38;
 
-import {QM31} from "../field/QM31.sol";
-
 /// @title SashTypes
 /// @notice Canonical data structures, verifier modes, and typed errors for SASH EVM settlement.
 library SashTypes {
@@ -15,21 +13,16 @@ library SashTypes {
         uint16 numSegments;
         uint16 seqLen;
         uint32 eosTokenId;
-        uint16 b0RelDraws;
-        uint16 headRelDraws;
         bytes32 manifestRootsHash;
         bool active;
     }
 
     struct SegmentClaim {
         uint16 segmentIndex;
-        uint16 relationDraws;
         bytes32 preRoot;
         bytes32 modelRoot;
-        bytes32 traceRoot;
         bytes32 residualInRoot;
         bytes32 residualOutRoot;
-        QM31.Elem tokenHornerClaim;
     }
 
     error ZeroOwner();
@@ -42,9 +35,6 @@ library SashTypes {
     error ManifestRootMismatch(bytes32 got, bytes32 expected);
     error ResidualBoundaryMismatch(uint256 linkIndex);
     error HeadMustNotCarryOutRoot();
-    error RelationDrawCountMismatch(uint256 segmentIndex, uint16 got, uint16 expected);
-    error EmbedTokenHornerMismatch();
-    error HeadTokenHornerMismatch();
     error InvalidSequenceLength();
     error InvalidTokenWindow();
     error PromptTokenMismatch(uint256 index);

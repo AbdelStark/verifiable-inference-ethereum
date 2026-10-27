@@ -1,20 +1,14 @@
-//! Reference SASH 23-segment grid, manifest, Fiat-Shamir channel, and Horner verifier.
+//! Reference SASH 23-segment grid checks and the sha256 settlement digests (`SPEC.md` §1).
 
 use sha2::{Digest, Sha256};
-
-use crate::channel::derive_sash_w_residual_stream;
-use crate::field::{P, QM31};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SegmentClaim {
     pub segment_index: u16,
-    pub relation_draws: u16,
     pub pre_root: [u8; 32],
     pub model_root: [u8; 32],
-    pub trace_root: [u8; 32],
     pub residual_in_root: [u8; 32],
     pub residual_out_root: [u8; 32],
-    pub token_horner_claim: QM31,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -22,8 +16,6 @@ pub struct ModelManifest {
     pub num_segments: u16,
     pub seq_len: u16,
     pub eos_token_id: u32,
-    pub b0_rel_draws: u16,
-    pub head_rel_draws: u16,
     pub manifest_roots_hash: [u8; 32],
 }
 
@@ -37,42 +29,48 @@ impl ModelManifest {
         hasher.finalize().into()
     }
 
-    pub fn from_segments(
-        segments: &[SegmentClaim],
-        seq_len: u16,
-        eos_token_id: u32,
-        b0_rel_draws: u16,
-        head_rel_draws: u16,
-    ) -> Self {
+    pub fn from_segments(segments: &[SegmentClaim], seq_len: u16, eos_token_id: u32) -> Self {
         Self {
             num_segments: segments.len() as u16,
             seq_len,
             eos_token_id,
-            b0_rel_draws,
-            head_rel_draws,
             manifest_roots_hash: Self::compute_roots_hash(segments),
         }
     }
 }
 
-/// Computes the canonical 32-byte `SHA-256` digest binding `model_id` and all `SegmentClaim`s
-/// (matches Solidity `VerifiableInferenceSettlement.computePublicDigest`).
-pub fn compute_public_digest(model_id: [u8; 32], segments: &[SegmentClaim]) -> [u8; 32] {
+/// `sha256` over token ids, each encoded as a 32-byte big-endian word
+/// (Solidity `sha256(abi.encodePacked(uint32[]))`).
+pub fn compute_token_hash(ids: &[u32]) -> [u8; 32] {
+    let mut h = Sha256::new();
+    for id in ids {
+        h.update([0u8; 28]);
+        h.update(id.to_be_bytes());
+    }
+    h.finalize().into()
+}
+
+/// `sha256(modelId || be32(n) || n * (be16(segmentIndex) || preRoot || modelRoot || residualInRoot
+/// || residualOutRoot) || tokenHash(tokIn) || tokenHash(tokOut))`
+/// (matches Solidity `SashGridVerifier.computePublicDigest`).
+pub fn compute_public_digest(
+    model_id: [u8; 32],
+    segments: &[SegmentClaim],
+    tok_in: &[u32],
+    tok_out: &[u32],
+) -> [u8; 32] {
     let mut h = Sha256::new();
     h.update(model_id);
     h.update((segments.len() as u32).to_be_bytes());
     for s in segments {
         h.update(s.segment_index.to_be_bytes());
-        h.update(s.relation_draws.to_be_bytes());
         h.update(s.pre_root);
         h.update(s.model_root);
-        h.update(s.trace_root);
         h.update(s.residual_in_root);
         h.update(s.residual_out_root);
-        for limb in s.token_horner_claim.to_u32_array() {
-            h.update(limb.to_be_bytes());
-        }
     }
+    h.update(compute_token_hash(tok_in));
+    h.update(compute_token_hash(tok_out));
     h.finalize().into()
 }
 
@@ -83,10 +81,6 @@ pub enum GridError {
     ManifestRootMismatch,
     ResidualBoundaryMismatch { link: usize },
     HeadMustNotCarryOutRoot,
-    RelationDrawCountMismatch { segment: usize },
-    NonCanonicalM31(u32),
-    EmbedTokenHornerMismatch,
-    HeadTokenHornerMismatch,
     InvalidSequenceLength,
     InvalidTokenWindow,
     PromptTokenMismatch { index: usize },
@@ -118,11 +112,6 @@ pub fn verify_sash_grid(
                 got: seg.segment_index,
             });
         }
-        for limb in seg.token_horner_claim.to_u32_array() {
-            if limb >= P {
-                return Err(GridError::NonCanonicalM31(limb));
-            }
-        }
     }
 
     if ModelManifest::compute_roots_hash(segments) != manifest.manifest_roots_hash {
@@ -139,13 +128,6 @@ pub fn verify_sash_grid(
         return Err(GridError::HeadMustNotCarryOutRoot);
     }
 
-    if segments[0].relation_draws != manifest.b0_rel_draws {
-        return Err(GridError::RelationDrawCountMismatch { segment: 0 });
-    }
-    if segments[last].relation_draws != manifest.head_rel_draws {
-        return Err(GridError::RelationDrawCountMismatch { segment: last });
-    }
-
     let s = manifest.seq_len as usize;
     if tok_in.len() != s || tok_out.len() != s {
         return Err(GridError::InvalidSequenceLength);
@@ -154,17 +136,6 @@ pub fn verify_sash_grid(
     let a_len = answer_ids.len();
     if p_len == 0 || a_len == 0 || p_len + a_len - 1 != s {
         return Err(GridError::InvalidTokenWindow);
-    }
-
-    for &t in tok_in
-        .iter()
-        .chain(tok_out.iter())
-        .chain(prompt_ids)
-        .chain(answer_ids)
-    {
-        if t >= P {
-            return Err(GridError::NonCanonicalM31(t));
-        }
     }
 
     for j in 0..p_len {
@@ -190,32 +161,6 @@ pub fn verify_sash_grid(
         });
     }
 
-    // Replay Fiat-Shamir channel on segment 0 (B0L0) and verify ascending Horner(tok_in).
-    let w_b0 = derive_sash_w_residual_stream(
-        segments[0].pre_root,
-        segments[0].model_root,
-        segments[0].trace_root,
-        segments[0].relation_draws,
-    );
-    let embed_horner =
-        QM31::horner_asc(tok_in, w_b0).map_err(|e| GridError::NonCanonicalM31(e.0))?;
-    if embed_horner != segments[0].token_horner_claim {
-        return Err(GridError::EmbedTokenHornerMismatch);
-    }
-
-    // Replay Fiat-Shamir channel on final segment (head) and verify descending Horner(tok_out).
-    let w_head = derive_sash_w_residual_stream(
-        segments[last].pre_root,
-        segments[last].model_root,
-        segments[last].trace_root,
-        segments[last].relation_draws,
-    );
-    let head_horner =
-        QM31::horner_desc(tok_out, w_head).map_err(|e| GridError::NonCanonicalM31(e.0))?;
-    if head_horner != segments[last].token_horner_claim {
-        return Err(GridError::HeadTokenHornerMismatch);
-    }
-
     Ok(())
 }
 
@@ -237,6 +182,42 @@ mod tests {
             &TINYLLAMA_ANSWER_IDS,
         )
         .expect("verified TinyLlama-1.1B 23-segment SASH proof must pass");
+    }
+
+    // TinyLlama values from `SPEC.md` §1.4.
+    #[test]
+    fn tinyllama_digests_match_spec() {
+        let segs = tinyllama_segments();
+        let manifest = tinyllama_manifest(&segs);
+        assert_eq!(
+            hex::encode(manifest.manifest_roots_hash),
+            "fd8ecd8c79795b3a79e426d60a912d0a8a160188539c9b12dd3803b249c55b26"
+        );
+        assert_eq!(
+            hex::encode(compute_token_hash(&TINYLLAMA_TOK_IN)),
+            "3e683ee8603b85a4f5407e1af5f20a437ddadc9c098acc6aac357d533d3f32cb"
+        );
+        assert_eq!(
+            hex::encode(compute_token_hash(&TINYLLAMA_TOK_OUT)),
+            "44c6f339d896d66ea25d0ca6e15214f596ef5c701db79be94232be51d29b6b1e"
+        );
+        assert_eq!(
+            hex::encode(compute_public_digest(
+                tinyllama_model_id(),
+                &segs,
+                &TINYLLAMA_TOK_IN,
+                &TINYLLAMA_TOK_OUT
+            )),
+            "8c27cadf1bc21512bbb76eb63b23699b9af32d18b92d7cdf5a90a489b8000c6b"
+        );
+        assert_eq!(
+            hex::encode(compute_token_hash(&TINYLLAMA_PROMPT_IDS)),
+            "b4d5730f21772191057fb4600dc73dfdf0350fab6996c7b12d1d1ca7b83b9ec1"
+        );
+        assert_eq!(
+            hex::encode(compute_token_hash(&TINYLLAMA_ANSWER_IDS)),
+            "aed36ba9347820959ae88d81e8c45a733e404b199fb3c12a463e2301253934c8"
+        );
     }
 
     #[test]
@@ -332,76 +313,6 @@ mod tests {
             );
         }
 
-        // 6. Mutated tok_in (with matching prompt_ids) caught by B0L0 Fiat-Shamir Horner check
-        {
-            let mut ti = TINYLLAMA_TOK_IN;
-            let mut pr = TINYLLAMA_PROMPT_IDS;
-            ti[0] = 530;
-            pr[0] = 530;
-            assert_eq!(
-                verify_sash_grid(
-                    &manifest,
-                    &base_segs,
-                    &ti,
-                    &TINYLLAMA_TOK_OUT,
-                    &pr,
-                    &TINYLLAMA_ANSWER_IDS
-                ),
-                Err(GridError::EmbedTokenHornerMismatch)
-            );
-        }
-
-        // 7. Mutated tok_out (before prompt window) caught by head Fiat-Shamir Horner check
-        {
-            let mut to = TINYLLAMA_TOK_OUT;
-            to[0] ^= 1;
-            assert_eq!(
-                verify_sash_grid(
-                    &manifest,
-                    &base_segs,
-                    &TINYLLAMA_TOK_IN,
-                    &to,
-                    &TINYLLAMA_PROMPT_IDS,
-                    &TINYLLAMA_ANSWER_IDS
-                ),
-                Err(GridError::HeadTokenHornerMismatch)
-            );
-        }
-
-        // 8. Mutated trace_root on B0L0 shifts w_residual_stream and breaks embed_tok
-        {
-            let mut s = base_segs.clone();
-            s[0].trace_root[0] ^= 0x01;
-            assert_eq!(
-                verify_sash_grid(
-                    &manifest,
-                    &s,
-                    &TINYLLAMA_TOK_IN,
-                    &TINYLLAMA_TOK_OUT,
-                    &TINYLLAMA_PROMPT_IDS,
-                    &TINYLLAMA_ANSWER_IDS
-                ),
-                Err(GridError::EmbedTokenHornerMismatch)
-            );
-        }
-
-        // 9. Wrong relation_draws on head
-        {
-            let mut s = base_segs.clone();
-            s[22].relation_draws = 25;
-            assert_eq!(
-                verify_sash_grid(
-                    &manifest,
-                    &s,
-                    &TINYLLAMA_TOK_IN,
-                    &TINYLLAMA_TOK_OUT,
-                    &TINYLLAMA_PROMPT_IDS,
-                    &TINYLLAMA_ANSWER_IDS
-                ),
-                Err(GridError::RelationDrawCountMismatch { segment: 22 })
-            );
-        }
-
         // 10. Public prompt_ids mismatch
         {
             let mut pr = TINYLLAMA_PROMPT_IDS;
@@ -470,40 +381,6 @@ mod tests {
                     &ans
                 ),
                 Err(GridError::AnswerTokenMismatch { index: 5 })
-            );
-        }
-
-        // 14. Non-canonical M31 limb in token_horner_claim
-        {
-            let mut s = base_segs.clone();
-            s[1].token_horner_claim = QM31::from_u32_unchecked(P, 0, 0, 0);
-            assert_eq!(
-                verify_sash_grid(
-                    &manifest,
-                    &s,
-                    &TINYLLAMA_TOK_IN,
-                    &TINYLLAMA_TOK_OUT,
-                    &TINYLLAMA_PROMPT_IDS,
-                    &TINYLLAMA_ANSWER_IDS
-                ),
-                Err(GridError::NonCanonicalM31(P))
-            );
-        }
-
-        // 15. Non-canonical token ID >= P
-        {
-            let mut pr = TINYLLAMA_PROMPT_IDS;
-            pr[0] = P;
-            assert_eq!(
-                verify_sash_grid(
-                    &manifest,
-                    &base_segs,
-                    &TINYLLAMA_TOK_IN,
-                    &TINYLLAMA_TOK_OUT,
-                    &pr,
-                    &TINYLLAMA_ANSWER_IDS
-                ),
-                Err(GridError::NonCanonicalM31(P))
             );
         }
 

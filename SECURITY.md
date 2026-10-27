@@ -8,7 +8,7 @@ When `VerifiableInferenceSettlement` accepts a run in `VerifierKind.ZKVM_GROTH16
 1. Every segment $i \in \{0, \dots, 22\}$ committed the exact `(preRoot[i], modelRoot[i])` enrolled in `SashModelRegistry` for `modelId`.
 2. Every segment passed SASH's `verify_composed` (`log_blowup = 1`, `n_queries = 100`, `pow_bits = 0`) with zero unsound skips or open requantize/dequantize seams.
 3. All 22 inter-segment residual-stream Merkle roots chain without gap (`outRoot[L] == inRoot[L+1]`), and `head` carries no dangling output boundary (`outRoot[22] == 0`).
-4. Replaying `Blake2sM31Channel` on-chain from `(preRoot, modelRoot, traceRoot)` yields `w_residual_stream` challenges under which `hornerAsc(tokIn, w) == embedTok` on segment 0 and `hornerDesc(tokOut, w) == headTok` on `head`.
+4. `tokIn` and `tokOut` are the exact vectors SASH's `embed_tok_ok` (segment 0) and `head_tok_ok` (`head`) checks accepted, with every id `< P`: their sha256 hashes are part of the `publicDigest` the segment proof attests ([SPEC.md](SPEC.md) §1, the statement the M2 and M3 guests must meet).
 5. `tokIn[0..P-1]` equals `promptIds`, `tokIn[P+j] == tokOut[P-1+j]` closes every autoregressive step $j \in [0, A-2]$, `tokOut[P-1..P+A-2]` equals `answerIds`, and `tokOut[P+A-2] == eosTokenId`.
 
 ## 2. Cryptographic assumption shift across layers
@@ -17,7 +17,7 @@ When `VerifiableInferenceSettlement` accepts a run in `VerifierKind.ZKVM_GROTH16
 |---|---|---|---|---|
 | Inner SASH segment proof | Circle STARK (`NitrooZK-stwo`) + GKR5 over `M31`/`QM31` with `Blake2sM31Channel` | Collision/PRF resistance of `BLAKE2s-256`; ~100 bits conjectured FRI query soundness (`100 * 1 + 0`); `QM31` Schwartz-Zippel ($\le \text{deg}/2^{124}$) | Candidate yes | None |
 | Outer zkVM wrapper (`ZKVM_GROTH16`) | SP1 / RISC Zero RISC-V STARK compressed to BN254 Groth16 | BN254 pairing hardness (~100-bit classical taxonomy), Groth16 SRS ceremony toxic-waste destruction, RISC-V zkVM constraint soundness | **No** (Shor breaks BN254) | **Yes** (Groth16 SRS) |
-| On-chain grid & Horner verifier | `SashGridVerifier.sol` + `Blake2sM31Channel.sol` | Deterministic EVM execution by Ethereum consensus | Yes (unconditional given EVM consensus) | None |
+| On-chain grid & digest checks | `SashGridVerifier.sol` (grid checks, sha256 `publicDigest`) | Deterministic EVM execution by Ethereum consensus; `sha256` collision resistance for the `publicDigest` binding | Yes | None |
 
 Effective classical soundness of the combined pipeline is bounded above by $\min(100, \lambda_{\text{zkVM}}, \lambda_{\text{BN254}}) \approx 100$ bits.
 

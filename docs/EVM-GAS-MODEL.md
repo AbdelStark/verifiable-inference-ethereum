@@ -32,10 +32,9 @@ Measured across all 23 segments (`B0L0..B0L21` + `head`) of `TinyLlama/TinyLlama
 |---|---:|---:|
 | Intrinsic tx gas | 21,000 | 21,000 |
 | Calldata (`SegmentClaim[23]` + tokens + Groth16 proof(s)) | ~64,000 (~4.6 KiB) | ~182,000 (~13.1 KiB) |
-| `SashModelRegistry` manifest check (`keccak256` + `SLOAD`) | ~5,500 | ~5,500 |
+| `SashModelRegistry` manifest check (`sha256` + `SLOAD`) | ~5,500 | ~5,500 |
 | `SashGridVerifier`: 22 residual boundary links + token loop + EOS | ~14,000 | ~14,000 |
-| `Blake2sM31Channel`: replay `B0L0` (`29` rels) + `head` (`24` rels) | ~143,000 | ~143,000 |
-| `QM31` Horner: `hornerAsc(32)` + `hornerDesc(32)` | ~22,000 | ~22,000 |
+| `publicDigest` token hashes: `sha256(tokIn)` + `sha256(tokOut)` | ~2,000 | ~2,000 |
 | `Sp1SashSegmentVerifier` (BN254 Groth16 pairing `0x08`) | ~270,000 | ~6,210,000 |
 | `settledRuns[runId]` cold `SSTORE` + `InferenceVerified` event | ~25,600 | ~25,600 |
-| **Total single-tx gas** | **~565,100** (3.4% of `EIP-7825`) | **~6,623,100** (39.5% of `EIP-7825`) |
+| **Total single-tx gas (estimated)** | **~402,100** (2.4% of `EIP-7825`) | **~6,460,100** (38.5% of `EIP-7825`) |

@@ -52,20 +52,21 @@ contract VerifiableInferenceSettlement {
 
         SashTypes.ModelManifest memory manifest = REGISTRY.getManifest(modelId);
 
-        bytes32 publicDigest = SashGridVerifier.computePublicDigest(modelId, segments);
-        bytes32 promptHash = sha256(abi.encodePacked(promptIds));
-        bytes32 answerHash = sha256(abi.encodePacked(answerIds));
+        bytes32 publicDigest = SashGridVerifier.computePublicDigest(modelId, segments, tokIn, tokOut);
+        bytes32 promptHash = SashGridVerifier.computeTokenHash(promptIds);
+        bytes32 answerHash = SashGridVerifier.computeTokenHash(answerIds);
         runId = sha256(abi.encodePacked(modelId, publicDigest, promptHash, answerHash));
 
         if (settledRuns[runId]) {
             revert SashTypes.RunAlreadySettled(runId);
         }
 
-        // 1. Verify succinct cryptographic proof (or chain-gated dev tag on chainid 31337) over `publicDigest`.
+        // 1. Verify succinct cryptographic proof (or chain-gated dev tag on chainid 31337) over `publicDigest`,
+        //    which binds the segment claims and the `tokIn` / `tokOut` vectors the proof's token checks used.
         SEGMENT_VERIFIER.verifyAggregatedSegments(publicDigest, proofBytes);
 
-        // 2. Verify SASH 23-segment manifest roots, 22 residual links, Fiat-Shamir w_residual_stream,
-        //    QM31 Horner commitments, prompt prefix, autoregressive loop closure, and EOS termination natively on EVM.
+        // 2. Verify SASH 23-segment manifest roots, 22 residual links, prompt prefix, autoregressive loop closure,
+        //    answer and EOS termination natively on EVM.
         SashGridVerifier.verifyGrid(manifest, segments, tokIn, tokOut, promptIds, answerIds);
 
         settledRuns[runId] = true;

@@ -1,8 +1,5 @@
-//! Clean-room reference primitives and 23-segment grid verifier for SASH Circle STARK
-//! inference settlement on the Ethereum EVM.
+//! Reference SASH 23-segment grid checks and settlement digests for Ethereum EVM settlement,
+//! mirroring the Solidity verifier bit for bit.
 
-pub mod blake2s;
-pub mod channel;
-pub mod field;
 pub mod grid;
 pub mod tinyllama_fixture;

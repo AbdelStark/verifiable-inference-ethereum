@@ -2,8 +2,6 @@
 pragma solidity ^0.8.38;
 
 import {Test} from "forge-std/Test.sol";
-import {M31} from "../src/field/M31.sol";
-import {QM31} from "../src/field/QM31.sol";
 import {SashTypes} from "../src/sash/SashTypes.sol";
 import {ISP1Verifier} from "@sp1-contracts/ISP1Verifier.sol";
 import {DevTranscriptSegmentVerifier} from "../src/sash/DevTranscriptSegmentVerifier.sol";
@@ -46,8 +44,6 @@ contract TinyLlamaSettlementTest is Test {
             TinyLlamaFixture.NUM_SEGMENTS,
             TinyLlamaFixture.SEQ_LEN,
             TinyLlamaFixture.EOS_TOKEN_ID,
-            TinyLlamaFixture.B0_REL_DRAWS,
-            TinyLlamaFixture.HEAD_REL_DRAWS,
             TinyLlamaFixture.MANIFEST_ROOTS_HASH
         );
         devVerifier = new DevTranscriptSegmentVerifier();
@@ -56,6 +52,17 @@ contract TinyLlamaSettlementTest is Test {
 
     function testEndToEndTinyLlama23SegmentDevSettlement() public {
         bytes memory proof = devVerifier.computeDevProof(TinyLlamaFixture.PUBLIC_DIGEST);
+        // runId, promptHash and answerHash from SPEC.md §1.4
+        bytes32 specRunId = 0x0f614a4f82d3c3656dc9b15b897a5b07f621b312f5e37ae58c42b7391223e430;
+        vm.expectEmit(address(settlement));
+        emit VerifiableInferenceSettlement.InferenceVerified(
+            specRunId,
+            TinyLlamaFixture.MODEL_ID,
+            TinyLlamaFixture.PUBLIC_DIGEST,
+            0xb4d5730f21772191057fb4600dc73dfdf0350fab6996c7b12d1d1ca7b83b9ec1,
+            0xaed36ba9347820959ae88d81e8c45a733e404b199fb3c12a463e2301253934c8,
+            SashTypes.VerifierKind.DEV_TRANSCRIPT_ONLY
+        );
         bytes32 runId = settlement.verifyAndSettle(
             TinyLlamaFixture.MODEL_ID,
             TinyLlamaFixture.segments(),
@@ -65,6 +72,7 @@ contract TinyLlamaSettlementTest is Test {
             TinyLlamaFixture.answerIds(),
             proof
         );
+        assertEq(runId, specRunId);
         assertTrue(settlement.settledRuns(runId));
     }
 
@@ -182,13 +190,13 @@ contract TinyLlamaSettlementTest is Test {
         );
     }
 
-    function testNegative06_MutatedTokInFailsHornerBinding() public {
+    function testNegative06_MutatedTokInFailsSegmentProof() public {
         uint32[] memory ti = TinyLlamaFixture.tokIn();
         uint32[] memory pr = TinyLlamaFixture.promptIds();
         ti[0] = 530;
         pr[0] = 530;
         bytes memory proof = devVerifier.computeDevProof(TinyLlamaFixture.PUBLIC_DIGEST);
-        vm.expectRevert(SashTypes.EmbedTokenHornerMismatch.selector);
+        vm.expectRevert(SashTypes.InvalidDevProofTag.selector);
         settlement.verifyAndSettle(
             TinyLlamaFixture.MODEL_ID,
             TinyLlamaFixture.segments(),
@@ -200,52 +208,16 @@ contract TinyLlamaSettlementTest is Test {
         );
     }
 
-    function testNegative07_MutatedTokOutFailsHornerBinding() public {
+    function testNegative07_MutatedTokOutFailsSegmentProof() public {
         uint32[] memory to = TinyLlamaFixture.tokOut();
         to[0] ^= 1;
         bytes memory proof = devVerifier.computeDevProof(TinyLlamaFixture.PUBLIC_DIGEST);
-        vm.expectRevert(SashTypes.HeadTokenHornerMismatch.selector);
+        vm.expectRevert(SashTypes.InvalidDevProofTag.selector);
         settlement.verifyAndSettle(
             TinyLlamaFixture.MODEL_ID,
             TinyLlamaFixture.segments(),
             TinyLlamaFixture.tokIn(),
             to,
-            TinyLlamaFixture.promptIds(),
-            TinyLlamaFixture.answerIds(),
-            proof
-        );
-    }
-
-    function testNegative08_MutatedTraceRootShiftsFiatShamirChallenge() public {
-        SashTypes.SegmentClaim[] memory segs = TinyLlamaFixture.segments();
-        segs[0].traceRoot ^= bytes32(uint256(1));
-        bytes memory proof = _devProofFor(segs);
-        vm.expectRevert(SashTypes.EmbedTokenHornerMismatch.selector);
-        settlement.verifyAndSettle(
-            TinyLlamaFixture.MODEL_ID,
-            segs,
-            TinyLlamaFixture.tokIn(),
-            TinyLlamaFixture.tokOut(),
-            TinyLlamaFixture.promptIds(),
-            TinyLlamaFixture.answerIds(),
-            proof
-        );
-    }
-
-    function testNegative09_WrongRelationDrawsReverts() public {
-        SashTypes.SegmentClaim[] memory segs = TinyLlamaFixture.segments();
-        segs[22].relationDraws = 25;
-        bytes memory proof = _devProofFor(segs);
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                SashTypes.RelationDrawCountMismatch.selector, 22, 25, TinyLlamaFixture.HEAD_REL_DRAWS
-            )
-        );
-        settlement.verifyAndSettle(
-            TinyLlamaFixture.MODEL_ID,
-            segs,
-            TinyLlamaFixture.tokIn(),
-            TinyLlamaFixture.tokOut(),
             TinyLlamaFixture.promptIds(),
             TinyLlamaFixture.answerIds(),
             proof
@@ -271,7 +243,8 @@ contract TinyLlamaSettlementTest is Test {
     function testNegative11_BrokenAutoregressiveLoopReverts() public {
         uint32[] memory ti = TinyLlamaFixture.tokIn();
         ti[27] = 1111;
-        bytes memory proof = devVerifier.computeDevProof(TinyLlamaFixture.PUBLIC_DIGEST);
+        bytes memory proof =
+            _devProofForModel(TinyLlamaFixture.MODEL_ID, TinyLlamaFixture.segments(), ti, TinyLlamaFixture.tokOut());
         vm.expectRevert(
             abi.encodeWithSelector(
                 SashTypes.AutoregressiveLoopMismatch.selector, 27 - TinyLlamaFixture.promptIds().length
@@ -291,16 +264,10 @@ contract TinyLlamaSettlementTest is Test {
     function testNegative12_MissingEosReverts() public {
         bytes32 altModel = keccak256("alt-eos-model");
         registry.enrollModel(
-            altModel,
-            TinyLlamaFixture.NUM_SEGMENTS,
-            TinyLlamaFixture.SEQ_LEN,
-            999,
-            TinyLlamaFixture.B0_REL_DRAWS,
-            TinyLlamaFixture.HEAD_REL_DRAWS,
-            TinyLlamaFixture.MANIFEST_ROOTS_HASH
+            altModel, TinyLlamaFixture.NUM_SEGMENTS, TinyLlamaFixture.SEQ_LEN, 999, TinyLlamaFixture.MANIFEST_ROOTS_HASH
         );
         SashTypes.SegmentClaim[] memory segs = TinyLlamaFixture.segments();
-        bytes memory proof = _devProofForModel(altModel, segs);
+        bytes memory proof = _devProofForModel(altModel, segs, TinyLlamaFixture.tokIn(), TinyLlamaFixture.tokOut());
         vm.expectRevert(
             abi.encodeWithSelector(SashTypes.MissingEosTermination.selector, TinyLlamaFixture.EOS_TOKEN_ID, 999)
         );
@@ -327,38 +294,6 @@ contract TinyLlamaSettlementTest is Test {
             TinyLlamaFixture.tokOut(),
             TinyLlamaFixture.promptIds(),
             ans,
-            proof
-        );
-    }
-
-    function testNegative14_NonCanonicalM31InHornerClaimReverts() public {
-        SashTypes.SegmentClaim[] memory segs = TinyLlamaFixture.segments();
-        segs[1].tokenHornerClaim = QM31.Elem(0x7fffffff, 0, 0, 0);
-        bytes memory proof = _devProofFor(segs);
-        vm.expectRevert(abi.encodeWithSelector(M31.NonCanonicalM31.selector, 0x7fffffff));
-        settlement.verifyAndSettle(
-            TinyLlamaFixture.MODEL_ID,
-            segs,
-            TinyLlamaFixture.tokIn(),
-            TinyLlamaFixture.tokOut(),
-            TinyLlamaFixture.promptIds(),
-            TinyLlamaFixture.answerIds(),
-            proof
-        );
-    }
-
-    function testNegative15_NonCanonicalPromptTokenReverts() public {
-        uint32[] memory pr = TinyLlamaFixture.promptIds();
-        pr[0] = 0x7fffffff;
-        bytes memory proof = devVerifier.computeDevProof(TinyLlamaFixture.PUBLIC_DIGEST);
-        vm.expectRevert(abi.encodeWithSelector(M31.NonCanonicalM31.selector, 0x7fffffff));
-        settlement.verifyAndSettle(
-            TinyLlamaFixture.MODEL_ID,
-            TinyLlamaFixture.segments(),
-            TinyLlamaFixture.tokIn(),
-            TinyLlamaFixture.tokOut(),
-            pr,
-            TinyLlamaFixture.answerIds(),
             proof
         );
     }
@@ -466,20 +401,26 @@ contract TinyLlamaSettlementTest is Test {
     }
 
     function _devProofFor(SashTypes.SegmentClaim[] memory segs) internal view returns (bytes memory) {
-        return _devProofForModel(TinyLlamaFixture.MODEL_ID, segs);
+        return _devProofForModel(TinyLlamaFixture.MODEL_ID, segs, TinyLlamaFixture.tokIn(), TinyLlamaFixture.tokOut());
     }
 
-    function _devProofForModel(bytes32 modelId, SashTypes.SegmentClaim[] memory segs)
-        internal
-        view
-        returns (bytes memory)
-    {
-        bytes32 digest = this.externalDigest(modelId, segs);
+    function _devProofForModel(
+        bytes32 modelId,
+        SashTypes.SegmentClaim[] memory segs,
+        uint32[] memory tokIn,
+        uint32[] memory tokOut
+    ) internal view returns (bytes memory) {
+        bytes32 digest = this.externalDigest(modelId, segs, tokIn, tokOut);
         return devVerifier.computeDevProof(digest);
     }
 
-    function externalDigest(bytes32 modelId, SashTypes.SegmentClaim[] calldata segs) external pure returns (bytes32) {
-        return SashGridVerifier.computePublicDigest(modelId, segs);
+    function externalDigest(
+        bytes32 modelId,
+        SashTypes.SegmentClaim[] calldata segs,
+        uint32[] calldata tokIn,
+        uint32[] calldata tokOut
+    ) external pure returns (bytes32) {
+        return SashGridVerifier.computePublicDigest(modelId, segs, tokIn, tokOut);
     }
 
     function externalRootsHash(SashTypes.SegmentClaim[] calldata segs) external pure returns (bytes32) {

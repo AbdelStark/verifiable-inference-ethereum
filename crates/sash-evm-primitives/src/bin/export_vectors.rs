@@ -7,9 +7,9 @@ use std::process;
 
 use sash_evm_primitives::grid::{SegmentClaim, compute_public_digest};
 use sash_evm_primitives::tinyllama_fixture::{
-    TINYLLAMA_ANSWER_IDS, TINYLLAMA_B0_REL_DRAWS, TINYLLAMA_EOS_TOKEN_ID, TINYLLAMA_HEAD_REL_DRAWS,
-    TINYLLAMA_PROMPT, TINYLLAMA_PROMPT_IDS, TINYLLAMA_RESPONSE, TINYLLAMA_TOK_IN,
-    TINYLLAMA_TOK_OUT, tinyllama_manifest, tinyllama_model_id, tinyllama_segments,
+    TINYLLAMA_ANSWER_IDS, TINYLLAMA_EOS_TOKEN_ID, TINYLLAMA_PROMPT, TINYLLAMA_PROMPT_IDS,
+    TINYLLAMA_RESPONSE, TINYLLAMA_TOK_IN, TINYLLAMA_TOK_OUT, tinyllama_manifest,
+    tinyllama_model_id, tinyllama_segments,
 };
 
 fn hex0x(bytes: [u8; 32]) -> String {
@@ -41,13 +41,10 @@ fn write_segments(out: &mut String, segs: &[SegmentClaim]) -> fmt::Result {
         segs.len()
     )?;
     for (i, s) in segs.iter().enumerate() {
-        let [a0, a1, b0, b1] = s.token_horner_claim.to_u32_array();
         writeln!(out, "        segs[{i}] = SashTypes.SegmentClaim({{")?;
         writeln!(out, "            segmentIndex: {},", s.segment_index)?;
-        writeln!(out, "            relationDraws: {},", s.relation_draws)?;
         writeln!(out, "            preRoot: {},", hex0x(s.pre_root))?;
         writeln!(out, "            modelRoot: {},", hex0x(s.model_root))?;
-        writeln!(out, "            traceRoot: {},", hex0x(s.trace_root))?;
         writeln!(
             out,
             "            residualInRoot: {},",
@@ -55,12 +52,8 @@ fn write_segments(out: &mut String, segs: &[SegmentClaim]) -> fmt::Result {
         )?;
         writeln!(
             out,
-            "            residualOutRoot: {},",
+            "            residualOutRoot: {}",
             hex0x(s.residual_out_root)
-        )?;
-        writeln!(
-            out,
-            "            tokenHornerClaim: QM31.Elem({a0}, {a1}, {b0}, {b1})"
         )?;
         writeln!(out, "        }});")?;
     }
@@ -71,7 +64,8 @@ fn render() -> Result<String, fmt::Error> {
     let model_id = tinyllama_model_id();
     let segs = tinyllama_segments();
     let manifest = tinyllama_manifest(&segs);
-    let public_digest = compute_public_digest(model_id, &segs);
+    let public_digest =
+        compute_public_digest(model_id, &segs, &TINYLLAMA_TOK_IN, &TINYLLAMA_TOK_OUT);
 
     let mut out = String::new();
     out.push_str(
@@ -79,11 +73,11 @@ fn render() -> Result<String, fmt::Error> {
          // SPDX-License-Identifier: Apache-2.0\n\
          pragma solidity ^0.8.38;\n\
          \n\
-         import {QM31} from \"../field/QM31.sol\";\n\
          import {SashTypes} from \"./SashTypes.sol\";\n\
          \n\
          /// @title TinyLlamaFixture\n\
-         /// @notice Primary-source 23-segment TinyLlama-1.1B-Chat-v1.0 SASH proof constants (`y-attnout-w12`).\n",
+         /// @notice 23-segment TinyLlama-1.1B-Chat-v1.0 SASH constants (`y-attnout-w12`), taken from an\n\
+         ///         unpublished SASH run that M2 checks against the proof bundles.\n",
     );
     writeln!(out, "/// @dev Prompt: {TINYLLAMA_PROMPT:?}")?;
     writeln!(out, "///      Response: {TINYLLAMA_RESPONSE:?}")?;
@@ -116,14 +110,6 @@ fn render() -> Result<String, fmt::Error> {
     writeln!(
         out,
         "    uint32 internal constant EOS_TOKEN_ID = {TINYLLAMA_EOS_TOKEN_ID};"
-    )?;
-    writeln!(
-        out,
-        "    uint16 internal constant B0_REL_DRAWS = {TINYLLAMA_B0_REL_DRAWS};"
-    )?;
-    writeln!(
-        out,
-        "    uint16 internal constant HEAD_REL_DRAWS = {TINYLLAMA_HEAD_REL_DRAWS};"
     )?;
     write_u32_array(&mut out, "promptIds", &TINYLLAMA_PROMPT_IDS)?;
     write_u32_array(&mut out, "answerIds", &TINYLLAMA_ANSWER_IDS)?;

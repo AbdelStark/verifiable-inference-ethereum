@@ -11,6 +11,5 @@ license = "Apache-2.0"
 authors = ["Abdel <@AbdelStark>"]
 
 [workspace.dependencies]
-blake2 = "0.10.6"
 hex = "0.4.3"
 sha2 = "0.10.9"
