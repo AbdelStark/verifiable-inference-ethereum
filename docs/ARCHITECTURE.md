@@ -23,7 +23,7 @@
                                      |
                                      v
 +-------------------------------------------------------------------------+
-| Ethereum EVM (Forge in-process EVM -> anvil (M1) -> Hoodi 560048 (M4))  |
+| Ethereum EVM (local anvil, chain 31337 -> Hoodi 560048 (M4))            |
 |                                                                         |
 |  [VerifiableInferenceSettlement.sol]                                    |
 |     |                                                                   |

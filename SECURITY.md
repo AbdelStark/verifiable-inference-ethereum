@@ -29,7 +29,7 @@ Effective classical soundness of the combined pipeline is bounded above by $\min
 
 ## 4. `DevTranscriptSegmentVerifier` isolation
 
-`DevTranscriptSegmentVerifier.sol` exists solely so local Foundry workflows on chain `31337` (`forge test`, and `forge script` in Forge's in-process EVM; a running anvil node from M1) can exercise the full 23-segment TinyLlama settlement flow in milliseconds without waiting for GPU/zkVM proof compression. Three independent defenses prevent accidental production use:
+`DevTranscriptSegmentVerifier.sol` exists solely so local Foundry workflows on chain `31337` (`forge test`, and `make anvil-demo` on a local anvil node) can exercise the full 23-segment TinyLlama settlement flow in milliseconds without waiting for GPU/zkVM proof compression. Three independent defenses prevent accidental production use:
 1. `DevTranscriptSegmentVerifier` checks `block.chainid == 31337` in both its constructor and `verifyAggregatedSegments`.
 2. `VerifiableInferenceSettlement` stores an immutable `allowDevVerifier` boolean; `DeployTestnet.s.sol` sets `allowDevVerifier = false`, reverting with `DevVerifierForbidden()` if a `DEV_TRANSCRIPT_ONLY` verifier is ever supplied.
 3. Every `InferenceVerified` event emits `VerifierKind` explicitly so off-chain indexers distinguish dev-mode runs (`0`) from cryptographic proofs (`1`).
