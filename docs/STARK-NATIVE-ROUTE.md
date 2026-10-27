@@ -28,7 +28,7 @@ The EIP facts below are verified; the sizes and gas multiples are estimates from
 - **Stwo fork:** a vendored NitrooZK fork of stwo v2.1.0, plus SASH's own verifier edits.
 - **Merkle trees:** non-lifted, mixed-degree, hashed with M31-reduced BLAKE2s (`vcs::Blake2sM31MerkleChannel`).
 - **Trees per segment:** 6 to 10, composition tree included: shape, model, base and interaction, then one per boundary side (residual stream in and out, K/V), then the composition tree (`docs/EVM-GAS-MODEL.md` §1).
-- **GKR:** one LogUp-GKR batch proof per segment, covering the lookups of up to five component families (attention key tiles, dequant, residual stream, Freivalds, attnout; `head` carries one too). It is verified outside stwo's `verify`, between trees 2 and 3, by `partially_verify_batch` from stwo's `prover` module, which needs the `prover` feature and a nightly toolchain.
+- **GKR:** one LogUp-GKR batch proof per segment, covering the lookups of up to five component families (attention key tiles, dequant, residual stream, Freivalds, attnout; `head` carries one too). It is verified outside stwo's `verify`, between trees 2 and 3, by `partially_verify_batch` from stwo's `prover` module, which needs the `prover` feature and a nightly toolchain. This repo's `sp1/patches/0002-move-gkr-verifier-to-core-lookups.patch` moves `partially_verify_batch` and the sum-check verifier to `stwo::core::lookups`, so the verifier build needs neither.
 - **PCS:** `log_blowup = 1`, 100 queries, 0 PoW bits, for 100 conjectured bits.
 
 ## StarkWare's stack today

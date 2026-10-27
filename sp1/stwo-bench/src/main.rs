@@ -9,12 +9,26 @@ use std::hint::black_box;
 use stwo::core::channel::{Blake2sM31Channel, Channel};
 use stwo::core::fields::m31::BaseField;
 use stwo::core::fields::qm31::SecureField;
+use stwo::core::lookups::gkr_verifier::{GkrBatchProof, partially_verify_batch};
 use stwo::core::vcs::MerkleHasher;
 use stwo::core::vcs::blake2_merkle::Blake2sM31MerkleHasher;
 
 pub fn main() {
     let input = sp1_zkvm::io::read_vec();
     let n = u32::from_le_bytes(input.as_slice().try_into().expect("stdin holds one u32: N"));
+    if n == u32::MAX {
+        // Never taken by the tests: it only proves the GKR verifier, moved out of nitroo's `prover`
+        // feature by sp1/patches/0002, links into a guest. Real GKR proofs run in the segment guest.
+        let empty = GkrBatchProof {
+            sumcheck_proofs: Vec::new(),
+            layer_masks_by_instance: Vec::new(),
+            output_claims_by_instance: Vec::new(),
+        };
+        let verified =
+            partially_verify_batch(Vec::new(), &empty, &mut Blake2sM31Channel::default());
+        sp1_zkvm::io::commit_slice(&[verified.is_ok() as u8]);
+        return;
+    }
 
     println!("cycle-tracker-report-start: hash_node");
     let leaf: Vec<BaseField> = (0..16).map(BaseField::from).collect();
