@@ -68,7 +68,7 @@ make check
 - **Write tests when a change touches the protocol**: grid checks and settlement guards. Assert against `SPEC.md` and the primary-source vectors, not against the implementation.
 - **Don't add tests for docs, cosmetic changes, trivial wiring or config.**
 - **A failing invariant test is a real regression: fix the code, never weaken the test.** Never regenerate the fixture (`make vectors`) or edit a primary-source vector to make a failing test pass; the fixture changes only with an intended Rust primitive change (§2.4).
-- **A grid-level negative control lands in both suites**, Rust and Foundry, never on one side only. Settlement-level controls (token binding, proof bytes, verifier gating, replay) run in Foundry only (`SPEC.md` §2.1 table).
+- **A grid-level negative control lands in both suites**, Rust and Foundry, never on one side only. Settlement-level controls (token binding, proof bytes, verifier gating, replay) run in Foundry only. A guest-level control runs natively and in the SP1 executor, never on one side only (`SPEC.md` §2.1 table).
 
 Other targets (`make help`): `make rust-check` (Rust gates only), `make vectors` (regenerate the fixture), `make forge-test` (`forge fmt --check && forge build --locked --sizes && forge lint --deny warnings`, then `forge test -vvv --gas-report` on a fresh `contracts/snapshots/` and the snapshot check), `make anvil-demo` (`contracts/script/anvil-settle.sh`: mines `DeployDevAnvil.s.sol` on a local `anvil --hardfork osaka --enable-tx-gas-limit` node and checks the receipts, the `InferenceVerified` event and `verifyAndSettle`'s gas against its snapshot), `make clean`.
 

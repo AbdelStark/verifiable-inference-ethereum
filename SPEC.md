@@ -1,23 +1,62 @@
 # Protocol and Contract Specification (`SPEC.md`)
 
-Version: `0.2.0` (2026-10-27)
+Version: `0.3.0` (2026-10-27)
 Pinned upstream SASH revision: `sg-ai-safety-hub/zk-inference-prover @ eb95bfa887299d1637550228d42086c27cbb2b3b`
 Stwo as run by SASH: the vendored `nitroo/` copy in `zk-inference-prover @ eb95bfa`. It equals `AntChainOpenLabs/NitrooZK-stwo @ 41c2a05bdb1fc3e3762bc7804108e8bc269bb6fc` for the field, channel, Merkle and FRI primitives, and differs in `nitroo/crates/stwo/src/core/pcs/verifier.rs`, `nitroo/crates/stwo/src/core/verifier.rs`, `nitroo/crates/stwo/src/core/air/components.rs` and `nitroo/crates/constraint-framework`.
+Files patched against `eb95bfa` for the segment guests' verifier build (§1.1): none yet.
 
 ## 1. Proved statement and settlement digests
 
-This section is the requirement the M2 segment guests and the M3 aggregator guest must meet. Neither guest exists yet. The contracts already implement their side of it (§1.3, §2).
+This section is the requirement the M2 segment guests and the M3 aggregator guest must meet. Neither guest exists yet. The contracts implement §1.3 and §2 as written. Binding each segment's `fixedHash` (§1.1) into the segment claim, `manifestRootsHash` and `publicDigest` is a planned M2 change to §1.3, not implemented yet.
 
 ### 1.1 Segment guests (M2)
 
-Each segment guest runs SASH's unmodified `verify_composed` at `eb95bfa` on one segment and accepts only if `Verdict::accepts()` holds, which requires `embed_tok_ok && head_tok_ok` (`prover/src/compose.rs`). In addition, the guest MUST:
+Each segment guest verifies one SASH segment (`<tag>.fixed.json`, `<tag>.claims.json`, `<tag>.proof.json`) with a verifier-only build of `verify_composed` (`prover/src/compose.rs`) at `eb95bfa`, and commits the segment's public values.
 
-1. **Reject any token id `>= P`** (`P = 2^31 - 1`) in the `tok_in` or `tok_out` vector it checks. SASH maps ids to field elements with `M31::from_u32_unchecked` (`m31_u32`, `prover/src/common.rs`), so an id `>= P` would alias a canonical id in the token Horner sum.
-2. **Output its segment claim** (§1.3) and, on `B0L0`, `tokenHash(tok_in)` of the exact vector its `embed_tok_ok` check used; on `head`, `tokenHash(tok_out)` of the exact vector its `head_tok_ok` check used.
+**Verifier build.** Upstream `verify_composed` cannot run in an SP1 guest: it calls `std::time::Instant::now`, its crate enables stwo's `prover` feature (which needs `array_chunks`, removed from Rust in 1.90), and nitroo's stwo `build.rs` runs CUDA cmake on every non-macOS host. The verifier build MAY differ from upstream only by:
+- stwo's `build.rs` gated on the `prover` feature;
+- constraint-framework's `mod cuda_domain` and its re-export gated on `prover`;
+- the GKR verifier (`gkr_verifier.rs`, the verifier half of `sumcheck.rs`, `utils.rs`) moved from `stwo::prover::lookups` to `stwo::core::lookups`, with re-exports and import fixes;
+- `zk-prover` cfg-split under a default-on `prover` feature;
+- `Instant::now` and `Verdict.verify_secs` cfg-gated out of the verifier build;
+- `shape_root_check`, `shape_root_from_params` and their `catch_unwind` cfg-gated out of the verifier build, with `verify_composed` binding upstream's no-calibration value `(None, None, 0.0, None)` in their place;
+- `verify_composed` split into byte decoding and a verify over the parsed `(Fixed, Claims, Proof)`, the byte entry delegating to it unchanged.
+
+The difference MUST be reproducible as a reviewed patch series against `eb95bfa`, and the header lists every patched file. Any other change needs an edit to this list in the change that makes it.
+
+**Rules.** A `Fixed` that does not parse is rejected (`Malformed`). A `Plan::new` assertion on the parsed `params`, or any other panic in the verifier build (e.g. a decodable proof with fewer than three commitments indexes out of bounds before upstream's length check), is a rejection with no named variant: the guest exits 1 with the panic message, and the native check panics. Then the guest MUST check, in this order, and reject with the named variant:
+1. **`TokenIdOutOfField`:** every id in `Fixed.tok_in` and `Fixed.tok_out` is `< P` (`P = 2^31 - 1`), before any Horner sum. SASH maps ids with `M31::from_u32_unchecked` (`m31_u32`, `prover/src/common.rs`), so `P + k` would alias `k`.
+2. **`SecurityParams`:** `log_blowup == 1`, `n_queries == 100`, `pow_bits == 0`.
+3. **`MissingLayer`:** `Fixed.layer` is `Some(l)` with `l < 2^16`.
+4. **`UnboundEdge`:** `Plan::new(&fixed.params).binding(fixed.layer)` has no `EdgeState::Unbound` edge, and `params.prove_argmax_lax == false`. The `--gkr-*` flags are backend choices and stay allowed.
+5. **`UnsoundDequant`:** every dequant `Spec` of the plan satisfies `Spec::sound()`, and `params.kmax <= KMAX_SOUND` (`21`, `prover/src/bf16.rs`).
+6. **`NotAccepted`:** `Verdict::accepts()` holds on the verifier build's `Verdict`. This includes `root_ok` and `model_root_ok` (proof commitments 0 and 1 equal `Fixed.pre_root` and `Fixed.model_root`), `embed_tok_ok` and `head_tok_ok`. `shape_root_ok` is always `None` in the verifier build: the guest does not re-derive the shape root. `pre_root` is bound on-chain to the enrolled manifest (§1.3), and its correctness rests on enrollment: relying parties re-derive it offline with `zk-prover model-roots` or `zk-prover expect-root --shape-only --params <tag>.fixed.json --calibration <manifest>` ([SECURITY.md](SECURITY.md) §3). Undecodable claims or proof also reject here.
+7. **`OpenSeam`:** `deq_out_open` and `rq_scale_open` are empty, and `ao_q_open` and `nn_open` are false. Upstream `accepts()` ignores them.
+
+Relation draws, challenge counts and the GKR instance list come only from the `Plan` of the parsed `params`, never from the proof.
+
+**`fixedHash`.** Decided: the guest commits the hash of the whole `Fixed` statement, and the manifest pins it. `fixedHash = sha256(serde_json::to_vec(&Fixed { tok_in: vec![], tok_out: vec![], ..parsed }))`, over the parsed struct, never the input bytes (serde drops unknown fields). It covers all of `Fixed`, not only `params`: `sizes_ok` skips tree 0, the verifier build never reads `layer` or `model`, and `block` is compared only with `rope.pos0` (`nn_pos_ok`, which passes when either is absent). The guest never reads a pin or a hash from its input, so one guest program serves every model.
+
+**Segment public values.** After rule 7, the guest commits 226 bytes with `sp1_zkvm::io::commit_slice` (never `commit`, which is bincode, and never `sp1-zkvm`'s `blake3` feature: the aggregator verifies each segment proof with `verify_sp1_proof(vkey, sha256(publicValues))`, so the public-values digest must be sha256).
+
+| Offset | Bytes | Field | Value |
+|---:|---:|---|---|
+| 0 | 2 | `segmentIndex` | `be16(Fixed.layer)`; `head` is `N - 1` (22 for TinyLlama) |
+| 2 | 32 | `preRoot` | proof commitment 0 |
+| 34 | 32 | `modelRoot` | proof commitment 1 |
+| 66 | 32 | `residualInRoot` | the `(Axis::Layer, "in")` boundary-side root, commitment 4 |
+| 98 | 32 | `residualOutRoot` | the `(Axis::Layer, "out")` boundary-side root, commitment 5; 32 zero bytes on `head`, which commits no out side |
+| 130 | 32 | `fixedHash` | as above |
+| 162 | 32 | `tokInHash` | `tokenHash(Fixed.tok_in)` (§1.3) on the segment with the embedding gadget (`B0L0`); else 32 zero bytes |
+| 194 | 32 | `tokOutHash` | `tokenHash(Fixed.tok_out)` on the segment that composes the argmax (`head`); else 32 zero bytes |
+
+- Roots are the 32 raw bytes of the `Blake2sHash`, not its hex string.
+- Bytes `0..130` are the §1.3 segment claim. Once the planned `fixedHash` binding lands, bytes `0..162` are the claim.
+- The K/V (`Axis::Token`) boundary-side roots (commitments 6 and up) are not output. That is sound only because `S = 32` is the single token block `B0`; a multi-block run needs them.
 
 ### 1.2 Aggregator guest (M3) and settlement
 
-The aggregator verifies all `N` segment proofs and commits `publicDigest` (§1.3), built from the segment claims and the two token hashes from §1.1. The BN254 wrapper's public values are exactly the 32 bytes of `publicDigest`.
+The aggregator verifies all `N` segment proofs and commits `publicDigest` (§1.3), taking each segment claim from its segment's public values (§1.1), `tokInHash` from segment `0` and `tokOutHash` from segment `N - 1`. The BN254 wrapper's public values are exactly the 32 bytes of `publicDigest`.
 
 `VerifiableInferenceSettlement` recomputes `publicDigest` from calldata (`modelId`, `segments`, `tokIn`, `tokOut`) and verifies the segment proof over it before any grid check. Any mutation of a segment claim, `tokIn` or `tokOut` therefore fails the segment-proof check: the SP1 proof with `Sp1SashSegmentVerifier`, or the dev tag with `DevTranscriptSegmentVerifier` (`chainid == 31337` only, no cryptographic binding).
 
@@ -55,10 +94,11 @@ Taken from an unpublished SASH run that M2 checks against the proof bundles: `Ti
 
 ### 2.1 Negative controls
 
-Each control runs only in the suites it lists, and MUST revert there with the listed error.
+Each control runs only in the suites it lists, and MUST fail there with the listed error: a revert in Foundry, a `GridError` in Rust, a `Reject` variant in the segment guest.
 
 - **Grid-level controls** (1–5, 10–13, 16) run in both suites. Foundry submits each with a dev proof for its own `publicDigest`, so the revert comes from the grid check, not the proof check.
 - **Settlement-level controls** (6, 7, 17–20, F) run in Foundry only. They exercise the segment verifier, verifier gating or replay protection, which have no Rust counterpart.
+- **Guest-level controls** run natively and in the SP1 executor (M2). Each makes the segment check return the listed `Reject` (§1.1) and the guest exit 1 with a panic message naming it. Their rows land with the segment check.
 - Numbers 8, 9, 14 and 15 are retired and not reused.
 
 | # | Mutation of the valid TinyLlama run | Rust `GridError` | Solidity error | Suites | Tests (Rust · Foundry) |

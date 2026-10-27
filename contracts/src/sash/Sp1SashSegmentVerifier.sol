@@ -6,8 +6,8 @@ import {ISP1Verifier} from "@sp1-contracts/ISP1Verifier.sol";
 import {ISashSegmentVerifier} from "./ISashSegmentVerifier.sol";
 
 /// @title Sp1SashSegmentVerifier
-/// @notice Production/testnet adapter verifying BN254 Groth16/Plonk proofs of SASH `verify_composed`
-///         execution via an immutable `ISP1Verifier` gateway and pinned `sashAggregatorVKey`.
+/// @notice Production/testnet adapter verifying the BN254 Groth16/Plonk proof of the M3 aggregator over the
+///         SASH segment guests (`SPEC.md` §1) via an immutable `ISP1Verifier` and pinned `sashAggregatorVKey`.
 /// @dev Outer wrapper relies on BN254 pairing hardness, SRS ceremony integrity, and SP1 circuit soundness.
 contract Sp1SashSegmentVerifier is ISashSegmentVerifier {
     ISP1Verifier public immutable SP1_VERIFIER;
