@@ -24,20 +24,20 @@ Each segment guest verifies one SASH segment (`<tag>.fixed.json`, `<tag>.claims.
 
 The difference MUST be reproducible as a reviewed patch series against `eb95bfa`, and the header lists every patched file. Any other change needs an edit to this list in the change that makes it.
 
-**Rules.** A `Fixed` that does not parse is rejected (`Malformed`). A `Plan::new` assertion on the parsed `params` is a rejection with no named variant: the guest exits 1 with the assertion's message. Then the guest MUST check, in this order, and reject with the named variant:
+**Rules.** A `Fixed` that does not parse is rejected (`Malformed`). A `Plan::new` assertion on the parsed `params`, or any other panic in the verifier build (e.g. a decodable proof with fewer than three commitments indexes out of bounds before upstream's length check), is a rejection with no named variant: the guest exits 1 with the panic message, and the native check panics. Then the guest MUST check, in this order, and reject with the named variant:
 1. **`TokenIdOutOfField`:** every id in `Fixed.tok_in` and `Fixed.tok_out` is `< P` (`P = 2^31 - 1`), before any Horner sum. SASH maps ids with `M31::from_u32_unchecked` (`m31_u32`, `prover/src/common.rs`), so `P + k` would alias `k`.
 2. **`SecurityParams`:** `log_blowup == 1`, `n_queries == 100`, `pow_bits == 0`.
 3. **`MissingLayer`:** `Fixed.layer` is `Some(l)` with `l < 2^16`.
 4. **`UnboundEdge`:** `Plan::new(&fixed.params).binding(fixed.layer)` has no `EdgeState::Unbound` edge, and `params.prove_argmax_lax == false`. The `--gkr-*` flags are backend choices and stay allowed.
 5. **`UnsoundDequant`:** every dequant `Spec` of the plan satisfies `Spec::sound()`, and `params.kmax <= KMAX_SOUND` (`21`, `prover/src/bf16.rs`).
-6. **`NotAccepted`:** `Verdict::accepts()` holds on the verifier build's `Verdict`. This includes `root_ok` and `model_root_ok` (proof commitments 0 and 1 equal `Fixed.pre_root` and `Fixed.model_root`), `embed_tok_ok` and `head_tok_ok`. `shape_root_ok` is always `None` in the verifier build: the guest does not re-derive the shape root, and `pre_root` is correct because the manifest pins it (§3 of [SECURITY.md](SECURITY.md)). Undecodable claims or proof also reject here.
+6. **`NotAccepted`:** `Verdict::accepts()` holds on the verifier build's `Verdict`. This includes `root_ok` and `model_root_ok` (proof commitments 0 and 1 equal `Fixed.pre_root` and `Fixed.model_root`), `embed_tok_ok` and `head_tok_ok`. `shape_root_ok` is always `None` in the verifier build: the guest does not re-derive the shape root. `pre_root` is bound on-chain to the enrolled manifest (§1.3), and its correctness rests on enrollment: relying parties re-derive it offline with `zk-prover model-roots` or `zk-prover expect-root --shape-only --params <tag>.fixed.json --calibration <manifest>` ([SECURITY.md](SECURITY.md) §3). Undecodable claims or proof also reject here.
 7. **`OpenSeam`:** `deq_out_open` and `rq_scale_open` are empty, and `ao_q_open` and `nn_open` are false. Upstream `accepts()` ignores them.
 
 Relation draws, challenge counts and the GKR instance list come only from the `Plan` of the parsed `params`, never from the proof.
 
-**`fixedHash`.** Decided: the guest commits the hash of the whole `Fixed` statement, and the manifest pins it. `fixedHash = sha256(serde_json::to_vec(&Fixed { tok_in: vec![], tok_out: vec![], ..parsed }))`, over the parsed struct, never the input bytes (serde drops unknown fields). It covers all of `Fixed`, not only `params`: `verify_composed` skips tree 0 in `sizes_ok`, and reads `layer`, `block` and `model` without checking them. The guest never reads a pin or a hash from its input, so one guest program serves every model.
+**`fixedHash`.** Decided: the guest commits the hash of the whole `Fixed` statement, and the manifest pins it. `fixedHash = sha256(serde_json::to_vec(&Fixed { tok_in: vec![], tok_out: vec![], ..parsed }))`, over the parsed struct, never the input bytes (serde drops unknown fields). It covers all of `Fixed`, not only `params`: `sizes_ok` skips tree 0, the verifier build never reads `layer` or `model`, and `block` is compared only with `rope.pos0` (`nn_pos_ok`, which passes when either is absent). The guest never reads a pin or a hash from its input, so one guest program serves every model.
 
-**Segment public values.** After rule 7, the guest commits 226 bytes with `sp1_zkvm::io::commit_slice` (never `commit`, which is bincode, and never `sp1-zkvm`'s `blake3` feature: the on-chain verifier hashes public values with sha256).
+**Segment public values.** After rule 7, the guest commits 226 bytes with `sp1_zkvm::io::commit_slice` (never `commit`, which is bincode, and never `sp1-zkvm`'s `blake3` feature: the aggregator verifies each segment proof with `verify_sp1_proof(vkey, sha256(publicValues))`, so the public-values digest must be sha256).
 
 | Offset | Bytes | Field | Value |
 |---:|---:|---|---|
