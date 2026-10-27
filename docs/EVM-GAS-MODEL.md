@@ -25,7 +25,7 @@ Osaka binds, and Amsterdam is tracked alongside it. Mainnet and Hoodi run Osaka.
 
 | Rule | Osaka | Amsterdam (provisional) |
 |---|---|---|
-| `EIP-7825` gas cap (`16,777,216`) | total gas | execution gas only (`EIP-8037`) |
+| `EIP-7825` gas cap (`16,777,216`) | total gas | all but state gas, so calldata and its floor still count (`EIP-8037`) |
 | Calldata floor, gas per zero / non-zero byte | 10 / 40 | 64 / 64 (`EIP-7976`) |
 | Intrinsic cost of a zero-value call | 21,000 | 12,000 + 3,000 (`EIP-2780`) |
 | Code size limit | 24,576 B | 65,536 B (`EIP-7954`) |
@@ -47,7 +47,7 @@ These figures derive from the §1 sizes, so they share their provenance.
 
 ## 4. Aggregated settlement gas breakdown (estimates, Osaka)
 
-One transaction carrying `SegmentClaim[23]`, the four token arrays and one wrapped SP1 proof (7,492 B of ABI calldata with a 260 B Groth16-sized proof: 3,417 non-zero and 4,075 zero bytes). Standard calldata plus execution exceeds the ~177,000-gas floor, so the floor does not bind.
+One transaction carrying `SegmentClaim[23]`, the four token arrays and one wrapped SP1 proof (7,492 B of ABI calldata with a 260 B Groth16-sized proof: 3,417 non-zero and 4,075 zero bytes). The floor is ~198,400 gas (~177,400 for the calldata plus the 21,000 intrinsic cost), below the table's ~409,100 total, so it does not bind.
 
 | Component | Gas (estimate) | Measured at |
 |---|---:|---|
