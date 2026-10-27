@@ -77,6 +77,7 @@ forge script script/DeployTestnet.s.sol:DeployTestnet --rpc-url "$HOODI_RPC_URL"
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): System dataflow across SASH, zkVM compression, and EVM contracts.
 - [docs/EVM-GAS-MODEL.md](docs/EVM-GAS-MODEL.md): Figures from the unpublished 23-segment TinyLlama-1.1B SASH run, the Osaka / Amsterdam network rules, measured gas and estimates.
 - [docs/ROADMAP.md](docs/ROADMAP.md): Milestones `M0` through `M4`.
+- [docs/STARK-NATIVE-ROUTE.md](docs/STARK-NATIVE-ROUTE.md): STARK-native routes to Ethereum compared with the SP1 BN254 wrap (research note, 2026-10-27).
 
 ## License
 

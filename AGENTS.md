@@ -50,6 +50,7 @@ User-decided rules with the same bar as the invariants.
 - `docs/ARCHITECTURE.md`: Two-layer hybrid design (zkVM segment compression + native Solidity SASH grid verifier).
 - `docs/EVM-GAS-MODEL.md`: Sizes from the unpublished TinyLlama-1.1B SASH run, the Osaka / Amsterdam network rules, measured gas and estimates.
 - `docs/ROADMAP.md`: Milestones `M0` through `M4` (Foundry -> Anvil -> Sepolia/Hoodi).
+- `docs/STARK-NATIVE-ROUTE.md`: Research note comparing STARK-native routes to Ethereum (Cairo / S-two / SHARP) with the SP1 BN254 wrap.
 - `crates/sash-evm-primitives`: Pure Rust reference SASH 23-segment grid checks and sha256 settlement digests, and the TinyLlama-1.1B fixture and `TinyLlamaFixture.sol` generator.
 - `contracts/`: Foundry Solidity verifier suite (`SashModelRegistry`, `SashGridVerifier`, `Sp1SashSegmentVerifier`, `DevTranscriptSegmentVerifier`, `VerifiableInferenceSettlement`), deployment scripts, and the Foundry rows of the `SPEC.md` §2.1 negative-control table.
 
