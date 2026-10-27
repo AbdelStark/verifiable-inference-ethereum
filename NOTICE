@@ -41,6 +41,43 @@ the patches modify:
     prover/src/gkr_key_tile.rs
     prover/src/gkrlink.rs
 
+  sp1/patches/0003-cfg-split-zk-prover.patch:
+    prover/Cargo.toml
+    prover/build.rs
+    prover/src/bf16.rs
+    prover/src/boundary.rs
+    prover/src/common.rs
+    prover/src/compose.rs
+    prover/src/encoding.rs
+    prover/src/gadgets/argmax/mod.rs
+    prover/src/gadgets/attention/air.rs
+    prover/src/gadgets/attention/mod.rs
+    prover/src/gadgets/attention/trace.rs
+    prover/src/gadgets/attention/witness.rs
+    prover/src/gadgets/attn_out/air.rs
+    prover/src/gadgets/attn_out/claims.rs
+    prover/src/gadgets/attn_out/mod.rs
+    prover/src/gadgets/attn_out/trace.rs
+    prover/src/gadgets/dequant/claims.rs
+    prover/src/gadgets/dequant/mod.rs
+    prover/src/gadgets/dequant/trace.rs
+    prover/src/gadgets/embed/mod.rs
+    prover/src/gadgets/freivalds/claims.rs
+    prover/src/gadgets/freivalds/mod.rs
+    prover/src/gadgets/freivalds/trace.rs
+    prover/src/gadgets/requant/mod.rs
+    prover/src/gadgets/requant/tables.rs
+    prover/src/gadgets/residual_stream/mod.rs
+    prover/src/gadgets/residual_stream/witness.rs
+    prover/src/gadgets/rope/mod.rs
+    prover/src/gadgets/rope/witness.rs
+    prover/src/gkr_key_tile.rs
+    prover/src/gkrlink.rs
+    prover/src/layer.rs
+    prover/src/lib.rs
+    prover/src/relations.rs
+    prover/src/util.rs
+
 SASH's NOTICE (Apache-2.0 §4(d)), carried with its source:
 
   zk-prover
