@@ -180,8 +180,6 @@ jobs:
         run: df -h /
       - name: Build SASH, check its pinned digests, regenerate the synthetic corpus and check the records
         run: sp1/scripts/sash-synthetic.sh
-      - name: One-time evidence for #40 (temporary, removed before merge)
-        run: sp1/scripts/evidence-gkr-move.sh
       - name: Disk after
         if: always()
         run: df -h / && sccache --show-stats
