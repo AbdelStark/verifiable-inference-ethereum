@@ -124,7 +124,9 @@ jobs:
         run: cargo test --locked -p sp1-host --features profiling
       - name: Clippy
         working-directory: sp1
-        run: cargo clippy --locked --workspace --all-targets -- -D warnings
+        run: |
+          cargo clippy --locked --workspace --all-targets -- -D warnings
+          cargo clippy --locked -p sp1-host --all-targets --features profiling -- -D warnings
       - name: Reproducible guest builds in the pinned SP1 Docker image
         run: |
           (cd sp1/segment-guest && cargo prove build --docker --tag v6.10.0 --locked --workspace-directory ../..)
@@ -160,8 +162,10 @@ jobs:
           echo /usr/local/cuda/lib64 | sudo tee /etc/ld.so.conf.d/cuda.conf
           sudo ldconfig
           echo /usr/local/cuda/bin >> "$GITHUB_PATH"
-      - name: SASH's Rust toolchain
-        run: rustup toolchain install nightly-2025-07-14 --profile minimal
+      - name: Vendor SASH and install its Rust toolchain (from its rust-toolchain.toml)
+        run: |
+          sp1/scripts/vendor-sash.sh
+          cd sp1/vendor/sash && rustup toolchain install --profile minimal
       - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
       # Only the downloaded crates: sccache covers the compiling. Never the corpus or the oracle binary.
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
