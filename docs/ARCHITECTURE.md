@@ -6,22 +6,24 @@
 +-------------------------------------------------------------------------+
 | GPU Prover Host (SASH zk-inference-prover @ eb95bfa)                    |
 |   Model: TinyLlama-1.1B-Chat-v1.0 (fe8a4ea, profile y-attnout-w12)      |
-|   Outputs 23 segment bundles: B0L0 .. B0L21 + head (761 MB JSON)        |
+|   Outputs 23 segment bundles: B0L0 .. B0L21 + head (761 MB JSON in the  |
+|   unpublished run; M2 reproduces it)                                    |
 +------------------------------------+------------------------------------+
                                      |
                                      v
 +-------------------------------------------------------------------------+
-| Off-Chain Proof Compression (RISC-V zkVM Guest -> BN254 Groth16)        |
-|   - Runs SASH verify_composed (no-cuda, pre-enrolled shape roots)       |
-|   - Emits 23 SegmentClaim structs; aggregates into publicDigest         |
-|   - Wraps into BN254 Groth16 proof (~260-384 bytes)                     |
+| Off-Chain Proof Compression (planned: M2 guests, M3 aggregator + wrap)  |
+|   - M2: SP1 v6 riscv64im guest per segment runs a verifier-only         |
+|     extraction of verify_composed; rejects token ids >= P               |
+|   - M3: aggregator verifies 23 proofs, commits publicDigest             |
+|   - M3: SP1 v6 BN254 wrap (Groth16 or PLONK, chosen at M3 start)        |
 +------------------------------------+------------------------------------+
                                      |
-                      Single Ethereum Transaction (< 600k gas)
+           Single Ethereum Transaction (< 600k gas: M3 exit gate)
                                      |
                                      v
 +-------------------------------------------------------------------------+
-| Ethereum EVM (Foundry -> Anvil -> Sepolia 11155111 / Hoodi 560048)      |
+| Ethereum EVM (Forge in-process EVM -> anvil (M1) -> Hoodi 560048 (M4))  |
 |                                                                         |
 |  [VerifiableInferenceSettlement.sol]                                    |
 |     |                                                                   |
@@ -29,7 +31,7 @@
 |     |         Loads enrolled ModelManifest & manifestRootsHash          |
 |     |                                                                   |
 |     +--> 2. [ISashSegmentVerifier.sol]                                  |
-|     |         - Sp1SashSegmentVerifier (BN254 Groth16 via 0x08)         |
+|     |         - Sp1SashSegmentVerifier (SP1 BN254 wrap; proofs from M3) |
 |     |         - DevTranscriptSegmentVerifier (chainid==31337 dev only)  |
 |     |                                                                   |
 |     +--> 3. [SashGridVerifier.sol]                                      |
@@ -42,9 +44,9 @@
 
 ## 2. Why `SashGridVerifier.sol` runs natively on the EVM instead of moving everything off-chain
 
-A naive zkVM wrapper would collapse the entire 23-segment LLM run into a single opaque boolean (`true`) inside the RISC-V guest. While slightly cheaper in calldata (~3.5 KiB saved), opaque aggregation hides protocol structure from on-chain contracts and concentrates 100% of binding logic inside off-chain guest code.
+A naive zkVM wrapper would collapse the entire 23-segment LLM run into a single opaque boolean (`true`) inside the RISC-V guest. While slightly cheaper in calldata (an estimated ~3.5 KiB saved), opaque aggregation hides protocol structure from on-chain contracts and concentrates 100% of binding logic inside off-chain guest code.
 
 By keeping **manifest admission, 22-layer residual Merkle root chaining, the sha256 `publicDigest` over the segment claims and both token vectors, prompt/response slicing, teacher-forcing loop closure, and EOS checking** native in Solidity (~22k gas total, estimated):
 1. Smart contracts inspect and bind per-layer `modelRoot` and `preRoot` commitments directly on-chain.
 2. Any bug in token indexing, prompt prefix slicing, or boundary chaining is prevented by small, auditable, unconditional EVM code.
-3. The segment proof interface (`ISashSegmentVerifier`) becomes completely modular: swapping BN254 Groth16 (`Sp1SashSegmentVerifier`) for RISC Zero requires **zero** changes to `SashModelRegistry`, `SashGridVerifier`, or downstream consumer contracts.
+3. The segment proof interface (`ISashSegmentVerifier`) stays modular: changing the proof system behind it, such as the BN254 wrap that M3 chooses for `Sp1SashSegmentVerifier`, requires **zero** changes to `SashModelRegistry`, `SashGridVerifier`, or downstream consumer contracts.

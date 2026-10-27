@@ -6,7 +6,7 @@ help:
 	@echo "  make rust-check  - Run cargo fmt --check, then clippy -D warnings and cargo test --workspace with --locked"
 	@echo "  make vectors     - Regenerate contracts/src/sash/TinyLlamaFixture.sol from the Rust TinyLlama fixture"
 	@echo "  make forge-test  - Check Solidity format, build against foundry.lock, lint, and run Foundry test suite with gas report"
-	@echo "  make anvil-demo  - Run local Anvil dev-mode deployment and TinyLlama-1.1B 23-segment settlement"
+	@echo "  make anvil-demo  - Run DeployDevAnvil.s.sol in Forge's in-process EVM (chain 31337): dev-mode deployment and TinyLlama-1.1B 23-segment settlement"
 	@echo "  make clean       - Clean build outputs"
 
 rust-check:

@@ -60,6 +60,6 @@ jobs:
       - name: Run TinyLlama 23-segment settlement & Foundry rows of the SPEC.md §2.1 negative-control table
         working-directory: contracts
         run: forge test -vvv --gas-report
-      - name: Dry-run local Anvil settlement script
+      - name: Run DeployDevAnvil.s.sol in Forge's in-process EVM (chain 31337)
         working-directory: contracts
         run: forge script script/DeployDevAnvil.s.sol:DeployDevAnvil -vvvv

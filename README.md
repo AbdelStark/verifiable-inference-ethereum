@@ -4,29 +4,25 @@ Ethereum EVM and Solidity verification stack for **SASH verifiable LLM inference
 
 ## Why a two-layer EVM architecture is required
 
-A verified 23-segment SASH proof for `TinyLlama/TinyLlama-1.1B-Chat-v1.0` (`fe8a4ea1ffedaf415f4da2f062534de366a451e6`, profile `y-attnout-w12`, `S = 32` tokens: 25 prompt + 8 answer tokens) spans **761.02 MB of JSON** (**289.38 MB** packed binary STARK + **7.14 MB** binary GKR = **296.51 MB**), **501,197** committed trace columns, **519,784** `QM31` OODS evaluations, and **~4.64 million** 64-byte `BLAKE2s-256` compression blocks.
+An unpublished 23-segment SASH run for `TinyLlama/TinyLlama-1.1B-Chat-v1.0` (`fe8a4ea1ffedaf415f4da2f062534de366a451e6`, profile `y-attnout-w12`, `S = 32` tokens: 25 prompt + 8 answer tokens) produced **761.02 MB of JSON** bundles, **501,197** committed trace columns, **519,784** `QM31` OODS evaluations and **~4.64 million** 64-byte `BLAKE2s-256` compression blocks. Its proofs come to **~296.51 MB** (a 289.38 MB stwo `size_estimate()` of the STARK proofs, in memory and not a wire format, plus 7.14 MB of GKR `serde_json` bytes). M2 reproduces these figures from the bundles ([docs/EVM-GAS-MODEL.md](docs/EVM-GAS-MODEL.md) §1).
 
-On Ethereum Mainnet, Sepolia (`11155111`), and Hoodi (`560048`):
-- **`EIP-7825`** (live since Fusaka) enforces a hard consensus ceiling of **`16,777,216` gas ($2^{24}$) per transaction**.
-- **`EIP-7623`** (live since Pectra) enforces a calldata floor of **`40` gas per non-zero byte** (~10.53 billion gas for 296.51 MB, or ~477.5 million gas for a single 13.45 MB layer segment `B0L0`).
-- **`EIP-152`** (`0x09`) provides 64-bit `BLAKE2f` (`BLAKE2b`), not 32-bit `BLAKE2s`, making 4.64M `BLAKE2s` blocks cost >9.2 billion gas in EVM bytecode.
+Mainnet and Hoodi run Osaka, which binds this project; Amsterdam is tracked alongside it ([docs/EVM-GAS-MODEL.md](docs/EVM-GAS-MODEL.md) §2 lists both forks' constants). Verifying those proofs directly in one EVM transaction would need at least ~804x the `EIP-7825` per-transaction cap under Osaka (~1,131x under Amsterdam), estimated from those sizes: calldata plus ~9.28 billion gas of `BLAKE2s` in Solidity, which no precompile computes ([docs/EVM-GAS-MODEL.md](docs/EVM-GAS-MODEL.md) §3). `verifiable-inference-ethereum` therefore splits the work across two layers, without weakening SASH's execution relation:
 
-Direct monolithic raw verification of all 23 wide segments in one EVM transaction is therefore consensus-impossible (>1,200x above `EIP-7825`). `verifiable-inference-ethereum` solves this cleanly without weakening SASH's execution relation by splitting work across two explicit layers:
-
-1. **Off-chain segment verification & compression (zkVM BN254 adapter):**
-   Verifies SASH's unmodified `verify_composed` per segment using pre-enrolled `pre_root` manifests, and compresses segment verdicts into succinct BN254 Groth16 proof(s) (`SP1SashSegmentVerifier.sol`, ~270k gas).
-2. **Native Solidity SASH grid settlement (`contracts/src/`):**
+1. **Off-chain segment verification and compression (planned, M2 and M3):**
+   - M2: an SP1 v6 `riscv64im` guest per segment runs a verifier-only extraction of SASH's `verify_composed`. Unmodified, `verify_composed` cannot run in a guest: it calls `std::time::Instant::now`, which panics on SP1's `zkvm` target, and its crate needs stwo's nightly `prover` feature (for the GKR verifier) and nitroo's CUDA build script.
+   - M3: an aggregator guest verifies the 23 segment proofs and commits `publicDigest`; an SP1 v6 BN254 wrap (Groth16 or PLONK, chosen at M3 start) makes it verifiable on-chain through `Sp1SashSegmentVerifier.sol` (~270k gas, estimated).
+2. **Native Solidity SASH grid settlement (`contracts/src/`, present):**
    Enforces on-chain in pure Solidity:
    - Enrolled 23-segment `(pre_root, model_root)` manifest membership (`SashModelRegistry.sol`),
    - All 22 inter-layer residual-stream Merkle root links (`out_root[L] == in_root[L+1]`),
    - A sha256 `publicDigest` over the segment claims and the `tok_in` / `tok_out` vectors, which the segment proof must attest, so the tokens are the ones SASH's own `embed_tok` / `head_tok` checks used ([SPEC.md](SPEC.md) §1),
    - Public prompt prefix matching, autoregressive teacher-forcing loop closure (`tok_in[P+j] == tok_out[P-1+j]`), and EOS (`2`) termination (`SashGridVerifier.sol`, ~22k gas, estimated).
 
-Total single-transaction settlement gas in aggregated mode is an estimated **~402k gas** (**2.4%** of the `EIP-7825` cap).
+Aggregated single-transaction settlement is estimated at **~409k gas** (**2.4%** of the `EIP-7825` cap) with a Groth16 wrap; M3 measures it ([docs/EVM-GAS-MODEL.md](docs/EVM-GAS-MODEL.md) §4).
 
 ## Exact claim boundary
 
-An emitted `InferenceVerified` event establishes **execution integrity** for one declared run of an enrolled quantized model manifest under SASH's `y-attnout-w12` integer/lookup relation. It does **not** claim floating-point (`bf16`/`fp32`) equivalence on uncalibrated inputs, weight/prompt secrecy (zero-knowledge), or behavioral safety of the model's text output. See [SECURITY.md](SECURITY.md) and [SPEC.md](SPEC.md) for full assumption accounting.
+An emitted `InferenceVerified` event whose `verifierKind` is not `DEV_TRANSCRIPT_ONLY` (`0`) establishes **execution integrity** for one declared run of an enrolled quantized model manifest under SASH's `y-attnout-w12` integer/lookup relation. A dev-mode event (`verifierKind == 0`) proves nothing about SASH execution. No event claims floating-point (`bf16`/`fp32`) equivalence on uncalibrated inputs, weight/prompt secrecy (zero-knowledge), or behavioral safety of the model's text output. See [SECURITY.md](SECURITY.md) and [SPEC.md](SPEC.md) for full assumption accounting.
 
 ## Quickstart
 
@@ -53,30 +49,32 @@ make rust-check
 This runs:
 - Real 23-segment `TinyLlama-1.1B-Chat-v1.0` SASH grid verification (`22` residual Merkle links + prompt, teacher-forcing, answer and EOS checks for `"Name the capital of France in one short sentence."` -> `"The capital of France is Paris."`),
 - The sha256 `manifestRootsHash`, token hashes and `publicDigest` checked against [SPEC.md](SPEC.md) §1.4,
-- The grid-level adversarial mutation rejection tests (controls 1 to 5, 10 to 13 and 16).
+- The grid-level negative controls (the Rust rows of the [SPEC.md](SPEC.md) §2.1 negative-control table).
 
-### 2. Run Foundry Solidity unit, gas & local Anvil settlement tests
+### 2. Run the Foundry suite and the dev-mode settlement script
 
 ```bash
 make forge-test
 make anvil-demo
 ```
 
-### 3. Deploy to Ethereum Sepolia (`11155111`) or Hoodi (`560048`)
+`make anvil-demo` runs `DeployDevAnvil.s.sol` in Forge's in-process EVM on chain `31337`, not against an anvil node. Settlement on a running anvil node is M1.
 
-Production testnet deployments disable `DevTranscriptSegmentVerifier` (`allowDevVerifier = false`) and bind `Sp1SashSegmentVerifier` to an immutable `SP1VerifierGateway` and `sashAggregatorVKey`:
+### 3. Deploy to Hoodi (`560048`) (M4)
+
+Testnet deployment is M4. It targets Hoodi; Sepolia (`11155111`) is optional. It disables `DevTranscriptSegmentVerifier` (`allowDevVerifier = false`) and binds `Sp1SashSegmentVerifier` to an immutable SP1 verifier address (`SP1_VERIFIER_GATEWAY`) and `SASH_AGGREGATOR_VKEY`. The vkey needs the M3 aggregator, and M3 chooses whether that address is a pinned SP1 verifier or the `SP1VerifierGateway`; `Sp1SashSegmentVerifier` takes either.
 
 ```bash
 cd contracts
-forge script script/DeployTestnet.s.sol:DeployTestnet --rpc-url "$SEPOLIA_RPC_URL" --broadcast --verify -vvvv
+forge script script/DeployTestnet.s.sol:DeployTestnet --rpc-url "$HOODI_RPC_URL" --broadcast --verify -vvvv
 ```
 
 ## Documentation
 
-- [SPEC.md](SPEC.md): Bit-exact protocol, wire format, contract interfaces, gas table, and negative-control table (§2.1).
+- [SPEC.md](SPEC.md): Proved statement, sha256 digest layouts, contract interfaces, and the negative-control table (§2.1).
 - [SECURITY.md](SECURITY.md): Threat model, transparent-STARK vs BN254-wrapper assumption shift, and dev-verifier isolation.
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): System dataflow across SASH, zkVM compression, and EVM contracts.
-- [docs/EVM-GAS-MODEL.md](docs/EVM-GAS-MODEL.md): Empirical 23-segment TinyLlama-1.1B proof measurements and `EIP-7825` / `EIP-7623` math.
+- [docs/EVM-GAS-MODEL.md](docs/EVM-GAS-MODEL.md): Figures from the unpublished 23-segment TinyLlama-1.1B SASH run, the Osaka / Amsterdam network rules, and gas estimates.
 - [docs/ROADMAP.md](docs/ROADMAP.md): Milestones `M0` through `M4`.
 
 ## License
