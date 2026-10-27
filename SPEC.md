@@ -36,7 +36,7 @@ All hashes are `sha256`. `be16` / `be32` are big-endian `uint16` / `uint32`. sha
 
 ### 1.4 TinyLlama values
 
-Taken from an unpublished SASH run that M2 checks against the proof bundles: `TinyLlama/TinyLlama-1.1B-Chat-v1.0 @ fe8a4ea1ffedaf415f4da2f062534de366a451e6`, profile `y-attnout-w12`, `N = 23`, `S = 32` (`25` prompt + `8` answer tokens ending at EOS `2`), prompt `"Name the capital of France in one short sentence."`, response `"The capital of France is Paris."`. `contracts/src/sash/TinyLlamaFixture.sol` is generated from `crates/sash-evm-primitives/src/tinyllama_fixture.rs` (`make vectors`).
+Taken from an unpublished SASH run that M2 checks against the proof bundles. The run is `AbdelStark/hallmark`'s TinyLlama case: its recipe (`make e2e-llm` at hallmark `675c99af66067d129dac30d6acc6612f4e392e68`) regenerates the 69 bundle files byte for byte, and `sp1/pins/tinyllama.sha256` pins them (`make bundles-check`). The case: `TinyLlama/TinyLlama-1.1B-Chat-v1.0 @ fe8a4ea1ffedaf415f4da2f062534de366a451e6`, profile `y-attnout-w12`, `N = 23`, `S = 32` (`25` prompt + `8` answer tokens ending at EOS `2`), prompt `"Name the capital of France in one short sentence."`, response `"The capital of France is Paris."`. `contracts/src/sash/TinyLlamaFixture.sol` is generated from `crates/sash-evm-primitives/src/tinyllama_fixture.rs` (`make vectors`).
 
 - `modelId` = `sha256("TinyLlama/TinyLlama-1.1B-Chat-v1.0@fe8a4ea1ffedaf415f4da2f062534de366a451e6:y-attnout-w12")` = `0x3def3a0832d3d82a82283200010c182132ac7d9eec681b772a95834f29e43c2a`
 - `manifestRootsHash` = `0xfd8ecd8c79795b3a79e426d60a912d0a8a160188539c9b12dd3803b249c55b26`
