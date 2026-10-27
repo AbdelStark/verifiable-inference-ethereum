@@ -1,4 +1,4 @@
-.PHONY: help check rust-check vectors forge-test anvil-demo sp1-vendor sp1-check sp1-docker bundles-check clean
+.PHONY: help check rust-check vectors forge-test anvil-demo sp1-vendor sp1-check sp1-docker sash-synthetic bundles-check clean
 
 help:
 	@echo "Targets:"
@@ -10,6 +10,8 @@ help:
 	@echo "  make sp1-vendor  - Build sp1/vendor/sash: SASH eb95bfa from its sha256-pinned tarball plus sp1/patches"
 	@echo "  make sp1-check   - Vendor SASH, check nitroo's Stwo without the prover feature on stable, then cargo fmt --check, the executor tests and clippy -D warnings in sp1/ (needs SP1 v6.10.0 and protoc)"
 	@echo "  make sp1-docker  - Build the segment guest and stwo-bench reproducibly in the pinned SP1 v6.10.0 Docker image and print their ELF sha256"
+	@echo "  make sash-synthetic"
+	@echo "                  - Linux + CUDA 12.9 toolkit only: build upstream SASH's prover, check its pinned digests, and regenerate the synthetic corpus and its oracle records"
 	@echo "  make bundles-check"
 	@echo "                  - Check the 69 TinyLlama proof bundle files in BUNDLES (default runs/tinyllama) against sp1/pins/tinyllama.sha256"
 	@echo "  make clean       - Clean build outputs"
@@ -49,6 +51,11 @@ check: rust-check
 	else \
 		echo "NOTE: the reproducible guest build needs an x86_64 host with cargo-prove and the $(SP1_IMAGE) image; it runs in CI."; \
 	fi
+	@if [ "$$(uname -s)" = Linux ] && command -v nvcc >/dev/null 2>&1 && [ -e /usr/local/cuda/lib64/libcudart.so ]; then \
+		$(MAKE) sash-synthetic; \
+	else \
+		echo "NOTE: the synthetic SASH corpus needs Linux with the CUDA 12.9 toolkit (no GPU); it runs in CI."; \
+	fi
 
 anvil-demo:
 	contracts/script/anvil-settle.sh
@@ -75,6 +82,9 @@ sp1-docker: sp1-vendor
 	cd sp1/segment-guest && cargo prove build --docker --tag v6.10.0 --locked --workspace-directory ../..
 	cd sp1/stwo-bench && cargo prove build --docker --tag v6.10.0 --locked --workspace-directory ../..
 	shasum -a 256 sp1/target/elf-compilation/docker/riscv64im-succinct-zkvm-elf/release/segment-guest sp1/target/elf-compilation/docker/riscv64im-succinct-zkvm-elf/release/stwo-bench
+
+sash-synthetic:
+	sp1/scripts/sash-synthetic.sh
 
 BUNDLES ?= runs/tinyllama
 

@@ -1,0 +1,21 @@
+# Upstream SASH's verifier, unmodified in behaviour (default features, prover included), as the
+# reference for the guest's differential tests. Its own workspace: it builds on SASH's nightly
+# toolchain and links the CUDA runtime, which the sp1/ workspace must not.
+[workspace]
+
+[package]
+name = "sash-oracle"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+description = "Prints upstream SASH verify_composed's verdict and binding table for one bundle as JSON"
+
+[dependencies]
+serde_json = "1"
+zk-prover = { path = "../vendor/sash/prover" }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 16
