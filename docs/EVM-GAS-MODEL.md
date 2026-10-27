@@ -59,7 +59,7 @@ M1 measures the grid path and the dev-mode settlement on Foundry 1.8.6 (`evm_ver
 | `VerifiableInferenceSettlement` deployment | 872,019 | 1,133,624 | 4,293 B |
 | `VerifiableInferenceSettlement.verifyAndSettle` | 201,052 | 277,702 | 7,236 B |
 
-**The settle transaction under `EIP-7623`.** Its calldata is 7,236 B: 4,048 zero and 3,188 non-zero bytes.
+**The settle transaction under `EIP-7623`** (anvil receipt, Osaka, Foundry 1.8.6). Its calldata is 7,236 B: 4,048 zero and 3,188 non-zero bytes.
 
 | Part | Gas |
 |---|---:|
@@ -69,7 +69,7 @@ M1 measures the grid path and the dev-mode settlement on Foundry 1.8.6 (`evm_ver
 | **`gasUsed`** | **201,052** |
 | Floor: 21,000 + 10 × 4,048 + 40 × 3,188 | 189,000 |
 
-The floor doesn't bind, but it is only 12,052 gas below `gasUsed`: calldata, not execution, dominates the dev-mode settlement.
+The floor doesn't bind, but it is only 12,052 gas below `gasUsed`: cutting execution by more than ~12k would make the calldata floor bind.
 
 | Component of the settle execution (Osaka, Foundry 1.8.6) | Gas | Source |
 |---|---:|---|
@@ -88,7 +88,7 @@ One transaction carrying `SegmentClaim[23]`, the four token arrays and one wrapp
 |---|---:|---|
 | Intrinsic tx gas | 21,000 | — |
 | Standard calldata: 4 × 4,075 + 16 × 3,417 | 70,972 | computed |
-| Dev-mode settle execution, 112,852, less the dev verifier's ~1,000 | ~111,850 | measured (§4) |
+| Dev-mode settle execution, 112,852, less the dev verifier's ~1,000 | ~111,850 | measured (§4: anvil receipt, Osaka, Foundry 1.8.6) |
 | `Sp1SashSegmentVerifier` (BN254 wrap: ~270k Groth16, ~300k PLONK; chosen at M3 start) | ~270,000 | estimate, M3 measures it |
 | **Total single-tx gas** | **~473,800** (~2.8% of `EIP-7825`) | estimate, M3 measures it |
 
