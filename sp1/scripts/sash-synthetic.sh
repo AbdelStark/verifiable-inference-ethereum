@@ -5,8 +5,10 @@
 #
 # Records (committed): sp1/testdata/synthetic.sha256 and sp1/testdata/synthetic.oracle.json.
 # The bundles themselves stay in the gitignored sp1/testdata/synthetic/. A run fails unless the fresh
-# corpus and oracle output equal the records. SASH_SYNTHETIC_BOOTSTRAP=1 writes the records instead; so
-# does a run with no records yet, which then fails so that they get reviewed and committed.
+# corpus and oracle output equal the records. Every run also writes the fresh ones next to them
+# (testdata/*.fresh, gitignored, uploaded by CI) so an intended change can be reviewed and committed
+# from any host. SASH_SYNTHETIC_BOOTSTRAP=1 overwrites the records; so does a run with neither record
+# yet, which then fails so that they get reviewed and committed.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -82,18 +84,20 @@ expect skip_kv_boundary '[14]' ''
 expect skip_embedding '[15]' ''
 expect head '[16]' e3f31c1d4aeae77e
 
-fresh_oracle="$(jq -s 'add' "$corpus/.oracle.jsonl")"
+jq -s 'add' "$corpus/.oracle.jsonl" >testdata/synthetic.oracle.json.fresh
 rm -f "$corpus/.oracle.jsonl"
-fresh_sums="$(cd "$corpus" && sha256sum -- * | sort -k2)"
+(cd "$corpus" && sha256sum -- * | sort -k2) >testdata/synthetic.sha256.fresh
 
-if [[ "${SASH_SYNTHETIC_BOOTSTRAP:-}" == 1 || ! -f testdata/synthetic.sha256 || ! -f testdata/synthetic.oracle.json ]]; then
-    printf '%s\n' "$fresh_sums" >testdata/synthetic.sha256
-    printf '%s\n' "$fresh_oracle" >testdata/synthetic.oracle.json
-    echo "Wrote testdata/synthetic.sha256 and testdata/synthetic.oracle.json from this run"
+records=(testdata/synthetic.sha256 testdata/synthetic.oracle.json)
+if [[ "${SASH_SYNTHETIC_BOOTSTRAP:-}" == 1 || ( ! -f "${records[0]}" && ! -f "${records[1]}" ) ]]; then
+    cp testdata/synthetic.sha256.fresh "${records[0]}"
+    cp testdata/synthetic.oracle.json.fresh "${records[1]}"
+    echo "Wrote ${records[*]} from this run"
     [[ "${SASH_SYNTHETIC_BOOTSTRAP:-}" == 1 ]] || fail "the records were missing; review and commit the ones this run wrote"
     exit 0
 fi
-(cd "$corpus" && sha256sum -c --strict --quiet ../synthetic.sha256) || fail "the corpus differs from testdata/synthetic.sha256"
-[[ "$(cd "$corpus" && ls | wc -l)" == "$(wc -l <testdata/synthetic.sha256)" ]] || fail "the corpus has files testdata/synthetic.sha256 does not list"
-diff <(printf '%s\n' "$fresh_oracle") testdata/synthetic.oracle.json || fail "the oracle output differs from testdata/synthetic.oracle.json"
-echo "OK: corpus and oracle output match testdata/synthetic.sha256 and testdata/synthetic.oracle.json"
+for record in "${records[@]}"; do
+    [[ -f "$record" ]] || fail "$record is missing while the other record exists; restore it from git"
+    diff "$record" "$record.fresh" || fail "$record differs from this run ($record.fresh)"
+done
+echo "OK: corpus and oracle output match ${records[*]}"
