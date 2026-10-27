@@ -124,7 +124,9 @@ jobs:
         run: cargo test --locked -p sp1-host --features profiling
       - name: Clippy
         working-directory: sp1
-        run: cargo clippy --locked --workspace --all-targets -- -D warnings
+        run: |
+          cargo clippy --locked --workspace --all-targets -- -D warnings
+          cargo clippy --locked -p sp1-host --all-targets --features profiling -- -D warnings
       - name: Reproducible guest builds in the pinned SP1 Docker image
         run: |
           (cd sp1/segment-guest && cargo prove build --docker --tag v6.10.0 --locked --workspace-directory ../..)

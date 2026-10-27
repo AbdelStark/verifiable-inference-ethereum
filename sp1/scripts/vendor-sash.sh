@@ -26,7 +26,10 @@ if [[ ! -f "$tarball" ]]; then
     curl -sSfL --retry 3 -o "$tarball.tmp" "$url" || fail "could not download $url"
     mv "$tarball.tmp" "$tarball"
 fi
-[[ "$(sha256_of "$tarball")" == "$sha256" ]] || fail "$tarball does not have the pinned sha256 $sha256"
+if [[ "$(sha256_of "$tarball")" != "$sha256" ]]; then
+    rm -f "$tarball"
+    fail "the downloaded tarball does not have the pinned sha256 $sha256 (removed it)"
+fi
 
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
@@ -41,6 +44,9 @@ for p in ${patches[@]+"${patches[@]}"}; do
     # patch(1), not `git apply`: inside a git work tree `git apply` can skip a patch's paths and exit 0.
     patch -d "$src" -p1 -F0 --forward --batch --quiet < "$p" || fail "$p does not apply cleanly to SASH ${commit}"
 done
+# -F0 refuses fuzz but not an offset; patch(1) then leaves a backup. The tarball has no .orig or .rej.
+stray="$(find "$src" \( -name '*.orig' -o -name '*.rej' \) -print -quit)"
+[[ -z "$stray" ]] || fail "a patch applied at an offset or with fuzz (${stray#"$src"/})"
 
 if [[ -d "$tree" ]] && diff -rq "$src" "$tree" >/dev/null 2>&1; then
     echo "OK: $tree is SASH ${commit} plus ${n_patches} patch(es), unchanged"
