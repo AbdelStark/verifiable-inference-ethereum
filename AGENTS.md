@@ -53,6 +53,7 @@ User-decided rules with the same bar as the invariants.
 - `docs/STARK-NATIVE-ROUTE.md`: Research note comparing STARK-native routes to Ethereum (Cairo / S-two / SHARP) with the SP1 BN254 wrap.
 - `crates/sash-evm-primitives`: Pure Rust reference SASH 23-segment grid checks and sha256 settlement digests, and the TinyLlama-1.1B fixture and `TinyLlamaFixture.sol` generator.
 - `sp1/`: SP1 v6.10.0 workspace, separate from the root one, with its own `Cargo.lock`: the segment guest (`segment-guest`, today the token-id range check and `tokenHash`) and its host crate (`sp1-host`, which builds the guest and runs it in the SP1 executor), plus `pins/tinyllama.sha256`, the sha256 pins of the 69 TinyLlama proof bundle files (`make bundles-check`).
+- `bench/stwo-cairo/`: S-two unit-cost microbenchmarks (BLAKE2s, QM31 mul-add, M31 ingestion) as a Scarb executable, and `run.py`, which clones `stwo-cairo` at its pin, proves them and reproduces the tables in `docs/STARK-NATIVE-ROUTE.md`. Neither `make check` nor CI runs it.
 - `contracts/`: Foundry Solidity verifier suite (`SashModelRegistry`, `SashGridVerifier`, `Sp1SashSegmentVerifier`, `DevTranscriptSegmentVerifier`, `VerifiableInferenceSettlement`), deployment scripts, and the Foundry rows of the `SPEC.md` §2.1 negative-control table.
 
 ## 5. Testing and verification

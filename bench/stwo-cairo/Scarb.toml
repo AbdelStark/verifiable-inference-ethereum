@@ -1,0 +1,14 @@
+[package]
+name = "stwo_unit_costs"
+version = "0.1.0"
+edition = "2024_07"
+
+[[target.executable]]
+
+[dependencies]
+cairo_execute = "2.18.0"
+
+# Same settings as stwo-cairo's `proving` profile for its verifiers.
+[cairo]
+enable-gas = false
+unsafe-panic = true
