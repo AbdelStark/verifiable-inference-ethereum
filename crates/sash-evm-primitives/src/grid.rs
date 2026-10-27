@@ -220,186 +220,132 @@ mod tests {
         );
     }
 
+    /// Runs the grid on the TinyLlama fixture with `segs`, `tok_in`, `prompt_ids` or `answer_ids`
+    /// replaced where given (negative controls, `SPEC.md` §2.1).
+    fn check(
+        manifest: Option<ModelManifest>,
+        segs: Option<&[SegmentClaim]>,
+        tok_in: Option<&[u32]>,
+        prompt_ids: Option<&[u32]>,
+        answer_ids: Option<&[u32]>,
+    ) -> Result<(), GridError> {
+        let base = tinyllama_segments();
+        let manifest = manifest.unwrap_or_else(|| tinyllama_manifest(&base));
+        verify_sash_grid(
+            &manifest,
+            segs.unwrap_or(&base),
+            tok_in.unwrap_or(&TINYLLAMA_TOK_IN),
+            &TINYLLAMA_TOK_OUT,
+            prompt_ids.unwrap_or(&TINYLLAMA_PROMPT_IDS),
+            answer_ids.unwrap_or(&TINYLLAMA_ANSWER_IDS),
+        )
+    }
+
     #[test]
-    fn negative_controls_reject_all_tampered_bundles() {
-        let base_segs = tinyllama_segments();
-        let manifest = tinyllama_manifest(&base_segs);
+    fn control_01_forged_model_root() {
+        let mut s = tinyllama_segments();
+        s[7].model_root[31] ^= 0x01;
+        assert_eq!(
+            check(None, Some(&s), None, None, None),
+            Err(GridError::ManifestRootMismatch)
+        );
+    }
 
-        // 1. Forged model_root on layer 7
-        {
-            let mut s = base_segs.clone();
-            s[7].model_root[0] ^= 0x01;
-            assert_eq!(
-                verify_sash_grid(
-                    &manifest,
-                    &s,
-                    &TINYLLAMA_TOK_IN,
-                    &TINYLLAMA_TOK_OUT,
-                    &TINYLLAMA_PROMPT_IDS,
-                    &TINYLLAMA_ANSWER_IDS
-                ),
-                Err(GridError::ManifestRootMismatch)
-            );
-        }
+    #[test]
+    fn control_02_forged_pre_root() {
+        let mut s = tinyllama_segments();
+        s[0].pre_root[31] ^= 0x01;
+        assert_eq!(
+            check(None, Some(&s), None, None, None),
+            Err(GridError::ManifestRootMismatch)
+        );
+    }
 
-        // 2. Forged pre_root on layer 0
-        {
-            let mut s = base_segs.clone();
-            s[0].pre_root[31] ^= 0x80;
-            assert_eq!(
-                verify_sash_grid(
-                    &manifest,
-                    &s,
-                    &TINYLLAMA_TOK_IN,
-                    &TINYLLAMA_TOK_OUT,
-                    &TINYLLAMA_PROMPT_IDS,
-                    &TINYLLAMA_ANSWER_IDS
-                ),
-                Err(GridError::ManifestRootMismatch)
-            );
-        }
+    #[test]
+    fn control_03_out_of_order_segment_index() {
+        let mut s = tinyllama_segments();
+        s[5].segment_index = 6;
+        assert_eq!(
+            check(None, Some(&s), None, None, None),
+            Err(GridError::InvalidSegmentIndex {
+                position: 5,
+                got: 6
+            })
+        );
+    }
 
-        // 3. Out-of-order segment_index
-        {
-            let mut s = base_segs.clone();
-            s[5].segment_index = 6;
-            assert_eq!(
-                verify_sash_grid(
-                    &manifest,
-                    &s,
-                    &TINYLLAMA_TOK_IN,
-                    &TINYLLAMA_TOK_OUT,
-                    &TINYLLAMA_PROMPT_IDS,
-                    &TINYLLAMA_ANSWER_IDS
-                ),
-                Err(GridError::InvalidSegmentIndex {
-                    position: 5,
-                    got: 6
-                })
-            );
-        }
+    #[test]
+    fn control_04_broken_residual_boundary_link() {
+        let mut s = tinyllama_segments();
+        s[10].residual_out_root[31] ^= 0xff;
+        assert_eq!(
+            check(None, Some(&s), None, None, None),
+            Err(GridError::ResidualBoundaryMismatch { link: 10 })
+        );
+    }
 
-        // 4. Broken residual-stream Merkle root link between B0L10 and B0L11
-        {
-            let mut s = base_segs.clone();
-            s[10].residual_out_root[3] ^= 0xff;
-            assert_eq!(
-                verify_sash_grid(
-                    &manifest,
-                    &s,
-                    &TINYLLAMA_TOK_IN,
-                    &TINYLLAMA_TOK_OUT,
-                    &TINYLLAMA_PROMPT_IDS,
-                    &TINYLLAMA_ANSWER_IDS
-                ),
-                Err(GridError::ResidualBoundaryMismatch { link: 10 })
-            );
-        }
+    #[test]
+    fn control_05_head_non_zero_residual_out_root() {
+        let mut s = tinyllama_segments();
+        s[22].residual_out_root[31] = 1;
+        assert_eq!(
+            check(None, Some(&s), None, None, None),
+            Err(GridError::HeadMustNotCarryOutRoot)
+        );
+    }
 
-        // 5. Non-zero residual_out_root on head
-        {
-            let mut s = base_segs.clone();
-            s[22].residual_out_root[0] = 1;
-            assert_eq!(
-                verify_sash_grid(
-                    &manifest,
-                    &s,
-                    &TINYLLAMA_TOK_IN,
-                    &TINYLLAMA_TOK_OUT,
-                    &TINYLLAMA_PROMPT_IDS,
-                    &TINYLLAMA_ANSWER_IDS
-                ),
-                Err(GridError::HeadMustNotCarryOutRoot)
-            );
-        }
+    #[test]
+    fn control_10_prompt_mismatch() {
+        let mut pr = TINYLLAMA_PROMPT_IDS;
+        pr[4] = 9999;
+        assert_eq!(
+            check(None, None, None, Some(&pr), None),
+            Err(GridError::PromptTokenMismatch { index: 4 })
+        );
+    }
 
-        // 10. Public prompt_ids mismatch
-        {
-            let mut pr = TINYLLAMA_PROMPT_IDS;
-            pr[10] = 9999;
-            assert_eq!(
-                verify_sash_grid(
-                    &manifest,
-                    &base_segs,
-                    &TINYLLAMA_TOK_IN,
-                    &TINYLLAMA_TOK_OUT,
-                    &pr,
-                    &TINYLLAMA_ANSWER_IDS
-                ),
-                Err(GridError::PromptTokenMismatch { index: 10 })
-            );
-        }
+    #[test]
+    fn control_11_broken_autoregressive_loop() {
+        let mut ti = TINYLLAMA_TOK_IN;
+        ti[27] = 1111;
+        assert_eq!(
+            check(None, None, Some(&ti), None, None),
+            Err(GridError::AutoregressiveLoopMismatch { step: 2 })
+        );
+    }
 
-        // 11. Broken autoregressive teacher-forcing loop
-        {
-            let mut ti = TINYLLAMA_TOK_IN;
-            ti[27] = 1111;
-            assert_eq!(
-                verify_sash_grid(
-                    &manifest,
-                    &base_segs,
-                    &ti,
-                    &TINYLLAMA_TOK_OUT,
-                    &TINYLLAMA_PROMPT_IDS,
-                    &TINYLLAMA_ANSWER_IDS
-                ),
-                Err(GridError::AutoregressiveLoopMismatch { step: 2 })
-            );
-        }
+    #[test]
+    fn control_12_missing_eos() {
+        let mut m = tinyllama_manifest(&tinyllama_segments());
+        m.eos_token_id = 999;
+        assert_eq!(
+            check(Some(m), None, None, None, None),
+            Err(GridError::MissingEosTermination {
+                got: 2,
+                expected: 999
+            })
+        );
+    }
 
-        // 12. Missing EOS termination
-        {
-            let mut m = manifest.clone();
-            m.eos_token_id = 999;
-            assert_eq!(
-                verify_sash_grid(
-                    &m,
-                    &base_segs,
-                    &TINYLLAMA_TOK_IN,
-                    &TINYLLAMA_TOK_OUT,
-                    &TINYLLAMA_PROMPT_IDS,
-                    &TINYLLAMA_ANSWER_IDS
-                ),
-                Err(GridError::MissingEosTermination {
-                    got: 2,
-                    expected: 999
-                })
-            );
-        }
+    #[test]
+    fn control_13_answer_mismatch() {
+        let mut ans = TINYLLAMA_ANSWER_IDS;
+        ans[3] = 777;
+        assert_eq!(
+            check(None, None, None, None, Some(&ans)),
+            Err(GridError::AnswerTokenMismatch { index: 3 })
+        );
+    }
 
-        // 13. Public answer_ids mismatch
-        {
-            let mut ans = TINYLLAMA_ANSWER_IDS;
-            ans[5] = 42;
-            assert_eq!(
-                verify_sash_grid(
-                    &manifest,
-                    &base_segs,
-                    &TINYLLAMA_TOK_IN,
-                    &TINYLLAMA_TOK_OUT,
-                    &TINYLLAMA_PROMPT_IDS,
-                    &ans
-                ),
-                Err(GridError::AnswerTokenMismatch { index: 5 })
-            );
-        }
-
-        // 16. Wrong segment count (truncated grid)
-        {
-            assert_eq!(
-                verify_sash_grid(
-                    &manifest,
-                    &base_segs[..22],
-                    &TINYLLAMA_TOK_IN,
-                    &TINYLLAMA_TOK_OUT,
-                    &TINYLLAMA_PROMPT_IDS,
-                    &TINYLLAMA_ANSWER_IDS
-                ),
-                Err(GridError::InvalidSegmentCount {
-                    got: 22,
-                    expected: 23
-                })
-            );
-        }
+    #[test]
+    fn control_16_truncated_segment_array() {
+        let s = tinyllama_segments();
+        assert_eq!(
+            check(None, Some(&s[..22]), None, None, None),
+            Err(GridError::InvalidSegmentCount {
+                got: 22,
+                expected: 23
+            })
+        );
     }
 }

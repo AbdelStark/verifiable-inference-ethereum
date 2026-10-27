@@ -45,13 +45,13 @@ User-decided rules with the same bar as the invariants.
 
 ## 4. Repository layout
 
-- `SPEC.md`: Canonical protocol, wire format, contract ABI, gas budget, and negative-control specification.
+- `SPEC.md`: Canonical protocol, wire format, contract ABI, and the negative-control table (§2.1).
 - `SECURITY.md`: Threat model, cryptographic assumption boundary, and audit checklist.
 - `docs/ARCHITECTURE.md`: Two-layer hybrid design (zkVM segment compression + native Solidity SASH grid verifier).
 - `docs/EVM-GAS-MODEL.md`: Empirical TinyLlama-1.1B SASH sizing and `EIP-7825` / `EIP-7623` arithmetic.
 - `docs/ROADMAP.md`: Milestones `M0` through `M4` (Foundry -> Anvil -> Sepolia/Hoodi).
 - `crates/sash-evm-primitives`: Pure Rust reference SASH 23-segment grid checks and sha256 settlement digests, and the TinyLlama-1.1B fixture and `TinyLlamaFixture.sol` generator.
-- `contracts/`: Foundry Solidity verifier suite (`SashModelRegistry`, `SashGridVerifier`, `Sp1SashSegmentVerifier`, `DevTranscriptSegmentVerifier`, `VerifiableInferenceSettlement`), deployment scripts, and negative-control test suite.
+- `contracts/`: Foundry Solidity verifier suite (`SashModelRegistry`, `SashGridVerifier`, `Sp1SashSegmentVerifier`, `DevTranscriptSegmentVerifier`, `VerifiableInferenceSettlement`), deployment scripts, and the Foundry rows of the `SPEC.md` §2.1 negative-control table.
 
 ## 5. Testing and verification
 
@@ -61,12 +61,12 @@ Before declaring any change complete, run:
 make check
 ```
 
-`make check` enforces `cargo fmt`, `cargo clippy --locked --workspace --all-targets -- -D warnings`, `cargo test --locked --workspace` (including the real TinyLlama-1.1B 23-segment grid, its digests pinned to `SPEC.md` §1.4, and the grid-level negative controls 1 to 5, 10 to 13 and 16; controls 6, 7 and 17 to 20 are settlement-level and exist only in Foundry), byte-exact sync of the generated `contracts/src/sash/TinyLlamaFixture.sol` with the Rust export (`export_vectors` run `--locked`), and, whenever Foundry is installed in `PATH`, `forge fmt --check`, `forge build --locked --sizes` (fails if a submodule differs from `contracts/foundry.lock`), `forge lint --deny warnings` and `forge test`.
+`make check` enforces `cargo fmt`, `cargo clippy --locked --workspace --all-targets -- -D warnings`, `cargo test --locked --workspace` (including the real TinyLlama-1.1B 23-segment grid, its digests pinned to `SPEC.md` §1.4, and the Rust rows of the `SPEC.md` §2.1 negative-control table; settlement-level controls run in Foundry only), byte-exact sync of the generated `contracts/src/sash/TinyLlamaFixture.sol` with the Rust export (`export_vectors` run `--locked`), and, whenever Foundry is installed in `PATH`, `forge fmt --check`, `forge build --locked --sizes` (fails if a submodule differs from `contracts/foundry.lock`), `forge lint --deny warnings` and `forge test`.
 
 - **Write tests when a change touches the protocol**: grid checks and settlement guards. Assert against `SPEC.md` and the primary-source vectors, not against the implementation.
 - **Don't add tests for docs, cosmetic changes, trivial wiring or config.**
 - **A failing invariant test is a real regression: fix the code, never weaken the test.** Never regenerate the fixture (`make vectors`) or edit a primary-source vector to make a failing test pass; the fixture changes only with an intended Rust primitive change (§2.4).
-- **A grid-level negative control lands in both suites**, Rust and Foundry, never on one side only. Settlement-level controls (token binding, proof bytes, verifier gating, replay) run in Foundry only (`SPEC.md` negative-control section).
+- **A grid-level negative control lands in both suites**, Rust and Foundry, never on one side only. Settlement-level controls (token binding, proof bytes, verifier gating, replay) run in Foundry only (`SPEC.md` §2.1 table).
 
 Other targets (`make help`): `make rust-check` (Rust gates only), `make vectors` (regenerate the fixture), `make forge-test` (`forge fmt --check && forge build --locked --sizes && forge lint --deny warnings && forge test -vvv --gas-report`), `make anvil-demo` (`DeployDevAnvil.s.sol` against chain `31337`), `make clean`.
 
@@ -96,8 +96,4 @@ When asked to work/implement/do/resolve issue #N:
 
 ## 9. Discrepancies to confirm
 
-Rust, Solidity and the fixture agree with each other on every item below; `SPEC.md` says otherwise. Each item is decided, and `SPEC.md` is wrong until the named issue lands.
-
-- **Negative controls**:
-  - `SPEC.md` §2 requires every control to revert in both the Rust and Foundry suites, but Rust has the grid-level controls only (1 to 5, 10 to 13 and 16).
-  - Decided: settlement-level controls run in Foundry only (§5), and SPEC is amended (#9).
+None open. Record any disagreement between the code and `SPEC.md` here (see the header).

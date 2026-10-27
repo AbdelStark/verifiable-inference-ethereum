@@ -53,23 +53,30 @@ Taken from an unpublished SASH run that M2 checks against the proof bundles: `Ti
 2. **`SashGridVerifier.sol`:** Verifies the segment count, indices `0..N-1`, `manifestRootsHash`, the 22 residual-stream boundary root equalities (`segments[i].residualOutRoot == segments[i+1].residualInRoot`), `segments[N-1].residualOutRoot == bytes32(0)`, `tokIn.length == tokOut.length == seqLen`, the token window (`P + A - 1 == seqLen`), the `promptIds` prefix match, autoregressive loop closure (`tokIn[P + j] == tokOut[P - 1 + j]`), the `answerIds` match, and `tokOut[P + A - 2] == eosTokenId`. It does not range-check token ids: the guest statement covers them (§1.1).
 3. **`VerifiableInferenceSettlement.sol`:** Checks `allowDevVerifier` against `segmentVerifier.verifierKind()`, checks replay protection (`settledRuns[runId]`), verifies `segmentVerifier.verifyAggregatedSegments(publicDigest, proofBytes)` with `publicDigest` as in §1.3, invokes `SashGridVerifier.verifyGrid`, records settlement, and emits `InferenceVerified`.
 
-Negative controls (numbers 8, 9, 14 and 15 are retired and not reused):
+### 2.1 Negative controls
 
-1. forged `modelRoot`;
-2. forged `preRoot`;
-3. out-of-order `segmentIndex`;
-4. broken residual boundary link;
-5. non-zero `head` out-root;
-6. mutated `tokIn`, submitted with the proof for the unmutated `publicDigest`;
-7. mutated `tokOut`, submitted with the proof for the unmutated `publicDigest`;
-10. mismatched `promptIds`;
-11. broken teacher-forcing loop;
-12. missing `EOS`;
-13. mismatched `answerIds`;
-16. wrong segment count;
-17. corrupted proof bytes;
-18. wrong `programVKey`;
-19. `DevTranscriptSegmentVerifier` on a non-dev chain or with `allowDevVerifier == false`;
-20. duplicate `runId` replay.
+Each control runs only in the suites it lists, and MUST revert there with the listed error.
 
-All of them MUST revert deterministically in both Rust and Foundry test suites.
+- **Grid-level controls** (1–5, 10–13, 16) run in both suites. Foundry submits each with a dev proof for its own `publicDigest`, so the revert comes from the grid check, not the proof check.
+- **Settlement-level controls** (6, 7, 17–20, F) run in Foundry only. They exercise the segment verifier, verifier gating or replay protection, which have no Rust counterpart.
+- Numbers 8, 9, 14 and 15 are retired and not reused.
+
+| # | Mutation of the valid TinyLlama run | Rust `GridError` | Solidity error | Suites | Tests (Rust · Foundry) |
+|---|---|---|---|---|---|
+| 1 | `segments[7].modelRoot` low bit flipped | `ManifestRootMismatch` | `ManifestRootMismatch(rootsHash, manifestRootsHash)` | Rust, Foundry | `control_01_forged_model_root` · `testNegative01_ForgedModelRootReverts` |
+| 2 | `segments[0].preRoot` low bit flipped | `ManifestRootMismatch` | `ManifestRootMismatch(rootsHash, manifestRootsHash)` | Rust, Foundry | `control_02_forged_pre_root` · `testNegative02_ForgedPreRootReverts` |
+| 3 | `segments[5].segmentIndex = 6` | `InvalidSegmentIndex { position: 5, got: 6 }` | `InvalidSegmentIndex(5, 6)` | Rust, Foundry | `control_03_out_of_order_segment_index` · `testNegative03_OutOfOrderSegmentIndexReverts` |
+| 4 | `segments[10].residualOutRoot` low byte `^= 0xff` | `ResidualBoundaryMismatch { link: 10 }` | `ResidualBoundaryMismatch(10)` | Rust, Foundry | `control_04_broken_residual_boundary_link` · `testNegative04_BrokenResidualBoundaryLinkReverts` |
+| 5 | `segments[22].residualOutRoot = 1` | `HeadMustNotCarryOutRoot` | `HeadMustNotCarryOutRoot()` | Rust, Foundry | `control_05_head_non_zero_residual_out_root` · `testNegative05_HeadNonZeroResidualOutRootReverts` |
+| 6 | `tokIn[0] = promptIds[0] = 530`, original proof | — | `InvalidDevProofTag()` | Foundry | `testNegative06_MutatedTokInFailsSegmentProof` |
+| 7 | `tokOut[0]` low bit flipped, original proof | — | `InvalidDevProofTag()` | Foundry | `testNegative07_MutatedTokOutFailsSegmentProof` |
+| 10 | `promptIds[4] = 9999` | `PromptTokenMismatch { index: 4 }` | `PromptTokenMismatch(4)` | Rust, Foundry | `control_10_prompt_mismatch` · `testNegative10_PromptMismatchReverts` |
+| 11 | `tokIn[27] = 1111` | `AutoregressiveLoopMismatch { step: 2 }` | `AutoregressiveLoopMismatch(2)` | Rust, Foundry | `control_11_broken_autoregressive_loop` · `testNegative11_BrokenAutoregressiveLoopReverts` |
+| 12 | manifest `eosTokenId = 999` | `MissingEosTermination { got: 2, expected: 999 }` | `MissingEosTermination(2, 999)` | Rust, Foundry | `control_12_missing_eos` · `testNegative12_MissingEosReverts` |
+| 13 | `answerIds[3] = 777` | `AnswerTokenMismatch { index: 3 }` | `AnswerTokenMismatch(3)` | Rust, Foundry | `control_13_answer_mismatch` · `testNegative13_AnswerMismatchReverts` |
+| 16 | `segments` truncated to 22 | `InvalidSegmentCount { got: 22, expected: 23 }` | `InvalidSegmentCount(22, 23)` | Rust, Foundry | `control_16_truncated_segment_array` · `testNegative16_TruncatedSegmentArrayReverts` |
+| 17 | proof bytes `0xdeadbeef` (dev verifier) | — | `InvalidDevProofTag()` | Foundry | `testNegative17_InvalidProofBytesReverts` |
+| 18 | against `StubSp1Gateway` (checks the vkey and the proof bytes): a proof for a wrong `programVKey`; an adapter pinned to a wrong `programVKey`, with a proof valid for the gateway's | — | `StubSp1Gateway.BadSp1Proof()` | Foundry | `testNegative18_WrongSp1VKeyProofReverts` |
+| 19 | dev verifier with `allowDevVerifier == false`; dev verifier on Sepolia (`11155111`) | — | `DevVerifierForbidden()`; `DevChainOnly(11155111)` | Foundry | `testNegative19_DevVerifierBlockedOnSepoliaAndWhenDisallowed` |
+| 20 | the same run settled twice | — | `RunAlreadySettled(runId)` | Foundry | `testNegative20_DuplicateRunReplayReverts` |
+| F | fuzz: one of `modelId`, any `SegmentClaim` field, any element of `tokIn` / `tokOut` / `promptIds` / `answerIds`, or one proof byte XORed with a non-zero mask; original dev proof, never re-derived | — | any revert | Foundry | `testFuzzSingleFieldMutationReverts` (seed fixed under `[fuzz]` in `contracts/foundry.toml`) |
