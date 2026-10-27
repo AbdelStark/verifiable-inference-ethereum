@@ -28,7 +28,7 @@ done
 scripts/vendor-sash.sh
 export CARGO_TARGET_DIR="$PWD/target/sash"
 
-echo "== build zk-prover (SIMD) and run upstream's test suite (pinned synthetic digests included; model-data tests are #[ignore]d upstream)"
+echo "== build zk-prover (SIMD) and run upstream's whole test suite, as its CI does (pinned synthetic digests included)"
 (cd vendor/sash && cargo build --release --locked && cargo test --release --locked)
 echo "== build sash-oracle"
 (cd sash-oracle && cargo build --release --locked)
