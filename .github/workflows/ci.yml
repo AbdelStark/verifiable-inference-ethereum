@@ -78,3 +78,42 @@ jobs:
       - name: Mine the TinyLlama dev-mode settlement on a local Osaka anvil node and check the receipts
         working-directory: contracts
         run: script/anvil-settle.sh
+
+  sp1:
+    name: SP1 guest workspace
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install Rust toolchain from rust-toolchain.toml
+        run: rustup toolchain install
+      - name: Install protoc (sp1-sdk build dependency)
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+      - name: Install SP1 v6.10.0
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          curl -sSfL -o "$RUNNER_TEMP/sp1up" https://raw.githubusercontent.com/succinctlabs/sp1/v6.10.0/sp1up/sp1up
+          bash "$RUNNER_TEMP/sp1up" --version v6.10.0
+          echo "$HOME/.sp1/bin" >> "$GITHUB_PATH"
+      - name: Print toolchain versions
+        run: |
+          "$HOME/.sp1/bin/cargo-prove" prove --version
+          rustc +succinct --version
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: sp1 -> target
+      - name: Format check
+        working-directory: sp1
+        run: cargo fmt -- --check
+      # Tests before clippy: they build the guest ELF, which sp1-build skips under clippy but `include_elf!` needs.
+      - name: Executor tests (token-hash guest, SPEC.md §1.1 rule 1)
+        working-directory: sp1
+        run: cargo test --locked --workspace
+      - name: Clippy
+        working-directory: sp1
+        run: cargo clippy --locked --workspace --all-targets -- -D warnings
+      - name: Reproducible guest build in the pinned SP1 Docker image
+        working-directory: sp1/segment-guest
+        run: |
+          cargo prove build --docker --tag v6.10.0 --locked --workspace-directory ../..
+          shasum -a 256 ../target/elf-compilation/docker/riscv64im-succinct-zkvm-elf/release/segment-guest

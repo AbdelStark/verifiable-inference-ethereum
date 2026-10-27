@@ -34,6 +34,9 @@ An emitted `InferenceVerified` event whose `verifierKind` is not `DEV_TRANSCRIPT
 | Foundry | `v1.8.6` | Install [foundryup](https://getfoundry.sh), then `foundryup --install v1.8.6`. |
 | solc | `0.8.38` | Nothing to do: `forge` downloads the version set in `contracts/foundry.toml`. |
 | jq | any | Your package manager (`brew install jq`, `apt install jq`); `make anvil-demo` reads the broadcast receipts with it. |
+| SP1 | `v6.10.0` | `curl -sSfL -o sp1up https://raw.githubusercontent.com/succinctlabs/sp1/v6.10.0/sp1up/sp1up && bash sp1up --version v6.10.0`; it installs `cargo-prove` into `~/.sp1/bin` and the `succinct` Rust toolchain that builds guests for `riscv64im-succinct-zkvm-elf`. Needed for the `sp1/` workspace (`make sp1-check`). |
+| protoc | any recent | Your package manager (`apt install protobuf-compiler`, `brew install protobuf`), or set `PROTOC` to a [protoc release](https://github.com/protocolbuffers/protobuf/releases) binary; `sp1-sdk`'s build scripts compile protobuf definitions. |
+| Docker | optional | Only for `make sp1-docker`, the reproducible guest build in the pinned `ghcr.io/succinctlabs/sp1:v6.10.0` image. CI runs it either way. |
 
 The Foundry dependencies (`forge-std`, `sp1-contracts`) are git submodules under `contracts/lib/`, locked in `contracts/foundry.lock`. Fetch them before any `forge` or `make` target, either by cloning with `git clone --recursive` or, in an existing clone, with:
 

@@ -1,5 +1,6 @@
 # Rust build artifacts
 /target/
+/sp1/target/
 **/*.rs.bk
 
 # Foundry build artifacts & caches

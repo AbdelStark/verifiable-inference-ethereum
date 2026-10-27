@@ -1,0 +1,19 @@
+[package]
+name = "sp1-host"
+description = "Host side of the SP1 segment guest: builds it and runs it in the SP1 executor"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[dependencies]
+sp1-sdk.workspace = true
+
+[build-dependencies]
+sp1-build.workspace = true
+
+[dev-dependencies]
+hex = "0.4.3"
+sash-evm-primitives.workspace = true
+tokio = { version = "1", features = ["sync"] }

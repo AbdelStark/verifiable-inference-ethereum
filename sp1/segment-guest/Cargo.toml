@@ -1,0 +1,12 @@
+[package]
+name = "segment-guest"
+description = "SP1 segment guest (SPEC.md §1.1)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[dependencies]
+sash-evm-primitives.workspace = true
+sp1-zkvm.workspace = true
