@@ -2,8 +2,9 @@ verifiable-inference-ethereum
 Copyright 2026 Abdel (@AbdelStark)
 
 This project implements clean-room Rust and Solidity verification components
-and test vectors interoperating with the following Apache-2.0 open-source
-projects:
+and test vectors (crates/, contracts/) interoperating with the following
+Apache-2.0 open-source projects. The SP1 segment guest (sp1/) instead builds
+SASH's own source, modified as described below.
 
 1. SASH zk-inference-prover (https://github.com/sg-ai-safety-hub/zk-inference-prover)
    Pinned reference revision: eb95bfa887299d1637550228d42086c27cbb2b3b
@@ -17,3 +18,23 @@ projects:
 3. TinyLlama-1.1B-Chat-v1.0 (https://huggingface.co/TinyLlama/TinyLlama-1.1B-Chat-v1.0)
    Pinned reference revision: fe8a4ea1ffedaf415f4da2f062534de366a451e6
    License: Apache-2.0
+
+Modified upstream source (Apache-2.0 §4(b)). sp1/scripts/vendor-sash.sh
+downloads SASH zk-inference-prover at eb95bfa887299d1637550228d42086c27cbb2b3b,
+which vendors NitrooZK-stwo under nitroo/, and applies the patches in
+sp1/patches/. Each patch's header states what it changes and why. The files
+the patches modify:
+
+  sp1/patches/0001-gate-cuda-build-on-prover.patch:
+    nitroo/crates/stwo/build.rs
+    nitroo/crates/constraint-framework/src/lib.rs
+
+SASH's NOTICE (Apache-2.0 §4(d)), carried with its source:
+
+  zk-prover
+  Copyright 2026 Pascal Berrang
+
+  This product includes NitrooZK-stwo
+  (https://github.com/AntChainOpenLabs/NitrooZK-stwo), vendored in nitroo/,
+  Copyright 2024 StarkWare Industries Ltd., licensed under the Apache License,
+  Version 2.0. See nitroo/LICENSE.

@@ -9,6 +9,9 @@
 /contracts/broadcast/
 /contracts/lcov.info
 
+# Vendored upstream source (sp1/scripts/vendor-sash.sh)
+/sp1/vendor/
+
 # Local proof bundles, weights & scratch runs
 /runs/
 /artifacts/
