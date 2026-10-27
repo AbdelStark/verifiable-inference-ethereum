@@ -352,6 +352,23 @@ contract TinyLlamaSettlementTest is Test {
             TinyLlamaFixture.answerIds(),
             badProof
         );
+
+        // An adapter pinned to the wrong vkey, with a proof the gateway accepts for its own vkey.
+        Sp1SashSegmentVerifier wrongAdapter = new Sp1SashSegmentVerifier(address(gateway), wrongVkey);
+        VerifiableInferenceSettlement wrongSettlement =
+            new VerifiableInferenceSettlement(address(registry), address(wrongAdapter), false);
+        bytes memory gatewayProof =
+            abi.encodePacked(keccak256(abi.encodePacked(vkey, abi.encodePacked(TinyLlamaFixture.PUBLIC_DIGEST))));
+        vm.expectRevert(StubSp1Gateway.BadSp1Proof.selector);
+        wrongSettlement.verifyAndSettle(
+            TinyLlamaFixture.MODEL_ID,
+            TinyLlamaFixture.segments(),
+            TinyLlamaFixture.tokIn(),
+            TinyLlamaFixture.tokOut(),
+            TinyLlamaFixture.promptIds(),
+            TinyLlamaFixture.answerIds(),
+            gatewayProof
+        );
     }
 
     function testNegative19_DevVerifierBlockedOnSepoliaAndWhenDisallowed() public {

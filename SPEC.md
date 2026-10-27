@@ -55,7 +55,7 @@ Taken from an unpublished SASH run that M2 checks against the proof bundles: `Ti
 
 ### 2.1 Negative controls
 
-Each control MUST revert with the listed error in every suite it lists, and in no other suite.
+Each control runs only in the suites it lists, and MUST revert there with the listed error.
 
 - **Grid-level controls** (1–5, 10–13, 16) run in both suites. Foundry submits each with a dev proof for its own `publicDigest`, so the revert comes from the grid check, not the proof check.
 - **Settlement-level controls** (6, 7, 17–20, F) run in Foundry only. They exercise the segment verifier, verifier gating or replay protection, which have no Rust counterpart.
@@ -76,7 +76,7 @@ Each control MUST revert with the listed error in every suite it lists, and in n
 | 13 | `answerIds[3] = 777` | `AnswerTokenMismatch { index: 3 }` | `AnswerTokenMismatch(3)` | Rust, Foundry | `control_13_answer_mismatch` · `testNegative13_AnswerMismatchReverts` |
 | 16 | `segments` truncated to 22 | `InvalidSegmentCount { got: 22, expected: 23 }` | `InvalidSegmentCount(22, 23)` | Rust, Foundry | `control_16_truncated_segment_array` · `testNegative16_TruncatedSegmentArrayReverts` |
 | 17 | proof bytes `0xdeadbeef` (dev verifier) | — | `InvalidDevProofTag()` | Foundry | `testNegative17_InvalidProofBytesReverts` |
-| 18 | proof for a wrong `programVKey`, against `StubSp1Gateway` (checks the vkey and the proof bytes) | — | `StubSp1Gateway.BadSp1Proof()` | Foundry | `testNegative18_WrongSp1VKeyProofReverts` |
+| 18 | against `StubSp1Gateway` (checks the vkey and the proof bytes): a proof for a wrong `programVKey`; an adapter pinned to a wrong `programVKey`, with a proof valid for the gateway's | — | `StubSp1Gateway.BadSp1Proof()` | Foundry | `testNegative18_WrongSp1VKeyProofReverts` |
 | 19 | dev verifier with `allowDevVerifier == false`; dev verifier on Sepolia (`11155111`) | — | `DevVerifierForbidden()`; `DevChainOnly(11155111)` | Foundry | `testNegative19_DevVerifierBlockedOnSepoliaAndWhenDisallowed` |
 | 20 | the same run settled twice | — | `RunAlreadySettled(runId)` | Foundry | `testNegative20_DuplicateRunReplayReverts` |
 | F | fuzz: one of `modelId`, any `SegmentClaim` field, any element of `tokIn` / `tokOut` / `promptIds` / `answerIds`, or one proof byte XORed with a non-zero mask; original dev proof, never re-derived | — | any revert | Foundry | `testFuzzSingleFieldMutationReverts` (seed fixed under `[fuzz]` in `contracts/foundry.toml`) |
