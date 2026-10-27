@@ -41,8 +41,24 @@ FIT_MIN_LOG_N = 14
 M31_P = 2**31 - 1
 FELT_P = 2**251 + 17 * 2**192 + 1
 LOG_MEMORY_ADDRESS_BOUND = 29  # stwo-cairo crates/common/src/memory.rs:2
+# Memory table limits at the pin: memory_address_to_id packs 2^(29 - 25) = 16 addresses per row
+# (crates/cairo-air/src/components/memory_address_to_id.rs:29); memory_id_to_small holds at most
+# 2^24 distinct values and the rest become big values (crates/adapter/src/memory.rs:66, 160-178);
+# memory_id_to_big splits into tables of at most 2^25 rows (MAX_SEQUENCE_LOG_SIZE,
+# crates/prover/src/witness/cairo_claim_generator.rs:1441).
+ADDRESSES_PER_ROW = 16
+LOG_SMALL_VALUE_CAPACITY = 24
+LOG_MAX_BIG_SIZE = 25
+# Base + interaction columns of the memory tables, whose sources compute them
+# (memory_address_to_id.rs:32,82; memory_id_to_small.rs:7,27; memory_id_to_big.rs:23,237).
+MEMORY_COLUMNS = {"memory_address_to_id": 32 + 32, "memory_id_to_small": 9 + 12,
+                  "memory_id_to_big": 29 + 32}
+# CI step counts of the reference verifiers (.github/workflows/cairo-ci.yaml:136-153).
+EXPECTED_CALIBRATION_STEPS = {"stwo_cairo_verifier": 18_152_624, "stwo_circuit_verifier": 1_982_220}
+QUERIES = 100  # SASH's segment proofs (prover/src/util.rs:14-16)
 
 # Components a BLAKE2s compression adds rows to, with rows per compression, and the QM31 one.
+# Every other component that grows with the program has one row per opcode or builtin instance.
 BLAKE_COMPONENTS = {"blake_compress_opcode": 1, "blake_round": 10, "blake_g": 80, "triple_xor_32": 8}
 QM31_COMPONENT = "qm_31_add_mul_opcode"
 
@@ -150,13 +166,16 @@ def args_file(path, bench, n):
     path.write_text(json.dumps([hex(v) for v in felts]))
 
 
-def scarb_execute(args):
-    out = run(["scarb", "execute", "--no-build", "--print-resource-usage", "--output", "none",
-               "--arguments-file", args], cwd=HERE).stdout
-
+def resource_usage(out):
+    """Steps and max memory address from `scarb execute --print-resource-usage`."""
     def field(name):
         return int(re.search(rf"{name}: ([\d,]+)", out).group(1).replace(",", ""))
     return {"steps": field("steps"), "max_memory_address": field("max memory address")}
+
+
+def scarb_execute(args):
+    return resource_usage(run(["scarb", "execute", "--no-build", "--print-resource-usage",
+                               "--output", "none", "--arguments-file", args], cwd=HERE).stdout)
 
 
 def swap_used_mib():
@@ -243,15 +262,45 @@ def execution_resources(bins, program, args, out):
     return json.loads(Path(out).read_text())
 
 
-def component_columns(stwo):
-    """Trace + interaction columns of each component, read from the pinned sources."""
+def component_columns(stwo, names):
+    """Base and interaction columns of each component, read from the pinned sources."""
     cols = {}
-    for name in [*BLAKE_COMPONENTS, QM31_COMPONENT]:
+    for name in names:
+        if name in MEMORY_COLUMNS:
+            cols[name] = {"base": 0, "interaction": MEMORY_COLUMNS[name]}
+            continue
         src = (stwo / "crates/cairo-air/src/components" / f"{name}.rs").read_text()
         base = int(re.search(r"N_TRACE_COLUMNS: usize = (\d+);", src).group(1))
-        inter = int(re.search(r"SECURE_EXTENSION_DEGREE \* (\d+)\]", src).group(1)) * 4
-        cols[name] = {"base": base, "interaction": inter}
+        inter = re.search(r"SECURE_EXTENSION_DEGREE(?: \* (\d+))?\]", src).group(1)
+        cols[name] = {"base": base, "interaction": 4 * int(inter or 1)}
     return cols
+
+
+def component_rows(res):
+    """Unpadded rows of each component that grows with the program, from get_execution_resources."""
+    rows = dict(res["opcodes_instance_counter"])
+    for name, per in BLAKE_COMPONENTS.items():
+        rows[name] = per * rows.get("blake_compress_opcode", 0)
+    rows.update({k: v for k, v in res["builtin_instance_counter"].items() if k != "output_builtin"})
+    mem = res["memory_tables_sizes"]
+    rows["memory_address_to_id"] = math.ceil(mem["memory_address_to_id"] / ADDRESSES_PER_ROW)
+    rows["memory_id_to_small"] = min(mem["memory_id_to_small"], 2**LOG_SMALL_VALUE_CAPACITY)
+    big = mem["memory_id_to_big"] + mem["memory_id_to_small"] - rows["memory_id_to_small"]
+    rows["memory_id_to_big"] = [min(2**LOG_MAX_BIG_SIZE, big - i)
+                                for i in range(0, max(big, 1), 2**LOG_MAX_BIG_SIZE)]
+    rows["verify_instruction"] = res["verify_instruction"]
+    return rows
+
+
+def padded(n):  # a component's rows, padded to a power of two (at least one SIMD vector)
+    return 2 ** max(4, math.ceil(math.log2(n))) if n > 0 else 0
+
+
+def growing_cells(rows, cols, pad):
+    """Base + interaction cells of the components in `rows`, padded or not."""
+    f = padded if pad else (lambda n: n)
+    return sum(sum(f(n) for n in (v if isinstance(v, list) else [v]))
+               * (cols[c]["base"] + cols[c]["interaction"]) for c, v in rows.items())
 
 
 def measure(stwo, bins, out, benches, log_ns, max_gib):
@@ -276,21 +325,33 @@ def measure(stwo, bins, out, benches, log_ns, max_gib):
                 break  # larger N needs more memory still: stop this benchmark here
 
 
-def calibrate(stwo, bins, out, max_gib):
+def calibration_runs(stwo, bins, out):
+    """Executes the two reference verifiers with the CI commands; returns their rows and the
+    stwo_cairo_verifier program to prove."""
     ver = stwo / "stwo_cairo_verifier"
     rows = []
     for package, proof in [
         ("stwo_cairo_verifier", "../test_data/test_prove_verify_all_opcode_components/proof.json"),
         ("stwo_circuit_verifier", "crates/circuit_air/test_data/proof.json"),
     ]:
-        res = run(["scarb", "--profile", "proving", "execute", "--package", package, "--features",
-                   "qm31_opcode", "--print-resource-usage", "--output", "none", "--arguments-file",
-                   proof], cwd=ver).stdout
-        steps = int(re.search(r"steps: ([\d,]+)", res).group(1).replace(",", ""))
-        rows.append({"package": package, "steps": steps, "arguments": proof})
+        usage = resource_usage(run(
+            ["scarb", "--profile", "proving", "execute", "--package", package, "--features",
+             "qm31_opcode", "--print-resource-usage", "--output", "none", "--arguments-file",
+             proof], cwd=ver).stdout)
+        assert usage["steps"] == EXPECTED_CALIBRATION_STEPS[package], (package, usage)
+        rows.append({"package": package, **usage, "arguments": proof,
+                     "argument_felts": len(json.loads((ver / proof).read_text()))})
     executable = ver / "target/proving/stwo_cairo_verifier.executable.json"
     program = out / "stwo_cairo_verifier.all_builtins.executable.json"
     program.write_text(json.dumps(with_all_builtins(json.loads(executable.read_text()))))
+    rows[0]["resources"] = execution_resources(bins, program, ver / rows[0]["arguments"],
+                                               out / "calibration.resources.json")
+    return rows, program
+
+
+def calibrate(stwo, bins, out, max_gib):
+    rows, program = calibration_runs(stwo, bins, out)
+    ver = stwo / "stwo_cairo_verifier"
     rows[0].update(prove(bins, program, ver / rows[0]["arguments"],
                          out / "calibration.proof.json", out / "calibration.log", max_gib))
     (out / "calibration.json").write_text(json.dumps(rows, indent=1))
@@ -300,14 +361,15 @@ def calibrate(stwo, bins, out, max_gib):
 
 
 def fit(points):
-    """Least squares y = a + b * n over the points at n >= 2^FIT_MIN_LOG_N."""
+    """Least squares y = a + b * n over the points at n >= 2^FIT_MIN_LOG_N; (a, b, residuals)."""
     pts = [(n, y) for n, y in points if n >= 2**FIT_MIN_LOG_N]
     if len(pts) < 3:
         return None
     mn = sum(n for n, _ in pts) / len(pts)
     my = sum(y for _, y in pts) / len(pts)
     b = sum((n - mn) * (y - my) for n, y in pts) / sum((n - mn) ** 2 for n, _ in pts)
-    return my - b * mn, b
+    a = my - b * mn
+    return a, b, [y - a - b * n for n, y in pts]
 
 
 def trace_cells(r):
@@ -321,15 +383,26 @@ def padded_rows(r, name):
     return sum(2**x for x in v) if isinstance(v, list) else 2**v
 
 
+def total_rows(v):
+    return sum(v) if isinstance(v, list) else v
+
+
 def fmt(x, digits=0):
     return f"{x:,.{digits}f}"
+
+
+def loads(r):
+    return "/".join(f"{x:.1f}" for x in r["load_avg"])
 
 
 def report(stwo, out):
     meta = json.loads((out / "meta.json").read_text())
     rows = [json.loads(line) for line in (out / "results.jsonl").read_text().splitlines()]
     rows = list({(r["bench"], r["n"]): r for r in rows}.values())  # last run of each point wins
-    cols = component_columns(stwo)
+    cal_path = out / "calibration.json"
+    cal = json.loads(cal_path.read_text()) if cal_path.exists() else []
+    names = {c for r in rows for c in component_rows(r["resources"])}
+    cols = component_columns(stwo, names | set(BLAKE_COMPONENTS) | {QM31_COMPONENT})
     lines = []
     w = lines.append
     m = meta["machine"]
@@ -337,6 +410,27 @@ def report(stwo, out):
     w(f"Toolchains: {meta['versions']['scarb']}; {meta['versions']['rustc']}; "
       f"stwo-cairo {meta['versions']['stwo_cairo']}.")
     w("")
+    w("Time is `/usr/bin/time -l` wall time of the whole `run_and_prove` command: Cairo VM run, "
+      "adaptation, proving, verification and writing the proof.")
+    w("")
+
+    # Every verified run: the growing components' rows from get_execution_resources must give the
+    # claim's log sizes, and the remaining (fixed-size) components a constant number of cells.
+    fixed_cells = {}
+    for r in [*rows, *cal[:1]]:
+        if r.get("status") != "verified":
+            continue
+        grow = component_rows(r["resources"])
+        for c, v in grow.items():
+            want = [2**x for x in r["log_sizes"][c]] if isinstance(r["log_sizes"].get(c), list) \
+                else [padded_rows(r, c)]
+            got = [padded(n) for n in (v if isinstance(v, list) else [v]) if n]
+            assert got == [x for x in want if x], (r.get("bench", "calibration"), c, v, want)
+        fixed_cells.setdefault(r.get("bench", "calibration"), set()).add(
+            trace_cells(r) - growing_cells(grow, cols, pad=True))
+    assert all(len(v) == 1 for v in fixed_cells.values()), fixed_cells
+    fixed_cells = {k: v.pop() for k, v in fixed_cells.items()}
+
     fits = {}
     for bench in BENCHES:
         br = sorted((r for r in rows if r["bench"] == bench), key=lambda r: r["n"])
@@ -345,16 +439,17 @@ def report(stwo, out):
         w(f"### {bench}")
         w("")
         w("| N | Steps (`scarb execute`) | Max memory address | Trace cells (base + interaction) "
-          "| Prove + verify (s) | Steps/s | Peak RSS (GiB) | Peak footprint (GiB) "
+          "| Cells/step | Time (s) | Steps/s | Peak RSS (GiB) | Peak footprint (GiB) "
           "| Load avg (1/5/15 min) | Status |")
-        w("|---:|---:|---:|---:|---:|---:|---:|---:|---|---|")
+        w("|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---|")
         for r in br:
             ok = r["status"] == "verified"
             w(f"| 2^{r['log_n']} | {fmt(r['steps'])} | {fmt(r['max_memory_address'])} | "
-              + (f"{fmt(trace_cells(r))} | {r['prove_s']:.2f} | {fmt(r['steps'] / r['prove_s'])} | "
-                 f"{r['max_rss_b'] / 2**30:.1f} | " if ok else "— | — | — | — | ")
+              + (f"{fmt(trace_cells(r))} | {trace_cells(r) / r['steps']:,.0f} | {r['prove_s']:.2f} | "
+                 f"{fmt(r['steps'] / r['prove_s'])} | {r['max_rss_b'] / 2**30:.1f} | "
+                 if ok else "— | — | — | — | — | ")
               + (f"{r['peak_footprint_b'] / 2**30:.1f} | " if "peak_footprint_b" in r else "— | ")
-              + f"{'/'.join(f'{x:.1f}' for x in r['load_avg'])} | {r['status']} |")
+              + f"{loads(r)} | {r['status']} |")
         ok = [r for r in br if r["status"] == "verified"]
         f = {
             "steps": fit([(r["n"], r["steps"]) for r in br]),
@@ -367,34 +462,35 @@ def report(stwo, out):
         uses = {}
         for rel in ok[-1]["relation_uses"] if ok else []:
             uses[rel] = fit([(r["n"], r["relation_uses"].get(rel, 0)) for r in ok])
-        rows_fit = {}
-        for name in {k for r in ok for k in r["log_sizes"]}:
-            rows_fit[name] = fit([(r["n"], padded_rows(r, name)) for r in ok])
-        fits[bench] = dict(f, relation_uses=uses, padded_rows=rows_fit)
+        grow = {}
+        for name in {c for r in br for c in component_rows(r["resources"])}:
+            grow[name] = fit([(r["n"], total_rows(component_rows(r["resources"]).get(name, 0)))
+                              for r in br])
+        a, b = ok[-2], ok[-1]
+        marginal = (b["prove_s"] - a["prove_s"]) / (b["n"] - a["n"])
+        fits[bench] = dict(f, relation_uses=uses, rows=grow, marginal_s=marginal)
         w("")
         w("| Fit over N ≥ 2^14 (" + ", ".join(f"2^{r['log_n']}" for r in ok
                                               if r["log_n"] >= FIT_MIN_LOG_N) + ") | Fixed | Per op |")
         w("|---|---:|---:|")
         for key, label, unit_fixed, unit_op, scale in [
                 ("steps", "Steps", "", "", 1), ("memory", "Memory addresses", "", "", 1),
-                ("cells", "Trace cells, padded (base + interaction)", "", "", 1),
-                ("prove_s", "Prove + verify time", " s", " µs", 1e6),
+                ("cells", "Trace cells, padded at N = 2^k (base + interaction)", "", "", 1),
+                ("prove_s", "Time", " s", " µs", 1e6),
                 ("rss_gib", "Peak RSS", " GiB", " KiB", 2**20),
                 ("footprint_gib", "Peak footprint", " GiB", " KiB", 2**20)]:
             if f[key]:
                 d = 2 if unit_fixed else 0
                 w(f"| {label} | {f[key][0]:,.{d}f}{unit_fixed} | {f[key][1] * scale:,.2f}{unit_op} |")
-        if len(ok) >= 2 and ok[-1]["log_n"] >= FIT_MIN_LOG_N:
-            a, b = ok[-2], ok[-1]
-            w(f"| Prove + verify time, marginal from 2^{a['log_n']} to 2^{b['log_n']} | | "
-              f"{(b['prove_s'] - a['prove_s']) / (b['n'] - a['n']) * 1e6:,.2f} µs |")
+        w(f"| Time, marginal from 2^{a['log_n']} to 2^{b['log_n']} | | {marginal * 1e6:,.2f} µs |")
+        w("| Time fit residuals (s) | " + ", ".join(f"{x:+.2f}" for x in f["prove_s"][2]) + " | |")
+        w(f"| Cells per step, marginal (fit) | | {f['cells'][1] / f['steps'][1]:,.0f} |")
         w("")
-        if ok:
-            opc = ok[-1]["resources"]["opcodes_instance_counter"]
-            per_op = {k: v / ok[-1]["n"] for k, v in opc.items() if v / ok[-1]["n"] >= 0.001}
-            w(f"Opcode instances per op at N = 2^{ok[-1]['log_n']}: "
-              + ", ".join(f"`{k}` {v:.4f}" for k, v in sorted(per_op.items(), key=lambda x: -x[1])) + ".")
-            w("")
+        opc = ok[-1]["resources"]["opcodes_instance_counter"]
+        per_op = {k: v / ok[-1]["n"] for k, v in opc.items() if v / ok[-1]["n"] >= 0.001}
+        w(f"Opcode instances per op at N = 2^{ok[-1]['log_n']}: "
+          + ", ".join(f"`{k}` {v:.4f}" for k, v in sorted(per_op.items(), key=lambda x: -x[1])) + ".")
+        w("")
 
     # Cells per BLAKE2s compression and per QM31 op, next to the inferred 99 rows.
     blake = [r for r in rows if r["bench"] == "blake2s" and r["status"] == "verified"]
@@ -411,11 +507,11 @@ def report(stwo, out):
         tot = [0, 0, 0, 0]
         for name, per in BLAKE_COMPONENTS.items():
             c = cols[name]["base"] + cols[name]["interaction"]
-            padded = padded_rows(r, name) / n
+            pad = padded_rows(r, name) / n
             unpadded = count * per / n
-            tot = [tot[0] + per, tot[1] + padded, tot[2] + unpadded * c, tot[3] + padded * c]
+            tot = [tot[0] + per, tot[1] + pad, tot[2] + unpadded * c, tot[3] + pad * c]
             w(f"| `{name}` | {cols[name]['base']} + {cols[name]['interaction']} | {per} | "
-              f"{padded:g} (2^{r['log_sizes'][name]}) | {fmt(unpadded * c)} | {fmt(padded * c)} |")
+              f"{pad:g} (2^{r['log_sizes'][name]}) | {fmt(unpadded * c)} | {fmt(pad * c)} |")
         w(f"| **Total** | | **{tot[0]}** | **{tot[1]:g}** | **{fmt(tot[2])}** | **{fmt(tot[3])}** |")
         w("")
     qm = [r for r in rows if r["bench"] == "qm31" and r["status"] == "verified"]
@@ -429,98 +525,199 @@ def report(stwo, out):
           f"{fmt(padded_rows(r, QM31_COMPONENT) / r['n'] * (c['base'] + c['interaction']))} "
           f"padded (2^{r['log_sizes'][QM31_COMPONENT]} rows).")
         w("")
+    w("Fixed-size components (lookup tables), base + interaction cells: "
+      + ", ".join(f"{k} {fmt(v)}" for k, v in fixed_cells.items()) + ".")
+    w("")
 
-    cal = out / "calibration.json"
-    if cal.exists():
+    if cal:
         w("### Calibration")
         w("")
-        w("| Program | Steps | Prove + verify (s) | Steps/s | Peak RSS (GiB) | Peak footprint (GiB) "
-          "| Trace cells (base + interaction) | Load avg | Status |")
-        w("|---|---:|---:|---:|---:|---:|---:|---|---|")
-        for c in json.loads(cal.read_text()):
+        w("| Program | Steps | Max memory address | Time (s) | Steps/s | Trace cells (base + "
+          "interaction) | Cells/step | Peak RSS (GiB) | Peak footprint (GiB) | Load avg | Status |")
+        w("|---|---:|---:|---:|---:|---:|---:|---:|---:|---|---|")
+        for c in cal:
+            head = f"| `{c['package']}` | {fmt(c['steps'])} | {fmt(c['max_memory_address'])} | "
             if "status" not in c:
-                w(f"| `{c['package']}` | {fmt(c['steps'])} | executed only | | | | | | |")
+                w(head + "executed only | | | | | | | |")
             elif c["status"] != "verified":
-                w(f"| `{c['package']}` | {fmt(c['steps'])} | — | — | — | "
-                  f"{c.get('peak_footprint_b', 0) / 2**30:.1f} | — | "
-                  f"{'/'.join(f'{x:.1f}' for x in c['load_avg'])} | {c['status']} |")
+                w(head + f"— | — | — | — | — | {c.get('peak_footprint_b', 0) / 2**30:.1f} | "
+                  f"{loads(c)} | {c['status']} |")
             else:
-                w(f"| `{c['package']}` | {fmt(c['steps'])} | {c['prove_s']:.1f} | "
-                  f"{fmt(c['steps'] / c['prove_s'])} | {c['max_rss_b'] / 2**30:.1f} | "
-                  f"{c['peak_footprint_b'] / 2**30:.1f} | "
-                  f"{fmt(trace_cells(c))} | {'/'.join(f'{x:.1f}' for x in c['load_avg'])} | verified |")
+                w(head + f"{c['prove_s']:.1f} | {fmt(c['steps'] / c['prove_s'])} | "
+                  f"{fmt(trace_cells(c))} | {trace_cells(c) / c['steps']:,.0f} | "
+                  f"{c['max_rss_b'] / 2**30:.1f} | {c['peak_footprint_b'] / 2**30:.1f} | "
+                  f"{loads(c)} | verified |")
+        w("")
+        w("Whole-run cells per step at each benchmark's largest verified N: " + ", ".join(
+            f"{b} {trace_cells(r) / r['steps']:,.0f}" for b in BENCHES
+            for r in [max((x for x in rows if x["bench"] == b and x["status"] == "verified"),
+                          key=lambda x: x["n"])]) + ".")
         w("")
 
-    if all(b in fits and fits[b]["prove_s"] for b in BENCHES):
-        extrapolate(fits, w)
+    if all(b in fits for b in BENCHES):
+        extrapolate(fits, cols, fixed_cells, cal[0] if cal and cal[0].get("status") == "verified"
+                    else None, rows, w)
     text = "\n".join(lines) + "\n"
     (out / "report.md").write_text(text)
     print(text)
 
 
-def extrapolate(fits, w):
+class Model:
+    """Fixed + per-op costs for a mix of the three ops. A proof pays the largest fixed cost once."""
+
+    def __init__(self, fits, ops, segments=1):
+        self.fits, self.ops, self.segments = fits, ops, segments
+
+    def per_op(self, key, slope=None):
+        return {b: (slope(b) if slope else self.fits[b][key][1]) * self.ops[b] for b in BENCHES}
+
+    def fixed(self, key):
+        return self.segments * max(self.fits[b][key][0] for b in BENCHES)
+
+    def total(self, key, slope=None):
+        return self.fixed(key) + sum(self.per_op(key, slope).values())
+
+    def combined(self, kind):  # per relation (uses) or component (rows)
+        acc = {}
+        for name in {n for b in BENCHES for n, f in self.fits[b][kind].items() if f}:
+            fs = [(b, self.fits[b][kind][name]) for b in BENCHES if self.fits[b][kind].get(name)]
+            acc[name] = max(0, self.segments * max(f[0] for _, f in fs)
+                            + sum(f[1] * self.ops[b] for b, f in fs))
+        return acc
+
+    def rows(self):
+        """Growing components' rows, with the memory tables' limits applied as the adapter does."""
+        rows = self.combined("rows")
+        small = rows["memory_id_to_small"]
+        rows["memory_id_to_small"] = min(small, 2**LOG_SMALL_VALUE_CAPACITY)
+        big = rows["memory_id_to_big"] + small - rows["memory_id_to_small"]
+        rows["memory_id_to_big"] = [min(2**LOG_MAX_BIG_SIZE, big - i)
+                                    for i in range(0, max(math.ceil(big), 1), 2**LOG_MAX_BIG_SIZE)]
+        return rows
+
+
+def tinyllama_ops(t):
+    return {
+        "blake2s": t["leaf_m31"] / 16 + t["hashes"],
+        # One step per query position and (column, sample) pair; every two-sample column also
+        # gets a periodicity sample, and no column has more than two (as #38 models it).
+        "qm31": QUERIES * (t["oods"] + (t["oods"] - t["columns"])),
+        "m31": t["leaf_m31"] + 4 * t["oods"] + 8 * t["hashes"],
+    }
+
+
+def extrapolate(fits, cols, fixed_cells, cal, rows, w):
+    # Time per padded trace cell of the largest proof measured: smaller proofs are dominated by
+    # the fixed preprocessed tree, which the witness cells leave out.
+    proofs = [r for r in rows if r["status"] == "verified"] + ([cal] if cal else [])
+    big = max(proofs, key=trace_cells)
+    ns_cell = big["prove_s"] / trace_cells(big)
+    fixed_tables = max(fixed_cells.values())
+
+    ratio, rel_ratio = {}, {}
+    if cal:
+        opc = cal["resources"]["opcodes_instance_counter"]
+        cal_ops = {"blake2s": opc["blake_compress_opcode"], "qm31": opc[QM31_COMPONENT] / 2,
+                   "m31": cal["argument_felts"]}
+        cm = Model(fits, cal_ops)
+        uses, model_rel = cal["relation_uses"], cm.combined("relation_uses")
+        cal_rel = max(uses, key=uses.get)
+        checks = [("Steps", cal["steps"], cm.total("steps")),
+                  ("Max memory address", cal["max_memory_address"], cm.total("memory")),
+                  (f"`{cal_rel}` uses", uses[cal_rel], model_rel[cal_rel]),
+                  ("Trace cells", trace_cells(cal), cm.total("cells")),
+                  ("Time (s)", cal["prove_s"], cm.total("prove_s"))]
+        ratio = {name: measured / model for name, measured, model in checks}
+        rel_ratio = {k: v / model_rel[k] for k, v in uses.items() if model_rel.get(k)}
+        w("### Model against the calibration verifier")
+        w("")
+        w(f"`stwo_cairo_verifier`'s ops: {fmt(cal_ops['blake2s'])} BLAKE2s compressions, "
+          f"{fmt(cal_ops['qm31'])} QM31 mul-adds (half its `qm_31_add_mul_opcode` instances), "
+          f"{fmt(cal_ops['m31'])} argument felts.")
+        w("")
+        w("| | Measured | Modelled from the three ops | Measured / modelled |")
+        w("|---|---:|---:|---:|")
+        for name, measured, model in checks:
+            d = 1 if name.startswith("Time") else 0
+            w(f"| {name} | {fmt(measured, d)} | {fmt(model, d)} | {measured / model:.2f} |")
+        w("")
+
     w("### Extrapolation to TinyLlama (estimate)")
     w("")
     w("Op counts: BLAKE2s compressions = leaf M31s / 16 + internal hashes, which reproduces the "
-      f"§3 total of {fmt(TINYLLAMA_COMPRESSIONS)}; QM31 mul-adds = leaf M31s × OODS values / "
-      "committed columns, one per queried value and sample point; ingested felts = leaf M31s "
-      "+ 4 × OODS values + 8 × internal hashes. Costs add linearly; each segment is one proof, "
-      "so it pays once the largest of the three fixed costs.")
+      f"§3 total of {fmt(TINYLLAMA_COMPRESSIONS)}; QM31 mul-adds = {QUERIES} query positions × "
+      "(OODS values + two-sample columns), with two-sample columns = OODS values − columns; "
+      "ingested felts = leaf M31s + 4 × OODS values + 8 × internal hashes. Costs add linearly; "
+      "each segment is one proof, so it pays once the largest of the three fixed costs.")
     w("")
-    w("| Workload | Segments | BLAKE2s | QM31 mul-adds | Ingested felts | Steps | Trace cells "
-      "| Prove time: BLAKE2s / QM31 / ingestion / fixed (s) | Prove time (s) "
-      "| Peak footprint (GiB) |")
-    w("|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|")
-    head = None
+    w("| Workload | BLAKE2s | QM31 mul-adds | Ingested felts | Steps | Trace cells, unpadded "
+      "| Trace cells, padded | Time, fit: BLAKE2s / QM31 / ingestion / fixed (s) | Time, fit (s) "
+      "| Time, marginal slopes (s) | Time, cells × ns/cell of the largest proof (s) "
+      "| Time, fit × measured / modelled on the calibration (s) |")
+    w("|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|")
+    head, rates = None, []
     for label, t in TINYLLAMA.items():
-        ops = {
-            "blake2s": t["leaf_m31"] / 16 + t["hashes"],
-            "qm31": t["leaf_m31"] * t["oods"] / t["columns"],
-            "m31": t["leaf_m31"] + 4 * t["oods"] + 8 * t["hashes"],
-        }
-
-        def per_op(key):
-            return {b: fits[b][key][1] * ops[b] for b in BENCHES}
-
-        def fixed(key):
-            return max(fits[b][key][0] for b in BENCHES)
-
-        def total(key):
-            return t["segments"] * fixed(key) + sum(per_op(key).values())
-        split = per_op("prove_s")
-        w(f"| {label} | {t['segments']} | {fmt(ops['blake2s'])} | {fmt(ops['qm31'])} | "
-          f"{fmt(ops['m31'])} | {fmt(total('steps'))} | {fmt(total('cells'))} | "
-          + " / ".join(fmt(split[b]) for b in BENCHES)
-          + f" / {fmt(t['segments'] * fixed('prove_s'))} | {fmt(total('prove_s'))} | "
-          + (f"{fmt(fixed('footprint_gib') + sum(per_op('footprint_gib').values()))} |"
-             if t["segments"] == 1 else "see the largest segment |"))
+        ops = tinyllama_ops(t)
+        md = Model(fits, ops, t["segments"])
+        grow = md.rows()
+        unpadded = t["segments"] * fixed_tables + growing_cells(grow, cols, pad=False)
+        pad = fixed_tables + growing_cells(grow, cols, pad=True) if t["segments"] == 1 else None
+        split = md.per_op("prove_s")
+        t_fit = md.total("prove_s")
+        t_marg = md.total("prove_s", slope=lambda b: fits[b]["marginal_s"])
+        t_cells = (pad or unpadded) * ns_cell
+        w(f"| {label} | {fmt(ops['blake2s'])} | {fmt(ops['qm31'])} | {fmt(ops['m31'])} | "
+          f"{fmt(md.total('steps'))} | {unpadded:.3g} | " + (f"{pad:.3g}" if pad else "—") + " | "
+          + " / ".join(fmt(split[b]) for b in BENCHES) + f" / {fmt(md.fixed('prove_s'))} | "
+          f"{fmt(t_fit)} | {fmt(t_marg)} | {fmt(t_cells)} | "
+          + (f"{fmt(t_fit * ratio['Time (s)'])} |" if ratio else "— |"))
+        rates.append(f"{label} {md.total('steps') / t_fit:,.0f} steps/s and "
+                     f"{t_fit / (pad or unpadded) * 1e9:.1f} ns per "
+                     f"{'padded' if pad else 'unpadded'} cell")
         if t["segments"] == 1:
-            head = (label, ops, total)
+            head = (label, md, grow, pad, t_fit)
     w("")
-    label, ops, total = head
+    w(f"Largest proof measured: {big.get('package') or big['bench'] + ' 2^' + str(big['log_n'])}, "
+      f"{ns_cell * 1e9:.1f} ns per padded trace cell. Per-inference cells "
+      "are unpadded: the segments' own op counts are not modelled. The fit-based times imply "
+      + "; ".join(rates) + ".")
+    w("")
 
-    def combined(kind):  # per relation (uses) or component (padded rows): largest fixed + per op
-        acc = {}
-        for name in {n for b in BENCHES for n, f in fits[b][kind].items() if f}:
-            fs = [(b, fits[b][kind][name]) for b in BENCHES if fits[b][kind].get(name)]
-            acc[name] = max(f[0] for _, f in fs) + sum(f[1] * ops[b] for b, f in fs)
-        return acc
-    mem = total("memory")
-    rel = combined("relation_uses")
+    label, md, grow, pad, t_fit = head
+    rel = md.combined("relation_uses")
     top_rel = max(rel, key=rel.get)
-    comp = combined("padded_rows")
-    top_comp = max(comp, key=comp.get)
+    sizes = {c: max(math.log2(padded(n)) for n in (v if isinstance(v, list) else [v]))
+             for c, v in grow.items() if total_rows(v) > 0}
+    top = max(sizes.values())
+    top_comp = sorted(c for c, s in sizes.items() if s == top)
+    mem, steps = md.total("memory"), md.total("steps")
+    r = ratio
     w(f"Checks for the largest segment, {label}:")
     w("")
-    w("| Check | Estimate | Bound |")
-    w("|---|---:|---|")
-    w(f"| Memory addresses (execution + ingested arguments) | {fmt(mem)} (2^{math.log2(mem):.2f}) "
-      f"| 2^{LOG_MEMORY_ADDRESS_BOUND} = {fmt(2**LOG_MEMORY_ADDRESS_BOUND)} |")
-    w(f"| Largest relation total uses, `{top_rel}` | {fmt(rel[top_rel])} "
-      f"({rel[top_rel] / M31_P:.2f} P) | P = {fmt(M31_P)} |")
-    w(f"| Largest component, `{top_comp}` | {fmt(comp[top_comp])} padded rows, log size "
-      f"{math.ceil(math.log2(comp[top_comp]))} | |")
-    w(f"| Steps | {fmt(total('steps'))} (2^{math.log2(total('steps')):.2f}) | |")
+    w("| Check | Modelled ops only | Scaled by measured / modelled on the calibration | Bound |")
+    w("|---|---:|---:|---|")
+
+    def scaled(x, key, digits=""):
+        return f"{x * r[key]:,.0f}" + digits.format(math.log2(x * r[key])) if key in r else "—"
+    w(f"| Memory addresses (execution + ingested arguments) | {fmt(mem)} (2^{math.log2(mem):.2f}) | "
+      f"{scaled(mem, 'Max memory address', ' (2^{:.2f})')} | "
+      f"2^{LOG_MEMORY_ADDRESS_BOUND} = {fmt(2**LOG_MEMORY_ADDRESS_BOUND)} |")
+    rr = rel_ratio.get(top_rel)
+    w(f"| Largest relation total uses, `{top_rel}` | {fmt(rel[top_rel])} ({rel[top_rel] / M31_P:.2f} P) | "
+      + (f"{fmt(rel[top_rel] * rr)} ({rel[top_rel] * rr / M31_P:.2f} P)" if rr else "—")
+      + f" | P = {fmt(M31_P)} |")
+    w(f"| Steps | {fmt(steps)} (2^{math.log2(steps):.2f}) | {scaled(steps, 'Steps', ' (2^{:.2f})')} | |")
+    w(f"| Largest component | " + ", ".join(f"`{c}`" for c in top_comp)
+      + f", log size {top:.0f} | — | |")
+    w(f"| Trace cells, padded | {pad:.3g} | "
+      + (f"{pad * r['Trace cells']:.3g}" if r else "—") + " | |")
+    w(f"| Time, fit (s) | {fmt(t_fit)} | {scaled(t_fit, 'Time (s)')} | |")
+    fp = md.total("footprint_gib")
+    w(f"| Peak footprint (GiB) | {fmt(fp)} | — | |")
+    w("")
+    w("Growing components of the largest segment, rows (log size): " + ", ".join(
+        f"`{c}` {fmt(total_rows(grow[c]))} ({s:.0f})"
+        for c, s in sorted(sizes.items(), key=lambda x: -x[1]) if s >= top - 3) + ".")
     w("")
 
 

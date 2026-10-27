@@ -1,7 +1,8 @@
 //! S-two unit-cost microbenchmarks (issue #39): `bench` selects one, `n` is the op count.
 //! 0: `n` chained `blake2s_compress` calls.
 //! 1: `n` chained QM31 fused mul-adds, `acc * b + c`.
-//! 2: ingest `n` M31 values from the arguments (`values`, which must hold exactly `n`).
+//! 2: ingest `n` M31 values from the arguments (`values`, which must hold exactly `n`): only
+//! their range-checked deserialization, with no work per value after it.
 use core::blake::blake2s_compress;
 use core::box::BoxTrait;
 use core::qm31::{m31, qm31, qm31_const};
@@ -17,7 +18,7 @@ fn main(bench: felt252, n: felt252, values: Array<m31>) -> felt252 {
     } else {
         assert(bench == 2, 'unknown bench');
         assert(values.len().into() == n, 'values must hold n M31s');
-        ingest(values)
+        n
     }
 }
 
@@ -51,12 +52,4 @@ fn qm31_mul_add(n: felt252) -> felt252 {
     }
     let [w0, _, _, _] = core::qm31::QM31Trait::unpack(acc);
     w0.into()
-}
-
-fn ingest(values: Array<m31>) -> felt252 {
-    let mut sum: felt252 = 0;
-    for v in values {
-        sum += v.into();
-    }
-    sum
 }
