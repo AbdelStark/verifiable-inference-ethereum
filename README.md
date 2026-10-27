@@ -33,6 +33,7 @@ An emitted `InferenceVerified` event whose `verifierKind` is not `DEV_TRANSCRIPT
 | Rust | `1.99.1` | Install [rustup](https://rustup.rs); it reads `rust-toolchain.toml` and installs `1.99.1` with `rustfmt` and `clippy` on the first `cargo` call in the repo. |
 | Foundry | `v1.8.6` | Install [foundryup](https://getfoundry.sh), then `foundryup --install v1.8.6`. |
 | solc | `0.8.38` | Nothing to do: `forge` downloads the version set in `contracts/foundry.toml`. |
+| jq | any | Your package manager (`brew install jq`, `apt install jq`); `make anvil-demo` reads the broadcast receipts with it. |
 
 The Foundry dependencies (`forge-std`, `sp1-contracts`) are git submodules under `contracts/lib/`, locked in `contracts/foundry.lock`. Fetch them before any `forge` or `make` target, either by cloning with `git clone --recursive` or, in an existing clone, with:
 
@@ -58,7 +59,7 @@ make forge-test
 make anvil-demo
 ```
 
-`make anvil-demo` runs `DeployDevAnvil.s.sol` in Forge's in-process EVM on chain `31337`, not against an anvil node. Settlement on a running anvil node is M1.
+`make anvil-demo` starts `anvil --hardfork osaka --enable-tx-gas-limit` (chain `31337`; port `8577`, or `ANVIL_PORT`), mines `DeployDevAnvil.s.sol`'s five transactions from anvil's first dev account, checks the receipts (status, `EIP-7825` gas limit, the `InferenceVerified` event with the `SPEC.md` §1.4 `runId`, and `verifyAndSettle`'s gas against its snapshot), prints their gas and stops the node. `make check` runs it too.
 
 ### 3. Deploy to Hoodi (`560048`) (M4)
 

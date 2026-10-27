@@ -61,7 +61,7 @@ Before declaring any change complete, run:
 make check
 ```
 
-`make check` enforces `cargo fmt`, `cargo clippy --locked --workspace --all-targets -- -D warnings`, `cargo test --locked --workspace` (including the real TinyLlama-1.1B 23-segment grid, its digests pinned to `SPEC.md` §1.4, and the Rust rows of the `SPEC.md` §2.1 negative-control table; settlement-level controls run in Foundry only), byte-exact sync of the generated `contracts/src/sash/TinyLlamaFixture.sol` with the Rust export (`export_vectors` run `--locked`), and, whenever Foundry is installed in `PATH`, `forge fmt --check`, `forge build --locked --sizes` (fails if a submodule differs from `contracts/foundry.lock`), `forge lint --deny warnings`, `forge test` (with `contracts/snapshots/` deleted first) and a check that the regenerated gas snapshots match the index.
+`make check` enforces `cargo fmt`, `cargo clippy --locked --workspace --all-targets -- -D warnings`, `cargo test --locked --workspace` (including the real TinyLlama-1.1B 23-segment grid, its digests pinned to `SPEC.md` §1.4, and the Rust rows of the `SPEC.md` §2.1 negative-control table; settlement-level controls run in Foundry only), byte-exact sync of the generated `contracts/src/sash/TinyLlamaFixture.sol` with the Rust export (`export_vectors` run `--locked`), and, whenever Foundry is installed in `PATH`, `forge fmt --check`, `forge build --locked --sizes` (fails if a submodule differs from `contracts/foundry.lock`), `forge lint --deny warnings`, `forge test` (with `contracts/snapshots/` deleted first) and a check that the regenerated gas snapshots match the index, then `make anvil-demo`.
 
 - **Gas snapshots are committed** in `contracts/snapshots/`. An intended gas change fails `make check` until the regenerated snapshots are staged; give the cause in the PR. A test's `assertLe` budget is raised only for an intended change, with the reason in the PR.
 - **Write tests when a change touches the protocol**: grid checks and settlement guards. Assert against `SPEC.md` and the primary-source vectors, not against the implementation.
@@ -69,7 +69,7 @@ make check
 - **A failing invariant test is a real regression: fix the code, never weaken the test.** Never regenerate the fixture (`make vectors`) or edit a primary-source vector to make a failing test pass; the fixture changes only with an intended Rust primitive change (§2.4).
 - **A grid-level negative control lands in both suites**, Rust and Foundry, never on one side only. Settlement-level controls (token binding, proof bytes, verifier gating, replay) run in Foundry only (`SPEC.md` §2.1 table).
 
-Other targets (`make help`): `make rust-check` (Rust gates only), `make vectors` (regenerate the fixture), `make forge-test` (`forge fmt --check && forge build --locked --sizes && forge lint --deny warnings`, then `forge test -vvv --gas-report` on a fresh `contracts/snapshots/` and the snapshot check), `make anvil-demo` (`DeployDevAnvil.s.sol` in Forge's in-process EVM on chain `31337`), `make clean`.
+Other targets (`make help`): `make rust-check` (Rust gates only), `make vectors` (regenerate the fixture), `make forge-test` (`forge fmt --check && forge build --locked --sizes && forge lint --deny warnings`, then `forge test -vvv --gas-report` on a fresh `contracts/snapshots/` and the snapshot check), `make anvil-demo` (`contracts/script/anvil-settle.sh`: mines `DeployDevAnvil.s.sol` on a local `anvil --hardfork osaka --enable-tx-gas-limit` node and checks the receipts, the `InferenceVerified` event and `verifyAndSettle`'s gas against its snapshot), `make clean`.
 
 ## 6. Working an issue
 
@@ -92,8 +92,8 @@ When asked to work/implement/do/resolve issue #N:
 
 - **CI** (`.github/workflows/ci.yml`) runs on pushes to `main` and on every PR, in two jobs:
   - `rust`: `cargo fmt --check`, `cargo clippy --locked --workspace --all-targets -- -D warnings`, `cargo test --locked --workspace`, and the fixture byte-sync check (`--locked`).
-  - `solidity` (Foundry `v1.8.6`): `forge fmt --check`, `forge build --locked --sizes` (`foundry.lock`, `EIP-170`), `forge lint --deny warnings`, `forge test -vvv --gas-report` on a fresh `contracts/snapshots/` (the report is uploaded as the `gas-report` artifact), the gas snapshot check, and a dry run of `DeployDevAnvil.s.sol`.
-  - **`ci.yml` spells out its steps; it does not call `make`.** A gate added to `make check` must be added to `ci.yml` too, and the other way round. `make check` skips the Anvil dry run (`make anvil-demo` runs it locally).
+  - `solidity` (Foundry `v1.8.6`): `forge fmt --check`, `forge build --locked --sizes` (`foundry.lock`, `EIP-170`), `forge lint --deny warnings`, `forge test -vvv --gas-report` on a fresh `contracts/snapshots/` (the report is uploaded as the `gas-report` artifact), the gas snapshot check, and `script/anvil-settle.sh`.
+  - **`ci.yml` spells out its steps; it does not call `make`.** A gate added to `make check` must be added to `ci.yml` too, and the other way round.
 
 ## 9. Discrepancies to confirm
 

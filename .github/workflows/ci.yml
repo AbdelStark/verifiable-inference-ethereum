@@ -75,6 +75,6 @@ jobs:
           git diff --exit-code -- snapshots || { echo "::error::Gas snapshots differ from the commit"; exit 1; }
           untracked="$(git ls-files --others --exclude-standard -- snapshots)"
           test -z "$untracked" || { echo "::error::Untracked gas snapshots: $untracked"; exit 1; }
-      - name: Run DeployDevAnvil.s.sol in Forge's in-process EVM (chain 31337)
+      - name: Mine the TinyLlama dev-mode settlement on a local Osaka anvil node and check the receipts
         working-directory: contracts
-        run: forge script script/DeployDevAnvil.s.sol:DeployDevAnvil -vvvv
+        run: script/anvil-settle.sh

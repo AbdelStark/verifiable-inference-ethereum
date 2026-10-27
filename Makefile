@@ -2,11 +2,11 @@
 
 help:
 	@echo "Targets:"
-	@echo "  make check       - Run Rust format, clippy, unit/negative tests, vector sync, and Foundry format, lint and tests (if forge is installed)"
+	@echo "  make check       - Run Rust format, clippy, unit/negative tests, vector sync, and Foundry format, lint, tests and anvil settlement (if forge is installed)"
 	@echo "  make rust-check  - Run cargo fmt --check, then clippy -D warnings and cargo test --workspace with --locked"
 	@echo "  make vectors     - Regenerate contracts/src/sash/TinyLlamaFixture.sol from the Rust TinyLlama fixture"
 	@echo "  make forge-test  - Check Solidity format, build against foundry.lock, lint, run the Foundry suite with gas report, and check the gas snapshots against the index"
-	@echo "  make anvil-demo  - Run DeployDevAnvil.s.sol in Forge's in-process EVM (chain 31337): dev-mode deployment and TinyLlama-1.1B 23-segment settlement"
+	@echo "  make anvil-demo  - Mine the dev-mode TinyLlama-1.1B 23-segment settlement (DeployDevAnvil.s.sol) on a local Osaka anvil node, check the receipts and print their gas"
 	@echo "  make clean       - Clean build outputs"
 
 rust-check:
@@ -29,14 +29,13 @@ check: rust-check
 	cmp -s "$$tmp" contracts/src/sash/TinyLlamaFixture.sol || { rm -f "$$tmp"; echo "ERROR: TinyLlamaFixture.sol drift detected; run 'make vectors'"; exit 1; }; \
 	rm -f "$$tmp"
 	@if command -v forge >/dev/null 2>&1; then \
-		$(MAKE) forge-test; \
+		$(MAKE) forge-test && $(MAKE) anvil-demo; \
 	else \
 		echo "NOTE: 'forge' not found in PATH; Solidity suite runs in CI or after installing Foundry."; \
 	fi
 
 anvil-demo:
-	@command -v forge >/dev/null 2>&1 || { echo "Install Foundry (forge/anvil) first"; exit 1; }
-	cd contracts && forge script script/DeployDevAnvil.s.sol:DeployDevAnvil -vvvv
+	contracts/script/anvil-settle.sh
 
 clean:
 	cargo clean
