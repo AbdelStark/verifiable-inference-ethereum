@@ -48,7 +48,7 @@ User-decided rules with the same bar as the invariants.
 - `SPEC.md`: Canonical protocol: the proved statement, sha256 digest layouts, contract ABI, and the negative-control table (§2.1).
 - `SECURITY.md`: Threat model, cryptographic assumption boundary, and audit checklist.
 - `docs/ARCHITECTURE.md`: Two-layer hybrid design (zkVM segment compression + native Solidity SASH grid verifier).
-- `docs/EVM-GAS-MODEL.md`: Sizes from the unpublished TinyLlama-1.1B SASH run, the Osaka / Amsterdam network rules, and gas estimates.
+- `docs/EVM-GAS-MODEL.md`: Sizes from the unpublished TinyLlama-1.1B SASH run, the Osaka / Amsterdam network rules, measured gas and estimates.
 - `docs/ROADMAP.md`: Milestones `M0` through `M4` (Foundry -> Anvil -> Sepolia/Hoodi).
 - `crates/sash-evm-primitives`: Pure Rust reference SASH 23-segment grid checks and sha256 settlement digests, and the TinyLlama-1.1B fixture and `TinyLlamaFixture.sol` generator.
 - `contracts/`: Foundry Solidity verifier suite (`SashModelRegistry`, `SashGridVerifier`, `Sp1SashSegmentVerifier`, `DevTranscriptSegmentVerifier`, `VerifiableInferenceSettlement`), deployment scripts, and the Foundry rows of the `SPEC.md` §2.1 negative-control table.
@@ -63,7 +63,7 @@ make check
 
 `make check` enforces `cargo fmt`, `cargo clippy --locked --workspace --all-targets -- -D warnings`, `cargo test --locked --workspace` (including the real TinyLlama-1.1B 23-segment grid, its digests pinned to `SPEC.md` §1.4, and the Rust rows of the `SPEC.md` §2.1 negative-control table; settlement-level controls run in Foundry only), byte-exact sync of the generated `contracts/src/sash/TinyLlamaFixture.sol` with the Rust export (`export_vectors` run `--locked`), and, whenever Foundry is installed in `PATH`, `forge fmt --check`, `forge build --locked --sizes` (fails if a submodule differs from `contracts/foundry.lock`), `forge lint --deny warnings`, `forge test` (with `contracts/snapshots/` deleted first) and a check that the regenerated gas snapshots match the index, then `make anvil-demo`.
 
-- **Gas snapshots are committed** in `contracts/snapshots/`. An intended gas change fails `make check` until the regenerated snapshots are staged; give the cause in the PR. A Foundry or solc bump also changes them; name the bump as the cause. A test's `assertLe` budget is raised only for an intended change, with the reason in the PR.
+- **Gas snapshots are committed** in `contracts/snapshots/`. An intended gas change fails `make check` until the regenerated snapshots are staged; give the cause in the PR. A Foundry or solc bump also changes them; name the bump as the cause. Keep the measured figures in `docs/EVM-GAS-MODEL.md` §4 and §5 equal to the snapshots and to the table `make anvil-demo` prints; its deployment and `enrollModel` rows aren't gated, so check them whenever a contract changes. A test's `assertLe` budget is raised only for an intended change, with the reason in the PR.
 - **Write tests when a change touches the protocol**: grid checks and settlement guards. Assert against `SPEC.md` and the primary-source vectors, not against the implementation.
 - **Don't add tests for docs, cosmetic changes, trivial wiring or config.**
 - **A failing invariant test is a real regression: fix the code, never weaken the test.** Never regenerate the fixture (`make vectors`) or edit a primary-source vector to make a failing test pass; the fixture changes only with an intended Rust primitive change (§2.4).

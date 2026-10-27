@@ -16,9 +16,9 @@ Mainnet and Hoodi run Osaka, which binds this project; Amsterdam is tracked alon
    - Enrolled 23-segment `(pre_root, model_root)` manifest membership (`SashModelRegistry.sol`),
    - All 22 inter-layer residual-stream Merkle root links (`out_root[L] == in_root[L+1]`),
    - A sha256 `publicDigest` over the segment claims and the `tok_in` / `tok_out` vectors, which the segment proof must attest, so the tokens are the ones SASH's own `embed_tok` / `head_tok` checks used ([SPEC.md](SPEC.md) §1),
-   - Public prompt prefix matching, autoregressive teacher-forcing loop closure (`tok_in[P+j] == tok_out[P-1+j]`), and EOS (`2`) termination (`SashGridVerifier.sol`, ~22k gas, estimated).
+   - Public prompt prefix matching, autoregressive teacher-forcing loop closure (`tok_in[P+j] == tok_out[P-1+j]`), and EOS (`2`) termination (`SashGridVerifier.sol`, ~37k gas measured, [docs/EVM-GAS-MODEL.md](docs/EVM-GAS-MODEL.md) §4).
 
-Aggregated single-transaction settlement is estimated at **~409k gas** (**2.4%** of the `EIP-7825` cap) with a Groth16 wrap; M3 measures it ([docs/EVM-GAS-MODEL.md](docs/EVM-GAS-MODEL.md) §4).
+Aggregated single-transaction settlement is estimated at **~474k gas** (**~2.8%** of the `EIP-7825` cap) with a Groth16 wrap, from the measured dev-mode settlement plus an estimated SP1 verifier; M3 measures it ([docs/EVM-GAS-MODEL.md](docs/EVM-GAS-MODEL.md) §5).
 
 ## Exact claim boundary
 
@@ -75,7 +75,7 @@ forge script script/DeployTestnet.s.sol:DeployTestnet --rpc-url "$HOODI_RPC_URL"
 - [SPEC.md](SPEC.md): Proved statement, sha256 digest layouts, contract interfaces, and the negative-control table (§2.1).
 - [SECURITY.md](SECURITY.md): Threat model, transparent-STARK vs BN254-wrapper assumption shift, and dev-verifier isolation.
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): System dataflow across SASH, zkVM compression, and EVM contracts.
-- [docs/EVM-GAS-MODEL.md](docs/EVM-GAS-MODEL.md): Figures from the unpublished 23-segment TinyLlama-1.1B SASH run, the Osaka / Amsterdam network rules, and gas estimates.
+- [docs/EVM-GAS-MODEL.md](docs/EVM-GAS-MODEL.md): Figures from the unpublished 23-segment TinyLlama-1.1B SASH run, the Osaka / Amsterdam network rules, measured gas and estimates.
 - [docs/ROADMAP.md](docs/ROADMAP.md): Milestones `M0` through `M4`.
 
 ## License
