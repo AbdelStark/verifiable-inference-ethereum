@@ -57,9 +57,24 @@ jobs:
       - name: Lint
         working-directory: contracts
         run: forge lint --deny warnings
-      - name: Run TinyLlama 23-segment settlement & Foundry rows of the SPEC.md §2.1 negative-control table
+      - name: Run TinyLlama 23-segment settlement, gas snapshots & Foundry rows of the SPEC.md §2.1 negative-control table
         working-directory: contracts
-        run: forge test -vvv --gas-report
+        shell: bash
+        run: |
+          rm -rf snapshots
+          forge test -vvv --gas-report | tee "$RUNNER_TEMP/gas-report.txt"
+      - name: Upload gas report
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: gas-report
+          path: ${{ runner.temp }}/gas-report.txt
+      - name: Check gas snapshots match the commit
+        working-directory: contracts
+        run: |
+          git diff --exit-code -- snapshots || { echo "::error::Gas snapshots differ from the commit"; exit 1; }
+          untracked="$(git ls-files --others --exclude-standard -- snapshots)"
+          test -z "$untracked" || { echo "::error::Untracked gas snapshots: $untracked"; exit 1; }
       - name: Run DeployDevAnvil.s.sol in Forge's in-process EVM (chain 31337)
         working-directory: contracts
         run: forge script script/DeployDevAnvil.s.sol:DeployDevAnvil -vvvv
