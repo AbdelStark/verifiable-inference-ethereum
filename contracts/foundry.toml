@@ -12,6 +12,13 @@ optimizer_runs = 200
 via_ir = true
 # `new` must be a real CREATE: as a deployCode cheatcode, an expected constructor revert ends the whole test.
 dynamic_test_linking = false
+# The project's EIP-170 limit (AGENTS.md §2.5), also enforced on test and script deployments.
+code_size_limit = 24576
+# Each test function's total gas, every call counted, stays within the EIP-7825 cap of 2^24.
+gas_limit = 16777216
+# Each top-level state-changing call runs as its own transaction, so its gas includes intrinsic and
+# calldata gas and matches an anvil receipt; view and pure calls aren't isolated.
+isolate = true
 
 [fuzz]
 # Fixed so the single-field mutation fuzz test (`SPEC.md` §2.1, row F) replays the same cases.
