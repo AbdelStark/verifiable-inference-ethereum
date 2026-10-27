@@ -80,6 +80,22 @@ The floor doesn't bind, but it is only 12,052 gas below `gasUsed`: cutting execu
 
 The harness snapshots include their own ABI decoding, so the split between rows is approximate. The total is the measured receipt.
 
+### Amsterdam (provisional)
+
+The same Osaka-compiled bytecode, mined on `anvil --hardfork amsterdam --enable-tx-gas-limit --code-size-limit 24576` from a Foundry nightly (`1.8.7-nightly`, commit `024702852`, 2026-10-27). These figures are provisional until Amsterdam activates on mainnet, and are taken from a nightly: Foundry 1.8.6's anvil doesn't apply Amsterdam gas (`EIP-7976`, `EIP-8037`, `EIP-2780`). #24 re-measures them on a stable Foundry release.
+
+No receipt field separates state gas, so it is derived from the `EIP-8037` constants: 183,600 per new contract, 1,530 per byte of deployed code, 97,920 per new storage slot.
+
+| Transaction (anvil receipt, Amsterdam, Foundry nightly `024702852`) | `gasUsed` | State gas (derived) | Rest | Osaka |
+|---|---:|---:|---:|---:|
+| `SashModelRegistry` deployment (1,095 B) | 1,902,912 | 1,858,950 | 43,962 | 291,752 |
+| `SashModelRegistry.enrollModel` (3 new slots) | 350,025 | 293,760 | 56,265 | 92,065 |
+| `DevTranscriptSegmentVerifier` deployment (784 B) | 1,420,693 | 1,383,120 | 37,573 | 223,223 |
+| `VerifiableInferenceSettlement` deployment (3,763 B) | 6,032,117 | 5,940,990 | 91,127 | 872,019 |
+| `VerifiableInferenceSettlement.verifyAndSettle` (1 new slot) | 478,104 | 97,920 | floor-bound | 201,052 |
+
+The settle transaction is floor-bound: 15,000 (`EIP-2780`) + 64 × 7,236 calldata bytes (`EIP-7976`) = 478,104, about 2.4x its Osaka cost. Deployments cost 6–7x more, almost all of it state gas.
+
 ## 5. Aggregated settlement gas breakdown (Osaka)
 
 One transaction carrying `SegmentClaim[23]`, the four token arrays and one wrapped SP1 proof: 7,492 B of ABI calldata with a 260 B Groth16-sized proof, 3,417 non-zero and 4,075 zero bytes. The SP1 verifier is an estimate until M3 measures it; the rest is the measured dev-mode settlement (§4).
@@ -94,4 +110,4 @@ One transaction carrying `SegmentClaim[23]`, the four token arrays and one wrapp
 
 The floor, 21,000 + 10 × 4,075 + 40 × 3,417 = 198,430 gas, is below the total, so it doesn't bind.
 
-Under Amsterdam the cold `SSTORE` alone rises to ~110,000 gas (§2); M1 and M3 record the Amsterdam figures.
+Under Amsterdam the floor alone is 15,000 + 64 × 7,492 = 494,488 gas, and the cold `SSTORE` rises to ~110,000 gas (§2), so the aggregated settlement would cost roughly 0.5–0.56M gas (estimate). M3 measures it.
