@@ -1,4 +1,4 @@
-.PHONY: help check rust-check vectors forge-test anvil-demo sp1-check sp1-docker clean
+.PHONY: help check rust-check vectors forge-test anvil-demo sp1-check sp1-docker bundles-check clean
 
 help:
 	@echo "Targets:"
@@ -9,6 +9,8 @@ help:
 	@echo "  make anvil-demo  - Mine the dev-mode TinyLlama-1.1B 23-segment settlement (DeployDevAnvil.s.sol) on a local Osaka anvil node, check the receipts and print their gas"
 	@echo "  make sp1-check   - Run cargo fmt --check, clippy -D warnings and the executor tests of the SP1 workspace in sp1/ (needs SP1 v6.10.0 and protoc)"
 	@echo "  make sp1-docker  - Build the segment guest reproducibly in the pinned SP1 v6.10.0 Docker image and print its ELF sha256"
+	@echo "  make bundles-check"
+	@echo "                  - Check the 69 TinyLlama proof bundle files in BUNDLES (default runs/tinyllama) against sp1/pins/tinyllama.sha256"
 	@echo "  make clean       - Clean build outputs"
 
 rust-check:
@@ -40,10 +42,11 @@ check: rust-check
 	else \
 		echo "NOTE: 'cargo-prove' not found in PATH; the SP1 workspace runs in CI or after installing SP1 v6.10.0."; \
 	fi
-	@if command -v cargo-prove >/dev/null 2>&1 && docker image inspect $(SP1_IMAGE) >/dev/null 2>&1; then \
+	@# sp1-build runs the image as linux/amd64, which hangs under emulation on arm64 hosts.
+	@if [ "$$(uname -m)" = x86_64 ] && command -v cargo-prove >/dev/null 2>&1 && docker image inspect $(SP1_IMAGE) >/dev/null 2>&1; then \
 		$(MAKE) sp1-docker; \
 	else \
-		echo "NOTE: cargo-prove or the $(SP1_IMAGE) image is missing; the reproducible guest build runs in CI."; \
+		echo "NOTE: the reproducible guest build needs an x86_64 host with cargo-prove and the $(SP1_IMAGE) image; it runs in CI."; \
 	fi
 
 anvil-demo:
@@ -60,6 +63,13 @@ sp1-check:
 sp1-docker:
 	cd sp1/segment-guest && cargo prove build --docker --tag v6.10.0 --locked --workspace-directory ../..
 	shasum -a 256 sp1/target/elf-compilation/docker/riscv64im-succinct-zkvm-elf/release/segment-guest
+
+BUNDLES ?= runs/tinyllama
+
+bundles-check:
+	@test "$$(ls "$(BUNDLES)" | wc -l | tr -d ' ')" = 69 || { echo "ERROR: $(BUNDLES) must hold exactly the 69 pinned bundle files"; exit 1; }
+	cd "$(BUNDLES)" && shasum -a 256 --strict --quiet -c "$(CURDIR)/sp1/pins/tinyllama.sha256"
+	@echo "OK: the 69 bundle files in $(BUNDLES) match sp1/pins/tinyllama.sha256"
 
 clean:
 	cargo clean
