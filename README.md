@@ -73,7 +73,7 @@ forge script script/DeployTestnet.s.sol:DeployTestnet --rpc-url "$SEPOLIA_RPC_UR
 
 ## Documentation
 
-- [SPEC.md](SPEC.md): Bit-exact protocol, wire format, contract interfaces, gas table, and 20-case negative-control matrix.
+- [SPEC.md](SPEC.md): Bit-exact protocol, wire format, contract interfaces, gas table, and negative-control matrix.
 - [SECURITY.md](SECURITY.md): Threat model, transparent-STARK vs BN254-wrapper assumption shift, and dev-verifier isolation.
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): System dataflow across SASH, zkVM compression, and EVM contracts.
 - [docs/EVM-GAS-MODEL.md](docs/EVM-GAS-MODEL.md): Empirical 23-segment TinyLlama-1.1B proof measurements and `EIP-7825` / `EIP-7623` math.

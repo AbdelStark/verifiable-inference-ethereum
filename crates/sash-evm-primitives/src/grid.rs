@@ -210,6 +210,14 @@ mod tests {
             )),
             "8c27cadf1bc21512bbb76eb63b23699b9af32d18b92d7cdf5a90a489b8000c6b"
         );
+        assert_eq!(
+            hex::encode(compute_token_hash(&TINYLLAMA_PROMPT_IDS)),
+            "b4d5730f21772191057fb4600dc73dfdf0350fab6996c7b12d1d1ca7b83b9ec1"
+        );
+        assert_eq!(
+            hex::encode(compute_token_hash(&TINYLLAMA_ANSWER_IDS)),
+            "aed36ba9347820959ae88d81e8c45a733e404b199fb3c12a463e2301253934c8"
+        );
     }
 
     #[test]

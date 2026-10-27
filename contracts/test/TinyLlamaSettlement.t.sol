@@ -52,6 +52,17 @@ contract TinyLlamaSettlementTest is Test {
 
     function testEndToEndTinyLlama23SegmentDevSettlement() public {
         bytes memory proof = devVerifier.computeDevProof(TinyLlamaFixture.PUBLIC_DIGEST);
+        // runId, promptHash and answerHash from SPEC.md §1.4
+        bytes32 specRunId = 0x0f614a4f82d3c3656dc9b15b897a5b07f621b312f5e37ae58c42b7391223e430;
+        vm.expectEmit(address(settlement));
+        emit VerifiableInferenceSettlement.InferenceVerified(
+            specRunId,
+            TinyLlamaFixture.MODEL_ID,
+            TinyLlamaFixture.PUBLIC_DIGEST,
+            0xb4d5730f21772191057fb4600dc73dfdf0350fab6996c7b12d1d1ca7b83b9ec1,
+            0xaed36ba9347820959ae88d81e8c45a733e404b199fb3c12a463e2301253934c8,
+            SashTypes.VerifierKind.DEV_TRANSCRIPT_ONLY
+        );
         bytes32 runId = settlement.verifyAndSettle(
             TinyLlamaFixture.MODEL_ID,
             TinyLlamaFixture.segments(),
@@ -61,6 +72,7 @@ contract TinyLlamaSettlementTest is Test {
             TinyLlamaFixture.answerIds(),
             proof
         );
+        assertEq(runId, specRunId);
         assertTrue(settlement.settledRuns(runId));
     }
 

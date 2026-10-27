@@ -5,7 +5,7 @@ use std::fmt::{self, Write};
 use std::fs;
 use std::process;
 
-use sash_evm_primitives::grid::{SegmentClaim, compute_public_digest, compute_token_hash};
+use sash_evm_primitives::grid::{SegmentClaim, compute_public_digest};
 use sash_evm_primitives::tinyllama_fixture::{
     TINYLLAMA_ANSWER_IDS, TINYLLAMA_EOS_TOKEN_ID, TINYLLAMA_PROMPT, TINYLLAMA_PROMPT_IDS,
     TINYLLAMA_RESPONSE, TINYLLAMA_TOK_IN, TINYLLAMA_TOK_OUT, tinyllama_manifest,
@@ -91,16 +91,6 @@ fn render() -> Result<String, fmt::Error> {
         out,
         "    bytes32 internal constant MANIFEST_ROOTS_HASH = {};",
         hex0x(manifest.manifest_roots_hash)
-    )?;
-    writeln!(
-        out,
-        "    bytes32 internal constant TOK_IN_HASH = {};",
-        hex0x(compute_token_hash(&TINYLLAMA_TOK_IN))
-    )?;
-    writeln!(
-        out,
-        "    bytes32 internal constant TOK_OUT_HASH = {};",
-        hex0x(compute_token_hash(&TINYLLAMA_TOK_OUT))
     )?;
     writeln!(
         out,

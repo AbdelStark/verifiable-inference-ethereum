@@ -12,8 +12,6 @@ import {SashTypes} from "./SashTypes.sol";
 library TinyLlamaFixture {
     bytes32 internal constant MODEL_ID = 0x3def3a0832d3d82a82283200010c182132ac7d9eec681b772a95834f29e43c2a;
     bytes32 internal constant MANIFEST_ROOTS_HASH = 0xfd8ecd8c79795b3a79e426d60a912d0a8a160188539c9b12dd3803b249c55b26;
-    bytes32 internal constant TOK_IN_HASH = 0x3e683ee8603b85a4f5407e1af5f20a437ddadc9c098acc6aac357d533d3f32cb;
-    bytes32 internal constant TOK_OUT_HASH = 0x44c6f339d896d66ea25d0ca6e15214f596ef5c701db79be94232be51d29b6b1e;
     bytes32 internal constant PUBLIC_DIGEST = 0x8c27cadf1bc21512bbb76eb63b23699b9af32d18b92d7cdf5a90a489b8000c6b;
     uint16 internal constant NUM_SEGMENTS = 23;
     uint16 internal constant SEQ_LEN = 32;

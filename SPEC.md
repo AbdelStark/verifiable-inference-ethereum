@@ -21,6 +21,8 @@ The aggregator verifies all `N` segment proofs and commits `publicDigest` (§1.3
 
 `VerifiableInferenceSettlement` recomputes `publicDigest` from calldata (`modelId`, `segments`, `tokIn`, `tokOut`) and verifies the segment proof over it before any grid check. Any mutation of a segment claim, `tokIn` or `tokOut` therefore fails the segment-proof check: the SP1 proof with `Sp1SashSegmentVerifier`, or the dev tag with `DevTranscriptSegmentVerifier` (`chainid == 31337` only, no cryptographic binding).
 
+`publicDigest` does not fix where the prompt ends: `runId` (§1.3) binds the caller's `promptIds` / `answerIds` split, so one proof settles once per split that passes the grid checks (prompt lengths `19..32` for the TinyLlama fixture). Every split claims the same proved `tokIn` / `tokOut` forward pass, so no split claims more than the proof covers. Replay protection stays on `runId`: keying it on `publicDigest` would let anyone front-run a pending settlement under another split and block the intended one.
+
 ### 1.3 Encodings
 
 All hashes are `sha256`. `be16` / `be32` are big-endian `uint16` / `uint32`. sha256 is used rather than keccak256: keccak256 would save only an estimated ~2k gas per settlement.

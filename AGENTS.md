@@ -45,7 +45,7 @@ User-decided rules with the same bar as the invariants.
 
 ## 4. Repository layout
 
-- `SPEC.md`: Canonical protocol, wire format, contract ABI, gas budget, and 20-case negative-control specification.
+- `SPEC.md`: Canonical protocol, wire format, contract ABI, gas budget, and negative-control specification.
 - `SECURITY.md`: Threat model, cryptographic assumption boundary, and audit checklist.
 - `docs/ARCHITECTURE.md`: Two-layer hybrid design (zkVM segment compression + native Solidity SASH grid verifier).
 - `docs/EVM-GAS-MODEL.md`: Empirical TinyLlama-1.1B SASH sizing and `EIP-7825` / `EIP-7623` arithmetic.
