@@ -1,0 +1,22 @@
+# SP1 programs and their host. A workspace of its own, with its own lockfile: guests build for
+# riscv64im-succinct-zkvm-elf with SP1's `succinct` toolchain, not the root workspace's.
+[workspace]
+resolver = "3"
+members = ["segment-guest", "sp1-host"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+authors = ["Abdel <@AbdelStark>"]
+publish = false
+
+[workspace.dependencies]
+sash-evm-primitives = { path = "../crates/sash-evm-primitives" }
+sp1-build = "=6.10.0"
+sp1-sdk = { version = "=6.10.0", features = ["blocking"] }
+sp1-zkvm = "=6.10.0"
+
+# SP1's sha256 precompile, for the guest's token hashes (the tag SP1 v6.10.0 tests against).
+[patch.crates-io]
+sha2 = { git = "https://github.com/sp1-patches/RustCrypto-hashes", tag = "patch-sha2-0.10.9-sp1-6.10.0" }

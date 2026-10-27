@@ -52,6 +52,7 @@ User-decided rules with the same bar as the invariants.
 - `docs/ROADMAP.md`: Milestones `M0` through `M4` (Foundry -> Anvil -> Sepolia/Hoodi).
 - `docs/STARK-NATIVE-ROUTE.md`: Research note comparing STARK-native routes to Ethereum (Cairo / S-two / SHARP) with the SP1 BN254 wrap.
 - `crates/sash-evm-primitives`: Pure Rust reference SASH 23-segment grid checks and sha256 settlement digests, and the TinyLlama-1.1B fixture and `TinyLlamaFixture.sol` generator.
+- `sp1/`: SP1 v6.10.0 workspace, separate from the root one, with its own `Cargo.lock`: the segment guest (`segment-guest`, today the token-id range check and `tokenHash`) and its host crate (`sp1-host`, which builds the guest and runs it in the SP1 executor).
 - `contracts/`: Foundry Solidity verifier suite (`SashModelRegistry`, `SashGridVerifier`, `Sp1SashSegmentVerifier`, `DevTranscriptSegmentVerifier`, `VerifiableInferenceSettlement`), deployment scripts, and the Foundry rows of the `SPEC.md` §2.1 negative-control table.
 
 ## 5. Testing and verification
@@ -62,7 +63,7 @@ Before declaring any change complete, run:
 make check
 ```
 
-`make check` enforces `cargo fmt`, `cargo clippy --locked --workspace --all-targets -- -D warnings`, `cargo test --locked --workspace` (including the real TinyLlama-1.1B 23-segment grid, its digests pinned to `SPEC.md` §1.4, and the Rust rows of the `SPEC.md` §2.1 negative-control table; settlement-level controls run in Foundry only), byte-exact sync of the generated `contracts/src/sash/TinyLlamaFixture.sol` with the Rust export (`export_vectors` run `--locked`), and, whenever Foundry is installed in `PATH`, `forge fmt --check`, `forge build --locked --sizes` (fails if a submodule differs from `contracts/foundry.lock`), `forge lint --deny warnings`, `forge test` (with `contracts/snapshots/` deleted first) and a check that the regenerated gas snapshots match the index, then `make anvil-demo`.
+`make check` enforces `cargo fmt`, `cargo clippy --locked --workspace --all-targets -- -D warnings`, `cargo test --locked --workspace` (including the real TinyLlama-1.1B 23-segment grid, its digests pinned to `SPEC.md` §1.4, and the Rust rows of the `SPEC.md` §2.1 negative-control table; settlement-level controls run in Foundry only), byte-exact sync of the generated `contracts/src/sash/TinyLlamaFixture.sol` with the Rust export (`export_vectors` run `--locked`), and, whenever Foundry is installed in `PATH`, `forge fmt --check`, `forge build --locked --sizes` (fails if a submodule differs from `contracts/foundry.lock`), `forge lint --deny warnings`, `forge test` (with `contracts/snapshots/` deleted first) and a check that the regenerated gas snapshots match the index, then `make anvil-demo`; whenever `cargo-prove` is installed, `make sp1-check`; and, when the `ghcr.io/succinctlabs/sp1:v6.10.0` image is also present locally (it is never pulled), `make sp1-docker`.
 
 - **Gas snapshots are committed** in `contracts/snapshots/`. An intended gas change fails `make check` until the regenerated snapshots are staged; give the cause in the PR. A Foundry or solc bump also changes them; name the bump as the cause. Keep the measured figures in `docs/EVM-GAS-MODEL.md` §4 and §5 equal to the snapshots and to the table `make anvil-demo` prints; its deployment and `enrollModel` rows aren't gated, so check them whenever a contract changes. A test's `assertLe` budget is raised only for an intended change, with the reason in the PR.
 - **Write tests when a change touches the protocol**: grid checks and settlement guards. Assert against `SPEC.md` and the primary-source vectors, not against the implementation.
@@ -70,7 +71,7 @@ make check
 - **A failing invariant test is a real regression: fix the code, never weaken the test.** Never regenerate the fixture (`make vectors`) or edit a primary-source vector to make a failing test pass; the fixture changes only with an intended Rust primitive change (§2.4).
 - **A grid-level negative control lands in both suites**, Rust and Foundry, never on one side only. Settlement-level controls (token binding, proof bytes, verifier gating, replay) run in Foundry only (`SPEC.md` §2.1 table).
 
-Other targets (`make help`): `make rust-check` (Rust gates only), `make vectors` (regenerate the fixture), `make forge-test` (`forge fmt --check && forge build --locked --sizes && forge lint --deny warnings`, then `forge test -vvv --gas-report` on a fresh `contracts/snapshots/` and the snapshot check), `make anvil-demo` (`contracts/script/anvil-settle.sh`: mines `DeployDevAnvil.s.sol` on a local `anvil --hardfork osaka --enable-tx-gas-limit` node and checks the receipts, the `InferenceVerified` event and `verifyAndSettle`'s gas against its snapshot), `make clean`.
+Other targets (`make help`): `make rust-check` (Rust gates only), `make vectors` (regenerate the fixture), `make forge-test` (`forge fmt --check && forge build --locked --sizes && forge lint --deny warnings`, then `forge test -vvv --gas-report` on a fresh `contracts/snapshots/` and the snapshot check), `make anvil-demo` (`contracts/script/anvil-settle.sh`: mines `DeployDevAnvil.s.sol` on a local `anvil --hardfork osaka --enable-tx-gas-limit` node and checks the receipts, the `InferenceVerified` event and `verifyAndSettle`'s gas against its snapshot), `make sp1-check` (in `sp1/`: `cargo fmt -- --check`, `cargo clippy --locked --workspace --all-targets -- -D warnings` and `cargo test --locked --workspace`, which runs the guest in the SP1 executor; needs SP1 v6.10.0 and `protoc`), `make sp1-docker` (`cargo prove build --docker --tag v6.10.0 --locked --workspace-directory ../..` for the segment guest, printing its ELF sha256), `make clean`.
 
 ## 6. Working an issue
 
@@ -91,9 +92,10 @@ When asked to work/implement/do/resolve issue #N:
 
 ## 8. Current state (mutable)
 
-- **CI** (`.github/workflows/ci.yml`) runs on pushes to `main` and on every PR, in two jobs:
+- **CI** (`.github/workflows/ci.yml`) runs on pushes to `main` and on every PR, in three jobs:
   - `rust`: `cargo fmt --check`, `cargo clippy --locked --workspace --all-targets -- -D warnings`, `cargo test --locked --workspace`, and the fixture byte-sync check (`--locked`).
   - `solidity` (Foundry `v1.8.6`): `forge fmt --check`, `forge build --locked --sizes` (`foundry.lock`, `EIP-170`), `forge lint --deny warnings`, `forge test -vvv --gas-report` on a fresh `contracts/snapshots/` (the report is uploaded as the `gas-report` artifact), the gas snapshot check, and `script/anvil-settle.sh`.
+  - `sp1` (SP1 `v6.10.0` via the pinned `sp1up`, `protoc` from apt): in `sp1/`, `cargo fmt -- --check`, `cargo clippy --locked --workspace --all-targets -- -D warnings` and `cargo test --locked --workspace`, then the Docker guest build, printing the ELF sha256.
   - **`ci.yml` spells out its steps; it does not call `make`.** A gate added to `make check` must be added to `ci.yml` too, and the other way round.
 
 ## 9. Discrepancies to confirm
