@@ -12,9 +12,11 @@ pub const STWO_BENCH_ELF: Elf = include_elf!("stwo-bench");
 
 /// stwo-bench's operations: the selector is the index, the name its cycle-tracker region. Keep in
 /// step with the `match` in `stwo-bench/src/main.rs`.
-pub const STWO_BENCH_OPS: [&str; 14] = [
+pub const STWO_BENCH_OPS: [&str; 16] = [
     "blake2s_compress",
+    "hash_node_leaf4",
     "hash_node_leaf16",
+    "hash_node_leaf20",
     "hash_node_leaf256",
     "hash_node_leaf4096",
     "hash_node_children",

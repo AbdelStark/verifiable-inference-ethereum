@@ -45,23 +45,25 @@ pub fn main() {
     let n = u32::from_le_bytes(header[4..].try_into().unwrap());
     match op {
         0 => blake2s_compress(n),
-        1 => hash_node_leaf::<16>("hash_node_leaf16", n),
-        2 => hash_node_leaf::<256>("hash_node_leaf256", n),
-        3 => hash_node_leaf::<4096>("hash_node_leaf4096", n),
-        4 => hash_node_children(n),
-        5 => channel_draw(n),
-        6 => qm31_loop("qm31_add", n, |acc, x, _| acc + x),
-        7 => qm31_loop("qm31_mul", n, |acc, x, _| acc * x),
-        8 => qm31_loop("qm31_mul_add", n, |acc, x, y| acc * x + y),
-        9 => m31_qm31_mul(n),
-        10 => row_quotients(n),
-        11 => decode("decode_json", n, |b| {
+        1 => hash_node_leaf::<4>("hash_node_leaf4", n),
+        2 => hash_node_leaf::<16>("hash_node_leaf16", n),
+        3 => hash_node_leaf::<20>("hash_node_leaf20", n),
+        4 => hash_node_leaf::<256>("hash_node_leaf256", n),
+        5 => hash_node_leaf::<4096>("hash_node_leaf4096", n),
+        6 => hash_node_children(n),
+        7 => channel_draw(n),
+        8 => qm31_loop("qm31_add", n, |acc, x, _| acc + x),
+        9 => qm31_loop("qm31_mul", n, |acc, x, _| acc * x),
+        10 => qm31_loop("qm31_mul_add", n, |acc, x, y| acc * x + y),
+        11 => m31_qm31_mul(n),
+        12 => row_quotients(n),
+        13 => decode("decode_json", n, |b| {
             serde_json::from_slice::<Proof>(b).ok()
         }),
-        12 => decode("decode_bincode", n, |b| {
+        14 => decode("decode_bincode", n, |b| {
             bincode::deserialize::<Proof>(b).ok()
         }),
-        13 => decode("decode_postcard", n, |b| {
+        15 => decode("decode_postcard", n, |b| {
             postcard::from_bytes::<Proof>(b).ok()
         }),
         OP_GKR_LINK => gkr_link(),
@@ -91,7 +93,8 @@ fn blake2s_compress(n: u32) {
     sp1_zkvm::io::commit_slice(&out);
 }
 
-/// `hash_node` of SASH's Merkle hasher on a leaf of `M` M31 values and no children.
+/// `hash_node` of SASH's Merkle hasher on a leaf of `M` M31 values and no children. The sizes 4 and 20
+/// end in a partial 64-byte block, 16, 256 and 4096 in a whole one.
 fn hash_node_leaf<const M: usize>(region: &str, n: u32) {
     let leaf: Vec<BaseField> = (0..M as u32).map(BaseField::from).collect();
     let mut acc = [0u8; 32];

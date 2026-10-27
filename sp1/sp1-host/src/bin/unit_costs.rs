@@ -6,7 +6,8 @@
 //! `cargo run --release --locked -p sp1-host --features profiling --bin unit-costs -- [CORPUS_DIR]`
 //!
 //! `CORPUS_DIR` (default `sp1/testdata/synthetic`) holds the synthetic corpus of `make sash-synthetic`,
-//! checked against `sp1/testdata/synthetic.sha256`.
+//! checked against `sp1/testdata/synthetic.sha256`. From CI: `gh run download <run-id> -n
+//! sash-synthetic-corpus -D <dir>`, then pass `<dir>/synthetic`.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -23,16 +24,32 @@ type Proof = StarkProof<Blake2sM31MerkleHasher>;
 
 const PINS: &str = include_str!("../../../testdata/synthetic.sha256");
 const MEASURED: &str = "sound_aligned";
-/// The bundles cross-checked against the full `verify_composed` cycles of #41's scratch guest.
-const CROSS_CHECKED: [&str; 2] = ["sound_aligned", "aligned_gkr5"];
+/// #41's scratch guest on the synthetic corpus: the whole `verify_composed`, JSON decoding of its three
+/// buffers included, in the executor (bundle, cycles, PGU; PR #55).
+const SCRATCH_41: [(&str, u64, u64); 2] = [
+    ("sound_aligned", 2_138_919_159, 1_938_734_716),
+    ("aligned_gkr5", 1_571_401_951, 1_401_629_884),
+];
 /// The sp1-sdk version `sp1/Cargo.toml` pins.
 const SP1_SDK: &str = "6.10.0";
 /// Bound on one measurement run.
 const CYCLE_LIMIT: u64 = 50_000_000_000;
 /// SASH's query count (`n_queries`, SPEC.md §1.1 rule 2).
 const QUERIES: u64 = 100;
-/// The prover network's per-request cap, in PGU.
+/// The prover network's per-request cap, in PGU: from #38, unverified (#48 confirms it).
 const PGU_CAP: f64 = 1e12;
+/// sp1-sdk 6.10.0 `network/mod.rs`: `MAINNET_DEFAULT_CYCLE_LIMIT` and `DEFAULT_GAS_LIMIT`, the limits a
+/// request gets when it skips simulation and sets none.
+const SDK_CYCLE_LIMIT: f64 = 1e12;
+const SDK_GAS_LIMIT: f64 = 1e9;
+/// The `hash_node_leaf*` operations: M31s per leaf, region.
+const LEAVES: [(u64, &str); 5] = [
+    (4, "hash_node_leaf4"),
+    (16, "hash_node_leaf16"),
+    (20, "hash_node_leaf20"),
+    (256, "hash_node_leaf256"),
+    (4096, "hash_node_leaf4096"),
+];
 /// Unverified: Succinct's Hypercube figure, ~400M PGU in under 12 s on 16 RTX 5090s.
 const PGU_PER_GPU_SECOND: f64 = 2e6;
 
@@ -60,6 +77,44 @@ struct Segment {
     sampled: u64,
     leaf_m31s: u64,
     siblings: u64,
+}
+
+impl Segment {
+    fn nodes(&self) -> Nodes {
+        Nodes::new(
+            self.leaf_m31s,
+            self.trees,
+            self.fri_inner_layers + self.segments,
+            2 * QUERIES * (self.fri_inner_layers + self.segments),
+            self.siblings,
+        )
+    }
+}
+
+/// Merkle node counts of one proof's decommitments.
+struct Nodes {
+    leaf_m31s: u64,
+    /// Nodes without children (bound: `QUERIES` per tree, two per query per FRI layer).
+    bottom: u64,
+    /// FRI leaves: 4 M31s (one QM31) each, in one 64-byte block.
+    fri_leaves: u64,
+    /// Nodes with children: every computed node but the root has one parent and every child slot is a
+    /// computed node or a sibling hash, so `bottom + siblings - 1` per tree (`vcs/verifier.rs`).
+    internal: u64,
+    siblings: u64,
+}
+
+impl Nodes {
+    fn new(leaf_m31s: u64, trees: u64, fri_layers: u64, fri_leaves: u64, siblings: u64) -> Self {
+        let bottom = QUERIES * trees + 2 * QUERIES * fri_layers;
+        Self {
+            leaf_m31s,
+            bottom,
+            fri_leaves,
+            internal: bottom + siblings - trees - fri_layers,
+            siblings,
+        }
+    }
 }
 
 const TINYLLAMA: [Segment; 4] = [
@@ -162,6 +217,37 @@ impl Cost {
             pgu: self.pgu + o.pgu,
         }
     }
+    fn minus(self, o: Self) -> Self {
+        self.plus(o.times(-1.0))
+    }
+    fn ratio(self, o: Self) -> Self {
+        Self {
+            cycles: self.cycles / o.cycles,
+            pgu: self.pgu / o.pgu,
+        }
+    }
+    fn scaled(self, k: Self) -> Self {
+        Self {
+            cycles: self.cycles * k.cycles,
+            pgu: self.pgu * k.pgu,
+        }
+    }
+    fn min(self, o: Self) -> Self {
+        Self {
+            cycles: self.cycles.min(o.cycles),
+            pgu: self.pgu.min(o.pgu),
+        }
+    }
+    fn max(self, o: Self) -> Self {
+        Self {
+            cycles: self.cycles.max(o.cycles),
+            pgu: self.pgu.max(o.pgu),
+        }
+    }
+    const ZERO: Self = Self {
+        cycles: 0.0,
+        pgu: 0.0,
+    };
 }
 
 /// Counts in one proof, the inputs of the analytic model.
@@ -171,9 +257,7 @@ struct ProofCounts {
     sampled: u64,
     two_sample_columns: u64,
     positions: u64,
-    leaf_m31s: u64,
-    fri_layers: u64,
-    siblings: u64,
+    nodes: Nodes,
 }
 
 impl ProofCounts {
@@ -208,31 +292,39 @@ impl ProofCounts {
                 .iter()
                 .map(|d| d.column_witness.len() as u64)
                 .sum::<u64>();
+        // FRI leaves: one QM31 per witness value and (bound) per query position and layer.
+        let fri_leaves = fri_witness + QUERIES * fri_layer_count;
+        let siblings = p
+            .decommitments
+            .iter()
+            .map(|d| d.hash_witness.len() as u64)
+            .sum::<u64>()
+            + fri_layers
+                .map(|l| l.decommitment.hash_witness.len() as u64)
+                .sum::<u64>();
         Self {
             trees: p.commitments.len(),
             columns,
             sampled,
             two_sample_columns: two_sample_columns as u64,
             positions: (last_values / last_columns) as u64,
-            // FRI leaves: one QM31 per witness value and (bound) per query position and layer.
-            leaf_m31s: tree_m31s + 4 * (fri_witness + QUERIES * fri_layer_count),
-            fri_layers: fri_layer_count,
-            siblings: p
-                .decommitments
-                .iter()
-                .map(|d| d.hash_witness.len() as u64)
-                .sum::<u64>()
-                + fri_layers
-                    .map(|l| l.decommitment.hash_witness.len() as u64)
-                    .sum::<u64>(),
+            nodes: Nodes::new(
+                tree_m31s + 4 * fri_leaves,
+                p.commitments.len() as u64,
+                fri_layer_count,
+                fri_leaves,
+                siblings,
+            ),
         }
     }
 }
 
 /// The measured per-unit costs the model multiplies.
 struct Model {
-    per_m31: Cost,
-    per_node: Cost,
+    /// `hash_node` = per node + per block × 64-byte blocks + per M31 × M31s.
+    node: Cost,
+    block: Cost,
+    update: Cost,
     children: Cost,
     step: Cost,
     qm31_mul: Cost,
@@ -243,14 +335,18 @@ struct Model {
 }
 
 impl Model {
-    /// BLAKE2s: leaf values, bottom nodes (bound: `QUERIES` per tree, two per query per FRI layer) and
-    /// internal nodes, taken as one two-children `hash_node` per sibling hash.
-    fn blake(&self, leaf_m31s: u64, bottom_nodes: u64, siblings: u64) -> (Cost, Cost) {
+    /// BLAKE2s: column values at 1/16 block + one update per M31; bottom nodes at the per-node cost; each
+    /// FRI leaf's 16 B fill a whole block, 3/4 of one more than its values; internal nodes at the
+    /// two-children `hash_node`.
+    fn blake(&self, n: &Nodes) -> (Cost, Cost) {
         let leaf = self
-            .per_m31
-            .times(leaf_m31s as f64)
-            .plus(self.per_node.times(bottom_nodes as f64));
-        (leaf, self.children.times(siblings as f64))
+            .block
+            .per(16.0)
+            .plus(self.update)
+            .times(n.leaf_m31s as f64)
+            .plus(self.node.times(n.bottom as f64))
+            .plus(self.block.times(0.75 * n.fri_leaves as f64));
+        (leaf, self.children.times(n.internal as f64))
     }
     /// One FRI fold's field arithmetic: 1 QM31 mul, 1 M31 × QM31 mul, 2 QM31 adds.
     fn fold(&self) -> Cost {
@@ -338,9 +434,8 @@ fn main() {
     let model = fit(&units, &encodings);
     print_decode(&units, &encodings, &reference);
     print_counts(&counts);
-    let share = proof_share(&sizes);
-    print_extrapolation(&model, share);
-    print_cross_check(&model, &dir, &sizes);
+    let remainders = cross_check(&model, &dir, &sizes);
+    print_extrapolation(&model, proof_share(&sizes), &remainders);
 }
 
 fn execute(
@@ -430,70 +525,106 @@ fn print_units(units: &HashMap<&str, Unit>) {
     println!();
 }
 
-/// Least-squares line through `(x, y)`: `(intercept, slope)`.
-fn line(points: &[(f64, f64)]) -> (f64, f64) {
-    let n = points.len() as f64;
-    let (sx, sy) = points
-        .iter()
-        .fold((0.0, 0.0), |(a, b), (x, y)| (a + x, b + y));
-    let (mx, my) = (sx / n, sy / n);
-    let sxy: f64 = points.iter().map(|(x, y)| (x - mx) * (y - my)).sum();
-    let sxx: f64 = points.iter().map(|(x, _)| (x - mx) * (x - mx)).sum();
-    let slope = sxy / sxx;
-    (my - slope * mx, slope)
+/// 64-byte BLAKE2s blocks of a `hash_node` over `m` M31s and no children.
+fn blocks(m: u64) -> u64 {
+    (4 * m).div_ceil(64)
+}
+
+/// Least squares `y = c0 + k × blocks + u × m` over `(blocks, m, y)`: `[c0, k, u]`.
+fn fit_node(points: &[(f64, f64, f64)]) -> [f64; 3] {
+    // Normal equations, augmented, solved by Gauss-Jordan elimination.
+    let mut a = [[0.0f64; 4]; 3];
+    for &(b, m, y) in points {
+        let x = [1.0, b, m, y];
+        for (row, xi) in a.iter_mut().zip(x) {
+            for (cell, xj) in row.iter_mut().zip(x) {
+                *cell += xi * xj;
+            }
+        }
+    }
+    for c in 0..3 {
+        let pivot = a[c];
+        for (r, row) in a.iter_mut().enumerate() {
+            if r != c {
+                let f = row[c] / pivot[c];
+                for (cell, p) in row.iter_mut().zip(pivot) {
+                    *cell -= f * p;
+                }
+            }
+        }
+    }
+    [a[0][3] / a[0][0], a[1][3] / a[1][1], a[2][3] / a[2][2]]
 }
 
 fn fit(units: &HashMap<&str, Unit>, encodings: &[(&'static str, Vec<u8>); 3]) -> Model {
-    let leaves = [
-        (16.0, "hash_node_leaf16"),
-        (256.0, "hash_node_leaf256"),
-        (4096.0, "hash_node_leaf4096"),
-    ];
-    let cycles: Vec<_> = leaves
-        .iter()
-        .map(|(m, n)| (*m, units[n].cycles()))
-        .collect();
-    let pgu: Vec<_> = leaves.iter().map(|(m, n)| (*m, units[n].pgu())).collect();
-    let (node_c, m31_c) = line(&cycles);
-    let (node_p, m31_p) = line(&pgu);
+    let points = |get: fn(&Unit) -> f64| -> Vec<(f64, f64, f64)> {
+        LEAVES
+            .iter()
+            .map(|(m, name)| (blocks(*m) as f64, *m as f64, get(&units[name])))
+            .collect()
+    };
+    let [node_c, block_c, update_c] = fit_node(&points(Unit::cycles));
+    let [node_p, block_p, update_p] = fit_node(&points(Unit::pgu));
     let steps = u32::from_le_bytes(
         units["row_quotients"].public_values[..4]
             .try_into()
             .unwrap(),
     );
-    let compress = units["blake2s_compress"].cycles();
+    let compress = Cost::of(&units["blake2s_compress"]);
     println!(
-        "**`hash_node` leaf fit** (`cycles = per node + per M31 × M31s`, least squares over 16, 256 and 4,096 M31s):\n"
+        "**`hash_node` leaf fit** (`per node + per block × ⌈4m / 64⌉ + per M31 × m`, least squares over m = 4, 16, 20, 256 and 4,096 M31s):\n"
     );
     println!("| Term | Cycles | PGU |\n|---|---:|---:|");
-    println!("| Per M31 | {} | {} |", dec(m31_c), dec(m31_p));
     println!("| Per node | {} | {} |", dec(node_c), dec(node_p));
-    for (m, name) in leaves {
-        let fitted = node_c + m31_c * m;
+    println!(
+        "| Per 64-byte block | {} | {} |",
+        dec(block_c),
+        dec(block_p)
+    );
+    println!(
+        "| Bare compression (`blake2s_compress`, cross-check of the block term) | {} | {} |",
+        dec(compress.cycles),
+        dec(compress.pgu)
+    );
+    println!(
+        "| Per M31 (`update`) | {} | {} |",
+        dec(update_c),
+        dec(update_p)
+    );
+    for (m, name) in LEAVES {
+        let b = blocks(m) as f64;
+        let fitted = Cost {
+            cycles: node_c + block_c * b + update_c * m as f64,
+            pgu: node_p + block_p * b + update_p * m as f64,
+        };
+        let measured = Cost::of(&units[name]);
         println!(
-            "| Fit residual at {m} M31s | {:+.2}% | |",
-            100.0 * (units[name].cycles() - fitted) / fitted
+            "| Fit residual at {} M31s ({} block{}) | {:+.2}% | {:+.2}% |",
+            int(m),
+            blocks(m),
+            if blocks(m) == 1 { "" } else { "s" },
+            100.0 * (measured.cycles - fitted.cycles) / fitted.cycles,
+            100.0 * (measured.pgu - fitted.pgu) / fitted.pgu
         );
     }
     println!(
-        "| Bare compression ×1/16 per M31 (`blake2s_compress` {} / 16) | {} | |",
-        dec(compress),
-        dec(compress / 16.0)
-    );
-    println!(
         "| `accumulate_row_quotients` per (column, sample) step ({} steps per row) | {} | {} |\n",
-        steps,
+        int(steps.into()),
         dec(units["row_quotients"].cycles() / f64::from(steps)),
         dec(units["row_quotients"].pgu() / f64::from(steps)),
     );
     Model {
-        per_m31: Cost {
-            cycles: m31_c,
-            pgu: m31_p,
-        },
-        per_node: Cost {
+        node: Cost {
             cycles: node_c,
             pgu: node_p,
+        },
+        block: Cost {
+            cycles: block_c,
+            pgu: block_p,
+        },
+        update: Cost {
+            cycles: update_c,
+            pgu: update_p,
         },
         children: Cost::of(&units["hash_node_children"]),
         step: Cost::of(&units["row_quotients"]).per(f64::from(steps)),
@@ -558,65 +689,184 @@ fn steps(sampled: u64, columns: u64) -> u64 {
     QUERIES * (sampled + (sampled - columns))
 }
 
-fn print_extrapolation(model: &Model, share: f64) {
+/// What #41 measured on one synthetic bundle beyond the model's measured parts.
+struct Remainder {
+    /// #41's total − the measured parts: the unmeasured work plus model error.
+    rest: Cost,
+    /// (#41's total − decode) / (BLAKE2s + quotients).
+    ratio: Cost,
+}
+
+/// The model on the synthetic bundles #41 ran `verify_composed` on, with the JSON decode of all three
+/// buffers, as that guest parsed them. Returns each bundle's remainder.
+fn cross_check(model: &Model, dir: &Path, sizes: &HashMap<String, u64>) -> Vec<Remainder> {
+    println!(
+        "**Cross-check on synthetic bundles** (counts from each `proof.json`; decode = JSON cycles and PGU per byte × the three files' bytes):\n"
+    );
+    println!(
+        "| Bundle | Leaf M31s | Bottom nodes (bound) | FRI leaves (bound) | Sibling hashes | Internal nodes | Quotient steps | JSON bytes |"
+    );
+    println!("|---|---:|---:|---:|---:|---:|---:|---:|");
+    let mut costs = Vec::new();
+    for (tag, cycles, pgu) in SCRATCH_41 {
+        let proof: Proof =
+            serde_json::from_slice(&read(dir, &format!("{tag}.proof.json"))).unwrap();
+        let c = ProofCounts::of(&proof);
+        let (leaf, internal) = model.blake(&c.nodes);
+        let steps = c.positions * (c.sampled + c.two_sample_columns);
+        let quot = model.step.times(steps as f64);
+        let json: u64 = ["fixed", "claims", "proof"]
+            .iter()
+            .map(|k| sizes[&format!("{tag}.{k}.json")])
+            .sum();
+        let decode = model.decode[0].1.times(json as f64);
+        let n = &c.nodes;
+        println!(
+            "| `{tag}` | {} | {} | {} | {} | {} | {} | {} |",
+            int(n.leaf_m31s),
+            int(n.bottom),
+            int(n.fri_leaves),
+            int(n.siblings),
+            int(n.internal),
+            int(steps),
+            int(json)
+        );
+        let total = Cost {
+            cycles: cycles as f64,
+            pgu: pgu as f64,
+        };
+        costs.push((tag, leaf.plus(internal), quot, decode, total));
+    }
+    println!(
+        "\n| Bundle | Metric | BLAKE2s | Quotients | JSON decode | Measured parts | #41 total | Measured / #41 | #41 − measured | (#41 − decode) / (BLAKE2s + quotients) |"
+    );
+    println!("|---|---|---:|---:|---:|---:|---:|---:|---:|---:|");
+    let mut remainders = Vec::new();
+    for (tag, blake, quot, decode, total) in costs {
+        let measured = blake.plus(quot).plus(decode);
+        let r = Remainder {
+            rest: total.minus(measured),
+            ratio: total.minus(decode).ratio(blake.plus(quot)),
+        };
+        for (metric, get) in METRICS {
+            println!(
+                "| `{tag}` | {metric} | {} | {} | {} | {} | {} | {:.0}% | {} | {:.2} |",
+                sci(get(&blake)),
+                sci(get(&quot)),
+                sci(get(&decode)),
+                sci(get(&measured)),
+                sci(get(&total)),
+                100.0 * get(&measured) / get(&total),
+                sci(get(&r.rest)),
+                get(&r.ratio)
+            );
+        }
+        remainders.push(r);
+    }
+    println!();
+    remainders
+}
+
+/// Reads one metric of a `Cost`.
+type Metric = fn(&Cost) -> f64;
+
+const METRICS: [(&str, Metric); 2] = [("Cycles", |c| c.cycles), ("PGU", |c| c.pgu)];
+
+fn print_extrapolation(model: &Model, share: f64, remainders: &[Remainder]) {
     println!(
         "**Extrapolation to TinyLlama** (`docs/EVM-GAS-MODEL.md` §1 counts; proof.json share of the JSON bytes taken from the synthetic corpus: {:.2}%):\n",
         100.0 * share
     );
-    let rows: Vec<(String, Vec<Cost>)> = {
-        let mut rows: Vec<(String, Vec<Cost>)> = Vec::new();
-        let mut leaf = Vec::new();
-        let mut internal = Vec::new();
-        let mut quot = Vec::new();
-        let mut rest = Vec::new();
-        let mut proof: Vec<Vec<Cost>> = vec![Vec::new(); model.decode.len()];
-        let mut fold = Vec::new();
-        for s in &TINYLLAMA {
-            let bottom = QUERIES * s.trees + 2 * QUERIES * (s.fri_inner_layers + s.segments);
-            let (l, i) = model.blake(s.leaf_m31s, bottom, s.siblings);
-            leaf.push(l);
-            internal.push(i);
-            quot.push(model.step.times(steps(s.sampled, s.columns) as f64));
-            let json = s.json_bytes as f64;
-            rest.push(model.decode[0].1.times(json * (1.0 - share)));
-            for (k, (_, per_byte, ratio)) in model.decode.iter().enumerate() {
-                proof[k].push(per_byte.times(json * share * ratio));
-            }
-            fold.push(
-                model
-                    .fold()
-                    .times((QUERIES * (s.fri_inner_layers + s.segments)) as f64),
-            );
+    let mut leaf = Vec::new();
+    let mut internal = Vec::new();
+    let mut quot = Vec::new();
+    let mut rest = Vec::new();
+    let mut proof: Vec<Vec<Cost>> = vec![Vec::new(); model.decode.len()];
+    let mut fold = Vec::new();
+    for s in &TINYLLAMA {
+        let (l, i) = model.blake(&s.nodes());
+        leaf.push(l);
+        internal.push(i);
+        quot.push(model.step.times(steps(s.sampled, s.columns) as f64));
+        let json = s.json_bytes as f64;
+        rest.push(model.decode[0].1.times(json * (1.0 - share)));
+        for (k, (_, per_byte, ratio)) in model.decode.iter().enumerate() {
+            proof[k].push(per_byte.times(json * share * ratio));
         }
-        rows.push(("BLAKE2s, leaves: per M31 × leaf M31s + per node × bottom nodes (≤ 100 per tree, 200 per FRI layer)".into(), leaf));
-        rows.push((
-            "BLAKE2s, internal nodes: `hash_node` (two children) × sibling hashes".into(),
+        fold.push(
+            model
+                .fold()
+                .times((QUERIES * (s.fri_inner_layers + s.segments)) as f64),
+        );
+    }
+    let measured: Vec<Vec<Cost>> = (0..model.decode.len())
+        .map(|enc| {
+            (0..TINYLLAMA.len())
+                .map(|i| {
+                    leaf[i]
+                        .plus(internal[i])
+                        .plus(quot[i])
+                        .plus(proof[enc][i])
+                        .plus(rest[i])
+                })
+                .collect()
+        })
+        .collect();
+    // Estimated total, `proof` as bincode: the measured parts plus the unmeasured work, from each
+    // synthetic remainder scaled by the BLAKE2s + quotient cost or added once per segment.
+    let bincode = model
+        .decode
+        .iter()
+        .position(|(enc, _, _)| *enc == "bincode")
+        .unwrap();
+    let estimate: Vec<(Cost, Cost)> = TINYLLAMA
+        .iter()
+        .enumerate()
+        .map(|(i, s)| {
+            let base = leaf[i].plus(internal[i]).plus(quot[i]);
+            let m = measured[bincode][i];
+            remainders
+                .iter()
+                .flat_map(|r| {
+                    [
+                        m.plus(base.scaled(r.ratio).minus(base)),
+                        m.plus(r.rest.times(s.segments as f64)),
+                    ]
+                })
+                .fold(
+                    (
+                        Cost {
+                            cycles: f64::INFINITY,
+                            pgu: f64::INFINITY,
+                        },
+                        Cost::ZERO,
+                    ),
+                    |(lo, hi), e| (lo.min(e), hi.max(e)),
+                )
+        })
+        .collect();
+    let mut rows: Vec<(String, Vec<Cost>)> = vec![
+        (
+            "BLAKE2s, leaves: column values at 1/16 block + per M31 × leaf M31s, per node × bottom nodes (≤ 100 per tree, 200 per FRI layer), 3/4 block × FRI leaves (≤ 200 per FRI layer)".into(),
+            leaf,
+        ),
+        (
+            "BLAKE2s, internal nodes: `hash_node` (two children) × (bottom nodes + sibling hashes − trees − FRI layers)".into(),
             internal,
-        ));
-        rows.push((
+        ),
+        (
             "DEEP quotients: per step × 100 × (sampled values + two-sample columns)".into(),
             quot,
-        ));
-        for (k, (enc, _, _)) in model.decode.iter().enumerate() {
-            rows.push((format!("Decode `proof` as {enc}"), proof[k].clone()));
-        }
-        rows.push(("Decode `fixed` + `claims` (JSON)".into(), rest));
-        rows.push(("FRI folds, field arithmetic only (bound)".into(), fold));
-        rows
-    };
-    let total = |enc: usize| -> Vec<Cost> {
-        (0..TINYLLAMA.len())
-            .map(|i| {
-                [0, 1, 2, 3 + enc, 3 + model.decode.len()].iter().fold(
-                    Cost {
-                        cycles: 0.0,
-                        pgu: 0.0,
-                    },
-                    |a, &r| a.plus(rows[r].1[i]),
-                )
-            })
-            .collect()
-    };
+        ),
+    ];
+    for (k, (enc, _, _)) in model.decode.iter().enumerate() {
+        rows.push((format!("Decode `proof` as {enc}"), proof[k].clone()));
+    }
+    rows.push(("Decode `fixed` + `claims` (JSON)".into(), rest));
+    rows.push((
+        "FRI folds, field arithmetic only (lower bound; not in the totals)".into(),
+        fold,
+    ));
     let header = TINYLLAMA
         .iter()
         .map(|s| s.name)
@@ -627,95 +877,90 @@ fn print_extrapolation(model: &Model, share: f64) {
         .map(|_| "---:")
         .collect::<Vec<_>>()
         .join("|");
-    for (metric, get) in [
-        ("Cycles", (|c: &Cost| c.cycles) as fn(&Cost) -> f64),
-        ("PGU", |c: &Cost| c.pgu),
-    ] {
+    let row = |label: &str, cells: Vec<String>| println!("| {label} | {} |", cells.join(" | "));
+    for (metric, get) in METRICS {
         println!("| {metric} | {header} |\n|---|{align}|");
         for (label, costs) in &rows {
-            println!(
-                "| {label} | {} |",
-                costs
-                    .iter()
-                    .map(|c| sci(get(c)))
-                    .collect::<Vec<_>>()
-                    .join(" | ")
-            );
+            row(label, costs.iter().map(|c| sci(get(c))).collect());
         }
         for (k, (enc, _, _)) in model.decode.iter().enumerate() {
-            let t = total(k);
-            println!(
-                "| **Measured parts, `proof` as {enc}** | {} |",
-                t.iter()
+            row(
+                &format!("**Measured parts only, `proof` as {enc}**"),
+                measured[k]
+                    .iter()
                     .map(|c| format!("**{}**", sci(get(c))))
-                    .collect::<Vec<_>>()
-                    .join(" | ")
+                    .collect(),
             );
         }
-        println!(
-            "| Unmeasured: OODS constraint evaluation, FRI fold domain points and inversions, the channel, GKR | — | — | — | — |\n"
+        row(
+            "Unmeasured: OODS constraint evaluation, FRI fold domain points and inversions, the channel, GKR, the per-value gather and reshape in `fri_answers` and the Merkle verifier",
+            vec!["—".into(); TINYLLAMA.len()],
         );
+        row(
+            "**Estimated total, `proof` as bincode** (unmeasured work from #41's synthetic remainder; estimate, #45 replaces it)",
+            estimate
+                .iter()
+                .map(|(lo, hi)| format!("**{}–{}**", sci(get(lo)), sci(get(hi))))
+                .collect(),
+        );
+        println!();
     }
     println!(
-        "| Against the per-request cap (one request per segment) and GPU time | {header} |\n|---|{align}|"
+        "| Against the per-request limits (one request per segment) and GPU time | {header} |\n|---|{align}|"
     );
+    let pct = |v: f64| format!("{:.2}%", 100.0 * v);
+    let hours = |pgu: f64| format!("{:.3}", pgu / PGU_PER_GPU_SECOND / 3600.0);
     for (k, (enc, _, _)) in model.decode.iter().enumerate() {
-        let t = total(k);
-        println!(
-            "| `proof` as {enc}: PGU / 1e12 cap | {} |",
-            t.iter()
-                .map(|c| format!("{:.2}%", 100.0 * c.pgu / PGU_CAP))
-                .collect::<Vec<_>>()
-                .join(" | ")
+        let t = &measured[k];
+        row(
+            &format!("Measured parts only, `proof` as {enc}: PGU / 1e12-PGU cap (unverified)"),
+            t.iter().map(|c| pct(c.pgu / PGU_CAP)).collect(),
         );
-        println!(
-            "| `proof` as {enc}: GPU-hours at 2M PGU/s per GPU (unverified) | {} |",
-            t.iter()
-                .map(|c| format!("{:.3}", c.pgu / PGU_PER_GPU_SECOND / 3600.0))
-                .collect::<Vec<_>>()
-                .join(" | ")
+        row(
+            &format!(
+                "Measured parts only, `proof` as {enc}: GPU-hours at 2M PGU/s per GPU (unverified)"
+            ),
+            t.iter().map(|c| hours(c.pgu)).collect(),
         );
     }
-    println!();
-}
-
-/// The same model on the synthetic bundles #41 ran `verify_composed` on, with the JSON decode of all
-/// three buffers, as that guest parsed them.
-fn print_cross_check(model: &Model, dir: &Path, sizes: &HashMap<String, u64>) {
-    println!(
-        "**Cross-check on synthetic bundles** (counts from each `proof.json`; decode = JSON cycles per byte × the three files' bytes):\n"
-    );
-    println!(
-        "| Bundle | Leaf M31s | Bottom nodes (bound) | Sibling hashes | Quotient steps | JSON bytes | BLAKE2s cycles | Quotient cycles | JSON decode cycles | Measured parts |"
-    );
-    println!("|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|");
-    for tag in CROSS_CHECKED {
-        let proof: Proof =
-            serde_json::from_slice(&read(dir, &format!("{tag}.proof.json"))).unwrap();
-        let c = ProofCounts::of(&proof);
-        let bottom = QUERIES * c.trees as u64 + 2 * QUERIES * c.fri_layers;
-        let (leaf, internal) = model.blake(c.leaf_m31s, bottom, c.siblings);
-        let steps = c.positions * (c.sampled + c.two_sample_columns);
-        let quot = model.step.times(steps as f64);
-        let json: u64 = ["fixed", "claims", "proof"]
+    let range = |f: &dyn Fn(&Cost) -> String| -> Vec<String> {
+        estimate
             .iter()
-            .map(|k| sizes[&format!("{tag}.{k}.json")])
-            .sum();
-        let decode = model.decode[0].1.times(json as f64);
-        let blake = leaf.plus(internal);
-        println!(
-            "| `{tag}` | {} | {} | {} | {} | {} | {} | {} | {} | {} |",
-            int(c.leaf_m31s),
-            int(bottom),
-            int(c.siblings),
-            int(steps),
-            int(json),
-            sci(blake.cycles),
-            sci(quot.cycles),
-            sci(decode.cycles),
-            sci(blake.plus(quot).plus(decode).cycles)
-        );
-    }
+            .map(|(lo, hi)| format!("{}–{}", f(lo), f(hi)))
+            .collect()
+    };
+    row(
+        "Estimated total, `proof` as bincode: PGU / 1e12-PGU cap (unverified)",
+        range(&|c| pct(c.pgu / PGU_CAP)),
+    );
+    row(
+        "Estimated total, `proof` as bincode: GPU-hours at 2M PGU/s per GPU (unverified)",
+        range(&|c| hours(c.pgu)),
+    );
+    let per_request = |cells: Vec<String>| -> Vec<String> {
+        cells
+            .into_iter()
+            .zip(&TINYLLAMA)
+            .map(|(c, s)| if s.segments == 1 { c } else { "—".into() })
+            .collect()
+    };
+    row(
+        "Estimated total, `proof` as bincode: cycles / sp1-sdk's 1e12-cycle `MAINNET_DEFAULT_CYCLE_LIMIT`",
+        per_request(range(&|c| pct(c.cycles / SDK_CYCLE_LIMIT))),
+    );
+    row(
+        "Measured parts only, `proof` as bincode: PGU / sp1-sdk's 1e9-PGU `DEFAULT_GAS_LIMIT`",
+        per_request(
+            measured[bincode]
+                .iter()
+                .map(|c| pct(c.pgu / SDK_GAS_LIMIT))
+                .collect(),
+        ),
+    );
+    row(
+        "Estimated total, `proof` as bincode: PGU / sp1-sdk's 1e9-PGU `DEFAULT_GAS_LIMIT`",
+        per_request(range(&|c| pct(c.pgu / SDK_GAS_LIMIT))),
+    );
     println!();
 }
 
