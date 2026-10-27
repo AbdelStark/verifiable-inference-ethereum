@@ -13,8 +13,8 @@
                                      v
 +-------------------------------------------------------------------------+
 | Off-Chain Proof Compression (planned: M2 guests, M3 aggregator + wrap)  |
-|   - M2: SP1 v6 riscv64im guest per segment runs a verifier-only         |
-|     extraction of verify_composed; rejects token ids >= P               |
+|   - M2: SP1 v6 riscv64im guest per segment runs a verifier-only build   |
+|     of verify_composed; rejects token ids >= P; commits fixedHash       |
 |   - M3: aggregator verifies 23 proofs, commits publicDigest             |
 |   - M3: SP1 v6 BN254 wrap (Groth16 or PLONK, chosen at M3 start)        |
 +------------------------------------+------------------------------------+
