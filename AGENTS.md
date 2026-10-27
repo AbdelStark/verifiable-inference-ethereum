@@ -80,6 +80,7 @@ When asked to work/implement/do/resolve issue #N:
 - **Read it first** (`gh issue view N`), then **implement the actual code**; never just change its GitHub status.
 - **Respect every invariant in this file**; write tests per §5 and run `make check`.
 - **Branch + PR**: branch `issue-N-short-slug`, commit, push, `gh pr create` referencing the issue with `Refs #N` (not `Closes`, unless asked). Do **NOT** merge, close or replace the PR, and do **NOT** close the issue: the human decides.
+- **One worktree per issue; parallel where they don't conflict.** Work each issue in its own git worktree. Run issues that touch disjoint files concurrently; stack a dependent issue's branch on the branch it depends on. Use subagents for the roles an issue needs (implementing, research, independent review, critique), and have the coordinating session brief them, resolve conflicts in shared files (`Makefile`, `ci.yml`, `AGENTS.md`, `SPEC.md`) and report to the user.
 - **No agent/tool branding** in branch names or PR titles. **Keep the PR description short**: what changed, how to verify, any AGENTS.md edits.
 
 ## 7. Maintaining this file
