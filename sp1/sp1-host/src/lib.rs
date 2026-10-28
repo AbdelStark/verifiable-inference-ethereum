@@ -1,7 +1,9 @@
 //! Host side of the SP1 guests: the segment guest's input encoding and executor run (`SPEC.md`
-//! §1.1), and stwo-bench's; the TinyLlama controls and proof sizes (`docs/EVM-GAS-MODEL.md`).
+//! §1.1), and stwo-bench's; the TinyLlama controls, proof sizes and `prove`'s checks
+//! (`docs/EVM-GAS-MODEL.md`).
 
 pub mod controls;
+pub mod prove;
 pub mod sizes;
 pub mod trace;
 
@@ -51,10 +53,15 @@ pub fn tinyllama_tags() -> Vec<String> {
 pub fn read_fixed_pins(path: &Path) -> io::Result<Vec<(String, [u8; 32])>> {
     let text = fs::read_to_string(path)
         .map_err(|e| io::Error::new(e.kind(), format!("{}: {e}", path.display())))?;
+    parse_fixed_pins(&text, &path.display().to_string())
+}
+
+/// [`read_fixed_pins`] on the file's text; `origin` names it in errors.
+pub fn parse_fixed_pins(text: &str, origin: &str) -> io::Result<Vec<(String, [u8; 32])>> {
     text.lines()
         .filter(|line| !line.starts_with('#') && !line.trim().is_empty())
         .map(|line| {
-            let bad = || io::Error::other(format!("{}: bad pin line {line:?}", path.display()));
+            let bad = || io::Error::other(format!("{origin}: bad pin line {line:?}"));
             let (tag, hex) = line.split_once(' ').ok_or_else(bad)?;
             let mut hash = [0; 32];
             hex::decode_to_slice(hex, &mut hash).map_err(|_| bad())?;

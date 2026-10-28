@@ -1,6 +1,6 @@
 [package]
 name = "sp1-host"
-description = "Host side of the SP1 segment guest: builds it and runs it in the SP1 executor"
+description = "Host side of the SP1 segment guest: builds it, runs it in the SP1 executor and proves it on a GPU"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -11,7 +11,7 @@ publish.workspace = true
 # Cycle-tracker regions need sp1-sdk's profiling executor, which is slower; only the stwo-bench test
 # and the unit-costs and decode-share commands (docs/EVM-GAS-MODEL.md §6, §7) turn it on, with the
 # commands' dependencies.
-profiling = ["sp1-sdk/profiling", "dep:postcard", "dep:sha2", "dep:stwo"]
+profiling = ["sp1-sdk/profiling", "dep:postcard", "dep:stwo"]
 # Counts BLAKE2s compressions in nitroo's Stwo (sp1/patches/0005): native host builds only, for the
 # native-check command; never a guest.
 count-ops = ["dep:stwo", "stwo/count-ops"]
@@ -32,24 +32,24 @@ name = "decode-share"
 path = "src/bin/decode_share.rs"
 required-features = ["profiling"]
 
+# `sash-evm-primitives` and `sha2` also serve the segment check's bundle mutations
+# (`sash-segment-check/tests/common`), shared with its native tests. sp1-sdk's `cuda` feature (`prove`)
+# adds `sp1-cuda`, which has no build script and no CUDA dependency: it downloads and runs SP1's
+# prebuilt `sp1-gpu-server` (Linux x86_64 only) when a CUDA client is built.
 [dependencies]
 bincode.workspace = true
 clap = { version = "4.6.7", features = ["derive"] }
 hex = "0.4.3"
 libc = "0.2.191"
 postcard = { workspace = true, optional = true }
+sash-evm-primitives.workspace = true
 sash-segment-check.workspace = true
 serde_json.workspace = true
-sha2 = { version = "0.10.9", optional = true }
-sp1-sdk.workspace = true
+sha2 = "0.10.9"
+sp1-sdk = { workspace = true, features = ["cuda"] }
 stwo = { workspace = true, optional = true }
 tokio = { version = "1", features = ["sync"] }
 zk-prover.workspace = true
 
 [build-dependencies]
 sp1-build.workspace = true
-
-# The segment check's bundle mutations (`sash-segment-check/tests/common`), shared with its native tests.
-[dev-dependencies]
-sash-evm-primitives.workspace = true
-sha2 = "0.10.9"
