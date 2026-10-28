@@ -19,7 +19,7 @@ The question raised in review: SASH already produces Circle STARK proofs, so why
 
 The EIP facts below are verified; the sizes and gas multiples are estimates from an unpublished run (`docs/EVM-GAS-MODEL.md` §1, §3):
 - **No BLAKE2s on the EVM.** The precompile at `0x09` (`EIP-152`) is only the BLAKE2b `F` compression function, over 64-bit words. SASH hashes with 32-bit BLAKE2s.
-- **One segment is bigger than a block.** One segment proof (`B0L0`) is about 13.45 MB by stwo's in-memory `size_estimate()` plus its GKR bytes (its JSON bundle is 33.8 MB), above the Osaka block size limit of `EIP-7934` (about 8 MiB). Its calldata floor alone is about 28.5x the `EIP-7825` per-transaction cap.
+- **One segment is bigger than a block.** One segment proof (`B0L0`) is about 13.45 MB by stwo's in-memory `size_estimate()` plus its GKR bytes (its JSON fixed, claims and proof files are 34.8 MB), above the Osaka block size limit of `EIP-7934` (about 8 MiB). Its calldata floor alone is about 28.5x the `EIP-7825` per-transaction cap.
 - **All 23 segments need at least ~800x the cap** under Osaka (`docs/EVM-GAS-MODEL.md` §3). These figures are estimates from the sizes of an unpublished run.
 - **Any route must recurse off-chain first.** SASH proofs have to become one small proof before they reach L1.
 
@@ -62,7 +62,7 @@ The EIP facts below are verified; the sizes and gas multiples are estimates from
 ## SP1's weak spots
 
 - **No BLAKE2s or M31/QM31 precompile in SP1 v6.10.** The ~5.13M BLAKE2s compressions and the field arithmetic run as plain RISC-V. `docs/EVM-GAS-MODEL.md` §6 measures the unit costs, at 2,139 cycles per compression and 148 per DEEP-quotient step. §7 measures the whole run: the 23 segments verify in the SP1 executor in 4.79e10 cycles (4.47e10 PGU), with a `bincode` proof, 22.9% of them in BLAKE2s. S-two Cairo and StarkWare's circuit library make exactly these operations native.
-- **Large guest input.** `verify_composed` reads serde JSON: about 761 MB per run, 84.6 MB for the `head` segment alone. Decoding JSON in the guest costs ~31 cycles per byte, so the proof buffer moves to `bincode`, at 8.4x fewer cycles (`docs/EVM-GAS-MODEL.md` §6.2, `SPEC.md` §1.1).
+- **Large guest input.** `verify_composed` reads serde JSON: about 761 MB per run, 85.5 MB for the `head` segment alone. Decoding JSON in the guest costs ~31 cycles per byte, so the proof buffer moves to `bincode`, at 8.4x fewer cycles (`docs/EVM-GAS-MODEL.md` §6.2, `SPEC.md` §1.1).
 - **No verifier-only build.** The verifier sits inside SASH's monolithic prover crate, which always enables stwo's `prover` and `parallel` features, rayon and the CUDA modules, and needs nightly. A guest means splitting out and maintaining a verifier crate. Prior art shows a stwo verifier compiling inside SP1 (`Okm165/stwo-verifier-sp1`), but not this fork or GKR.
 - **Weak Groth16 setup.** L2BEAT rates SP1 v6.1.0's Groth16 phase-2 setup red: Succinct ran it, with 18 participants and no public call. The PLONK option rests on Aztec Ignition and is rated green. If we stay on SP1, PLONK costs ~30k more gas for a stronger setup.
 
@@ -273,7 +273,7 @@ Everything but time is the same on both machines. The rest is AIR evaluation, ch
 
 From `docs/EVM-GAS-MODEL.md` §1 (65,967,346 leaf M31s, 519,784 OODS values, 501,235 columns, 518,489 internal hashes) and §3 (5,133,478 BLAKE2s compressions). Assumed multipliers:
 - **BLAKE2s compressions** as SASH's verifier runs them, Merkle `hash_node` plus channel, counted natively (§3, §7): 5,133,478 for all 23 segments and 557,316 for `head`. That is 10.6% and 6.0% above the analytic leaf M31s / 16 + internal hashes (4,641,448 and 525,665).
-- **QM31 mul-adds** = 100 query positions × (OODS values + two-sample columns), with two-sample columns = OODS values − columns: one per query position and (column, sample) pair, as `accumulate_row_quotients` (`verifier_core/src/pcs/quotients.cairo:263`) does. SASH proves with 100 queries. A periodicity sample is added to every column sampled at two points (`build_samples_with_randomness_and_periodicity`, which the pinned Cairo verifier mirrors at `quotients.cairo:79-100`), and no column has more than two. This is the count #38's SP1 model used: 53,833,300 for all 23 segments, 7,063,600 for `head`.
+- **QM31 mul-adds** = 100 query positions × (OODS values + two-sample columns), with two-sample columns = OODS values − columns: one per query position and (column, sample) pair, as `accumulate_row_quotients` (`verifier_core/src/pcs/quotients.cairo:263`) does. SASH proves with 100 queries. A periodicity sample is added to every column sampled at two points (`build_samples_with_randomness_and_periodicity`, which the pinned Cairo verifier mirrors at `quotients.cairo:79-100`), and no column has more than two. This is #38's formula; with the corrected 501,235 columns it gives 53,833,300 for all 23 segments and 7,063,600 for `head` (#38 used 53,837,100, from 501,197 columns).
 - **Ingested felts** = leaf M31s + 4 × OODS values + 8 × internal hashes. Each costs one M31 ingestion, including the 32-bit hash words.
 - **Costs add linearly.** Each segment is its own proof, so it pays once the largest of the three fixed costs.
 

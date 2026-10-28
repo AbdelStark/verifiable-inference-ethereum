@@ -14,7 +14,7 @@
 set -euo pipefail
 
 cd "$(dirname "$0")/../.."
-root=$PWD
+root="$(pwd -P)"
 pins=sp1/pins/tinyllama.fixed.sha256
 host=sp1/target/release
 
@@ -33,12 +33,20 @@ for var in MINIMAL_TRACE_CHUNK_THRESHOLD GAS_TRACE_CHUNK_THRESHOLD TRACE_CHUNK_S
     [[ -z "${!var+set}" ]] || fail "$var is set; SP1CoreOpts reads it, and the recorded figures take SP1's defaults"
 done
 
+bundles="$(cd "$BUNDLES" && pwd -P)"
+# OUT must be outside the repository or gitignored, and never the bundle directory or inside it. A
+# rejected OUT that this run created is removed again.
+[[ -d "$OUT" ]] && created= || created=1
 mkdir -p "$OUT"
-out="$(cd "$OUT" && pwd)"
+out="$(cd "$OUT" && pwd -P)"
+reject() {
+    [[ -z "$created" ]] || rmdir "$out"
+    fail "$@"
+}
 case "$out/" in
-"$root"/*) git check-ignore -q "$out" || fail "OUT ($out) is inside the repository and not gitignored" ;;
+"$bundles"/*) reject "OUT ($out) is the bundle directory or inside it" ;;
+"$root"/*) git check-ignore -q "$out" || reject "OUT ($out) is inside the repository and not gitignored" ;;
 esac
-bundles="$(cd "$BUNDLES" && pwd)"
 elf="$(cd "$(dirname "$ELF")" && pwd)/$(basename "$ELF")"
 
 (
