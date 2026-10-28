@@ -136,12 +136,13 @@ jobs:
         run: |
           mv "$RUNNER_TEMP/sash-synthetic-corpus/synthetic" sp1/testdata/synthetic
           (cd sp1/testdata/synthetic && sha256sum --strict -c ../synthetic.sha256)
-      # Release: a debug executor is too slow for ~1.5e9-cycle runs. Two threads: each run peaks at ~5 GB.
+      # Release: a debug executor is too slow for ~1.5e9-cycle runs. One thread: the native executor keeps guest
+      # memory in /dev/shm (~5 GB per run), and two concurrent runs overflow the runner's /dev/shm (SIGBUS).
       - name: Segment guest in the executor on every corpus bundle and bundle mutation (SPEC.md §2.1 G1-G7)
         working-directory: sp1
         env:
           SASH_SYNTHETIC_CORPUS: ${{ github.workspace }}/sp1/testdata/synthetic
-        run: cargo test --release --locked -p sp1-host --test segment_guest -- --ignored --test-threads=2
+        run: cargo test --release --locked -p sp1-host --test segment_guest -- --ignored --test-threads=1
       - name: stwo-bench in the profiling executor (cycle-tracker regions)
         working-directory: sp1
         run: cargo test --locked -p sp1-host --features profiling
