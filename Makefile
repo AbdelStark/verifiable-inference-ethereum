@@ -103,7 +103,7 @@ SASH_SYNTHETIC_CORPUS ?= $(CURDIR)/sp1/testdata/synthetic
 
 sp1-guest-suite: sp1-vendor
 	cd "$(SASH_SYNTHETIC_CORPUS)" && shasum -a 256 --strict --quiet -c "$(CURDIR)/sp1/testdata/synthetic.sha256"
-	cd sp1 && SASH_SYNTHETIC_CORPUS="$(SASH_SYNTHETIC_CORPUS)" cargo test --release --locked -p sp1-host --test segment_guest -- --ignored --test-threads=2
+	cd sp1 && SASH_SYNTHETIC_CORPUS="$(SASH_SYNTHETIC_CORPUS)" cargo test --release --locked -p sp1-host --test segment_guest -- --ignored --test-threads=1
 
 BUNDLES ?= runs/tinyllama
 
