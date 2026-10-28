@@ -24,6 +24,15 @@ Each segment guest verifies one SASH segment (`<tag>.fixed.json`, `<tag>.claims.
 
 The difference MUST be reproducible as a reviewed patch series against `eb95bfa`, and the header lists every patched file. Any other change needs an edit to this list in the change that makes it.
 
+**Guest input.** The guest reads three buffers with `sp1_zkvm::io::read_vec`, in this order:
+- `fixed`: the bytes of `<tag>.fixed.json`, decoded as `serde_json`;
+- `claims`: the bytes of `<tag>.claims.json`, decoded as `serde_json`;
+- `proof`: the `StarkProof` the host parses from `<tag>.proof.json` and re-encodes as `bincode` 1.3.3 (`bincode::serialize`: fixed-width little-endian integers, `u64` lengths).
+
+The guest decodes the buffers itself and calls the parsed entry of `verify_composed`. A `fixed` that does not decode is `Malformed`, and a `claims` or `proof` that does not decode rejects at rule 6. Whatever the wire format, `fixedHash` hashes the re-serialized parsed `Fixed`. The re-encoding is outside the trusted base: the guest verifies whatever proof it decodes.
+
+These formats come from measurements (`docs/EVM-GAS-MODEL.md` §6.2). Decoding `sound_aligned`'s `StarkProof` costs 29.6 cycles per JSON byte, 9.6 per `bincode` byte and 11.8 per `postcard` byte. Re-encoded, the proof is 0.386 of the JSON size in `bincode` and 0.445 in `postcard`. That is 699M cycles as JSON, 87M as `bincode` and 124M as `postcard`. Over the TinyLlama run, a JSON proof would cost ~2.2e10 cycles and a `bincode` one ~2.8e9 (extrapolated, `docs/EVM-GAS-MODEL.md` §6.3). `Fixed` and `Claims` stay JSON. 23 `skip_serializing_if` fields in `compose.rs` stop them round-tripping through `bincode` or `postcard`, and they are ~1% of the synthetic corpus' bundle bytes (#45 measures TinyLlama's share).
+
 **Rules.** A `Fixed` that does not parse is rejected (`Malformed`). A `Plan::new` assertion on the parsed `params`, or any other panic in the verifier build (e.g. a decodable proof with fewer than three commitments indexes out of bounds before upstream's length check), is a rejection with no named variant: the guest exits 1 with the panic message, and the native check panics. Then the guest MUST check, in this order, and reject with the named variant:
 1. **`TokenIdOutOfField`:** every id in `Fixed.tok_in` and `Fixed.tok_out` is `< P` (`P = 2^31 - 1`), before any Horner sum. SASH maps ids with `M31::from_u32_unchecked` (`m31_u32`, `prover/src/common.rs`), so `P + k` would alias `k`.
 2. **`SecurityParams`:** `log_blowup == 1`, `n_queries == 100`, `pow_bits == 0`.
