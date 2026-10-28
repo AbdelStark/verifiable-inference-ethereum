@@ -9,12 +9,27 @@ publish.workspace = true
 
 [features]
 # Cycle-tracker regions need sp1-sdk's profiling executor, which is slower; only the stwo-bench test
-# and the unit-costs command (docs/EVM-GAS-MODEL.md §6) turn it on, with the command's dependencies.
+# and the unit-costs and decode-share commands (docs/EVM-GAS-MODEL.md §6, §7) turn it on, with the
+# commands' dependencies.
 profiling = ["sp1-sdk/profiling", "dep:postcard", "dep:sha2", "dep:stwo"]
+# Counts BLAKE2s compressions in nitroo's Stwo (sp1/patches/0005): native host builds only, for the
+# native-check command; never a guest.
+count-ops = ["dep:stwo", "stwo/count-ops"]
 
 [[bin]]
 name = "unit-costs"
 path = "src/bin/unit_costs.rs"
+required-features = ["profiling"]
+
+# `make sp1-execute`: the native segment check with BLAKE2s counts, and the decode share.
+[[bin]]
+name = "native-check"
+path = "src/bin/native_check.rs"
+required-features = ["count-ops"]
+
+[[bin]]
+name = "decode-share"
+path = "src/bin/decode_share.rs"
 required-features = ["profiling"]
 
 [dependencies]
@@ -23,6 +38,7 @@ clap = { version = "4.6.7", features = ["derive"] }
 hex = "0.4.3"
 libc = "0.2.191"
 postcard = { workspace = true, optional = true }
+sash-segment-check.workspace = true
 serde_json.workspace = true
 sha2 = { version = "0.10.9", optional = true }
 sp1-sdk.workspace = true
@@ -36,5 +52,4 @@ sp1-build.workspace = true
 # The segment check's bundle mutations (`sash-segment-check/tests/common`), shared with its native tests.
 [dev-dependencies]
 sash-evm-primitives.workspace = true
-sash-segment-check.workspace = true
 sha2 = "0.10.9"

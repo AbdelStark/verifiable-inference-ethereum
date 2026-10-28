@@ -81,6 +81,13 @@ the patches modify:
   sp1/patches/0004-split-verify-composed.patch:
     prover/src/compose.rs
 
+  sp1/patches/0005-count-blake2s-compressions.patch:
+    nitroo/crates/stwo/Cargo.toml
+    nitroo/crates/stwo/src/core/vcs/blake2_hash.rs
+    nitroo/crates/stwo/src/core/vcs/blake2_merkle.rs
+    nitroo/crates/stwo/src/core/vcs/count_ops.rs (new)
+    nitroo/crates/stwo/src/core/vcs/mod.rs
+
 SASH's NOTICE (Apache-2.0 §4(d)), carried with its source:
 
   zk-prover

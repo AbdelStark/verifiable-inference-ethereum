@@ -14,3 +14,5 @@ postcard.workspace = true
 serde_json.workspace = true
 sp1-zkvm.workspace = true
 stwo.workspace = true
+# The segment check's `Fixed` and `Claims` (no `prover` feature), for the `decode_segment` regions.
+zk-prover.workspace = true

@@ -2,7 +2,10 @@
 //! with no calibration, as the guest does, and prints one JSON object:
 //! - `verdict`: the serialized `Verdict`, without its timing fields;
 //! - `accepts`: `Verdict::accepts()`;
-//! - `binding`: `Plan::new(&fixed.params).binding_json(fixed.layer)`, or `null` if `Fixed` does not parse.
+//! - `binding`: `Plan::new(&fixed.params).binding_json(fixed.layer)`, or `null` if `Fixed` does not parse;
+//! - `fixedHash`: `SPEC.md` §1.1's `fixedHash` of upstream's parsed `Fixed`, hex, or `null` if it does
+//!   not parse: `sha256(serde_json::to_vec(&Fixed { tok_in: vec![], tok_out: vec![], ..parsed }))`.
+//!   The guest computes it on the verifier build's `Fixed`; this is the independent reference.
 //!
 //! A panic prints `{"panic": "<message>"}` instead, still with exit code 0, so mutated bundles get a
 //! deterministic outcome.
@@ -11,6 +14,7 @@ use std::panic::{self, AssertUnwindSafe};
 use std::{env, fs, process};
 
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 use zk_prover::compose::{Fixed, Plan, verify_composed};
 
 const TIMING_FIELDS: [&str; 2] = ["verify_secs", "shape_secs"];
@@ -37,10 +41,22 @@ fn main() {
                 map.remove(field);
             }
         }
-        let binding = serde_json::from_slice::<Fixed>(&fixed)
-            .ok()
+        let parsed = serde_json::from_slice::<Fixed>(&fixed).ok();
+        let binding = parsed
+            .as_ref()
             .map(|f| Plan::new(&f.params).binding_json(f.layer));
-        json!({ "verdict": verdict, "accepts": accepts, "binding": binding })
+        let fixed_hash = parsed.map(|f| {
+            let cleared = Fixed {
+                tok_in: vec![],
+                tok_out: vec![],
+                ..f
+            };
+            format!(
+                "{:x}",
+                Sha256::digest(serde_json::to_vec(&cleared).expect("Fixed serializes"))
+            )
+        });
+        json!({ "verdict": verdict, "accepts": accepts, "binding": binding, "fixedHash": fixed_hash })
     }));
     let out = outcome.unwrap_or_else(|payload| {
         let message = payload

@@ -114,6 +114,7 @@ jobs:
           CARGO_TARGET_DIR: ${{ github.workspace }}/sp1/target/nitroo-check
         run: |
           cargo +1.99.1 check --locked --no-default-features --features std -p stwo
+          cargo +1.99.1 check --locked --no-default-features --features std,count-ops -p stwo
           cargo +1.99.1 check --locked --no-default-features --features std -p stwo-constraint-framework
       - name: Check SASH's zk-prover library (verify_composed) without the prover feature on stable
         working-directory: sp1/vendor/sash
@@ -143,14 +144,14 @@ jobs:
         env:
           SASH_SYNTHETIC_CORPUS: ${{ github.workspace }}/sp1/testdata/synthetic
         run: cargo test --release --locked -p sp1-host --test segment_guest -- --ignored --test-threads=1
-      - name: stwo-bench in the profiling executor (cycle-tracker regions)
+      - name: stwo-bench in the profiling executor (cycle-tracker regions) and the BLAKE2s compression counter
         working-directory: sp1
-        run: cargo test --locked -p sp1-host --features profiling
+        run: cargo test --locked -p sp1-host --features profiling,count-ops
       - name: Clippy
         working-directory: sp1
         run: |
           cargo clippy --locked --workspace --all-targets -- -D warnings
-          cargo clippy --locked -p sp1-host --all-targets --features profiling -- -D warnings
+          cargo clippy --locked -p sp1-host --all-targets --features profiling,count-ops -- -D warnings
       - name: Reproducible guest builds in the SP1 image pinned by digest; ELF sha256 and vkey against the committed ones
         run: sp1/scripts/docker-guests.sh
       - name: Upload the Docker-built segment guest ELF

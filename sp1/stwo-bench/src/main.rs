@@ -2,7 +2,7 @@
 //! guest, in its own cycle-tracker region, for the unit costs of `docs/EVM-GAS-MODEL.md` §6.
 //!
 //! Stdin: one 8-byte buffer `op: u32 LE || n: u32 LE`, then, for the decode operations only, the
-//! `StarkProof` to decode. Every input is `black_box`ed, so the loops run in full. Each operation
+//! `StarkProof` to decode, or for `decode_segment` the segment guest's three buffers. Every input is `black_box`ed, so the loops run in full. Each operation
 //! commits a value derived from its result, so none of the work is dead.
 #![no_main]
 sp1_zkvm::entrypoint!(main);
@@ -22,6 +22,7 @@ use stwo::core::pcs::quotients::{
 use stwo::core::proof::StarkProof;
 use stwo::core::vcs::MerkleHasher;
 use stwo::core::vcs::blake2_merkle::Blake2sM31MerkleHasher;
+use zk_prover::compose::{Claims, Fixed};
 
 /// SASH's proof type (`Proof` in `prover/src/common.rs`).
 type Proof = StarkProof<Blake2sM31MerkleHasher>;
@@ -34,6 +35,11 @@ const QUOTIENT_TWO_SAMPLE_COLUMNS: usize = 64;
 /// Never taken by the tests: it only proves the GKR verifier, moved out of nitroo's `prover` feature
 /// by sp1/patches/0002, links into a guest. Real GKR proofs run in the segment guest.
 const OP_GKR_LINK: u32 = u32::MAX;
+
+/// Decodes the segment guest's three buffers once, as `check_segment` does, in two regions:
+/// `decode_fixed_claims` and `decode_proof`. Not in the host's `STWO_BENCH_OPS`, whose operations
+/// take one buffer.
+const OP_DECODE_SEGMENT: u32 = 16;
 
 pub fn main() {
     let header = sp1_zkvm::io::read_vec();
@@ -66,6 +72,7 @@ pub fn main() {
         15 => decode("decode_postcard", n, |b| {
             postcard::from_bytes::<Proof>(b).ok()
         }),
+        OP_DECODE_SEGMENT => decode_segment(),
         OP_GKR_LINK => gkr_link(),
         _ => panic!("unknown op {op}"),
     }
@@ -223,6 +230,26 @@ fn decode(region: &str, n: u32, f: impl Fn(&[u8]) -> Option<Proof>) {
     for word in [ok, commitments as u32, queried as u32] {
         sp1_zkvm::io::commit_slice(&word.to_le_bytes());
     }
+}
+
+/// The segment guest's input (`SPEC.md` §1.1), decoded with `check_segment`'s types and calls:
+/// `Fixed` and `Claims` from JSON, the proof from `bincode`. Commits whether each decoded, then the
+/// proof's commitment count. The decoded values are dropped after the regions.
+fn decode_segment() {
+    let fixed = sp1_zkvm::io::read_vec();
+    let claims = sp1_zkvm::io::read_vec();
+    let proof = sp1_zkvm::io::read_vec();
+    start("decode_fixed_claims");
+    let fixed = serde_json::from_slice::<Fixed>(black_box(&fixed)).ok();
+    let claims = serde_json::from_slice::<Claims>(black_box(&claims)).ok();
+    end("decode_fixed_claims");
+    start("decode_proof");
+    let proof = bincode::deserialize::<Proof>(black_box(&proof)).ok();
+    end("decode_proof");
+    let commitments = proof.as_ref().map_or(0, |p| p.0.commitments.len() as u32);
+    let decoded = [fixed.is_some(), claims.is_some(), proof.is_some()].map(u8::from);
+    sp1_zkvm::io::commit_slice(&decoded);
+    sp1_zkvm::io::commit_slice(&commitments.to_le_bytes());
 }
 
 fn gkr_link() {

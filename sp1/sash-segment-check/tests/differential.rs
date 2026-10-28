@@ -12,12 +12,13 @@ use std::process::Command;
 use std::{env, fs};
 
 use common::{BUNDLES, Bundle, MUTATIONS, Outcome, oracle_records};
-use sash_segment_check::P;
+use sash_segment_check::{P, fixed_hash};
 use serde_json::{Value, json};
 use zk_prover::compose::{Fixed, Plan, verify_composed};
 
 /// What `sash-oracle` prints for one bundle, computed with the extracted (no-`prover`)
-/// `verify_composed`: its `Verdict` without timing fields, `accepts()`, and the binding table.
+/// `verify_composed`: its `Verdict` without timing fields, `accepts()`, the binding table, and the
+/// guest's `fixed_hash` of the verifier build's `Fixed`.
 fn extracted(bundle: &Bundle) -> Value {
     let out = panic::catch_unwind(AssertUnwindSafe(|| {
         let verdict = verify_composed(&bundle.fixed, &bundle.claims, &bundle.proof);
@@ -25,10 +26,12 @@ fn extracted(bundle: &Bundle) -> Value {
         let mut verdict = serde_json::to_value(&verdict).unwrap();
         // `verify_secs` is not in the verifier build; `shape_secs` is the other timing field.
         verdict.as_object_mut().unwrap().remove("shape_secs");
-        let binding = serde_json::from_slice::<Fixed>(&bundle.fixed)
-            .ok()
+        let parsed = serde_json::from_slice::<Fixed>(&bundle.fixed).ok();
+        let binding = parsed
+            .as_ref()
             .map(|f| Plan::new(&f.params).binding_json(f.layer));
-        json!({ "verdict": verdict, "accepts": accepts, "binding": binding })
+        let fixed_hash = parsed.map(|f| hex::encode(fixed_hash(&f)));
+        json!({ "verdict": verdict, "accepts": accepts, "binding": binding, "fixedHash": fixed_hash })
     }));
     out.unwrap_or_else(|payload| {
         let message = payload
