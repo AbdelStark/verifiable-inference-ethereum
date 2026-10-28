@@ -21,8 +21,9 @@ pub fn contracts_src() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../contracts/src")
 }
 
-/// `out` made absolute, if its directory exists and is neither `contracts_src` nor under it once
-/// both are canonicalized (so `../` and symlinks resolve), and `out` is no symlink into it.
+/// `out` made absolute, if it is no symlink (`fs::write` follows one, even a dangling one, to a target
+/// that may not exist yet) and its directory exists and is neither `contracts_src` nor under it once
+/// both are canonicalized (so `../` and symlinked directories resolve).
 pub fn check_fixture_out(out: &Path, contracts_src: &Path) -> Result<PathBuf, String> {
     let name = out
         .file_name()
@@ -36,9 +37,14 @@ pub fn check_fixture_out(out: &Path, contracts_src: &Path) -> Result<PathBuf, St
     let src =
         fs::canonicalize(contracts_src).map_err(|e| format!("{}: {e}", contracts_src.display()))?;
     let path = dir.join(name);
-    // An existing `out` that is a symlink is written through: its target counts too.
-    let target = fs::canonicalize(&path).unwrap_or_else(|_| path.clone());
-    if dir.starts_with(&src) || target.starts_with(&src) {
+    if fs::symlink_metadata(&path).is_ok_and(|m| m.file_type().is_symlink()) {
+        return Err(format!(
+            "--out {} is a symlink, which could lead under {}: the committed fixture changes only through `make vectors`",
+            out.display(),
+            src.display()
+        ));
+    }
+    if dir.starts_with(&src) {
         return Err(format!(
             "--out {} is under {}: the committed fixture changes only through `make vectors`",
             out.display(),

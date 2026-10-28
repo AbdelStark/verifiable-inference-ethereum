@@ -119,7 +119,7 @@ enum Command {
         /// The prompt length `L`: `promptIds = tokIn[0..L]`, `answerIds = tokOut[L-1..S]`.
         #[arg(long)]
         prompt_len: usize,
-        /// Where the rendered fixture goes; never under the checkout's `contracts/src`.
+        /// Where the rendered fixture goes; never under the checkout's `contracts/src`, and no symlink.
         #[arg(long)]
         out: PathBuf,
     },

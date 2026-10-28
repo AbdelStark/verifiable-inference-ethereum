@@ -55,6 +55,9 @@ fn out_under_contracts_src_is_refused() {
     let before = fs::read(committed_fixture()).unwrap();
     let inputs = temp_dir("refused");
     std::os::unix::fs::symlink(committed_fixture(), inputs.join("link.sol")).unwrap();
+    let dangling = root.join("contracts/src/dangling.sol");
+    assert!(!dangling.exists());
+    std::os::unix::fs::symlink(&dangling, inputs.join("dangling.sol")).unwrap();
     for (cwd, out) in [
         (root.clone(), "contracts/src/sash/TinyLlamaFixture.sol"),
         (
@@ -64,6 +67,8 @@ fn out_under_contracts_src_is_refused() {
         (root.join("sp1"), "../sp1/../contracts/src/fixture.sol"),
         // A symlink outside the checkout to the committed fixture.
         (inputs.clone(), "link.sol"),
+        // A dangling symlink outside the checkout to a new file under `contracts/src`.
+        (inputs.clone(), "dangling.sol"),
     ] {
         let output = fixture_from_bundles(&cwd, &inputs, Path::new(out));
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -75,6 +80,7 @@ fn out_under_contracts_src_is_refused() {
     }
     assert_eq!(fs::read(committed_fixture()).unwrap(), before);
     assert!(!root.join("contracts/src/fixture.sol").exists());
+    assert!(!dangling.exists());
     fs::remove_dir_all(inputs).unwrap();
 }
 
