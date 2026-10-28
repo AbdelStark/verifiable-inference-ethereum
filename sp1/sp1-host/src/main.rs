@@ -72,7 +72,7 @@ enum Command {
         #[arg(long)]
         tag: String,
         /// Where the compressed proof goes: `<tag>.proof.bin`, under the checkout's `runs/` or outside
-        /// the checkout.
+        /// the checkout, and never in the bundle directory.
         #[arg(long)]
         out: PathBuf,
     },
@@ -212,14 +212,20 @@ fn run(cli: Cli) -> Result<ExitCode, String> {
     }
 }
 
-/// `sp1-host prove`. Every check that needs no GPU runs before the CUDA client starts.
+/// `sp1-host prove`. Every check runs on the CPU before the CUDA client starts: the out path, the
+/// ELF's sha256, its vkey (`LightProver::setup`), and the executor run's exit code and `fixedHash`. The
+/// GPU's key and proof are checked again after proving.
 fn prove(elf: &Path, bundle: &Path, tag: &str, out: &Path) -> Result<ExitCode, String> {
-    let out = check_out(out, tag, &repo_root())?;
+    let out = check_out(out, tag, &repo_root(), bundle)?;
     let elf_bytes = read(elf)?;
     check_elf(&elf_bytes)?;
     println!("OK: the ELF matches sp1/segment-guest.elf.sha256");
     let pin = fixed_pin(FIXED_PINS, tag)?;
     let elf = Elf::from(elf_bytes);
+    let light = ProverClient::builder().light().build();
+    let light_pk = light.setup(elf.clone()).map_err(|e| e.to_string())?;
+    check_vkey(&vkey_text(light_pk.verifying_key()))?;
+    println!("OK: the vkey (CPU setup) matches sp1/segment-guest.vkey");
     let input = SegmentInput::read_bundle(bundle, tag).map_err(|e| e.to_string())?;
     println!("stdin bytes: {}", input.len());
 
@@ -238,6 +244,8 @@ fn prove(elf: &Path, bundle: &Path, tag: &str, out: &Path) -> Result<ExitCode, S
             run.stderr
         ));
     }
+    check_fixed_hash(&run.public_values, &pin)?;
+    println!("OK: the executor's fixedHash equals its pin in sp1/pins/tinyllama.fixed.sha256");
 
     // Building the client downloads `sp1-gpu-server` on first use and starts it: the warm-up, timed
     // apart from setup and proving.
@@ -252,7 +260,7 @@ fn prove(elf: &Path, bundle: &Path, tag: &str, out: &Path) -> Result<ExitCode, S
     let pk = client.setup(elf).map_err(|e| e.to_string())?;
     println!("setup time: {:.1} s", t.elapsed().as_secs_f64());
     check_vkey(&vkey_text(pk.verifying_key()))?;
-    println!("OK: the vkey matches sp1/segment-guest.vkey");
+    println!("OK: the GPU setup's vkey matches sp1/segment-guest.vkey");
 
     let t = Instant::now();
     let proof = client
@@ -293,7 +301,11 @@ fn prove(elf: &Path, bundle: &Path, tag: &str, out: &Path) -> Result<ExitCode, S
     println!("proof: {}", out.display());
     println!("proof size: {} bytes", bytes.len());
     println!("proof sha256: {}", hex::encode(Sha256::digest(&bytes)));
-    println!("host peak RSS: {} bytes", peak_rss());
+    // Not `sp1-gpu-server`, which is still running: see its `VmHWM` above.
+    println!(
+        "peak RSS of sp1-host and its exited children (the executor): {} bytes",
+        peak_rss()
+    );
     Ok(ExitCode::SUCCESS)
 }
 

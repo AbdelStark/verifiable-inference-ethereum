@@ -1,6 +1,6 @@
 //! `sp1-host prove`'s checks (`docs/EVM-GAS-MODEL.md` §8): the ELF and its vkey are the committed
-//! program's, the `fixedHash` its pin, and the proof file lands under `runs/` or outside the checkout.
-//! None of them needs a GPU.
+//! program's, the `fixedHash` its pin, and the proof file lands under `runs/` or outside the checkout,
+//! never in the bundle directory. None of them needs a GPU.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -78,8 +78,9 @@ pub fn check_fixed_hash(public_values: &[u8], pin: &[u8; 32]) -> Result<[u8; 32]
 }
 
 /// The proof file's path, made absolute: named `<tag>.proof.bin`, in an existing directory that is
-/// `<root>/runs/` or under it, or outside `root`. Proof bytes never land in the checkout's tracked tree.
-pub fn check_out(out: &Path, tag: &str, root: &Path) -> Result<PathBuf, String> {
+/// `<root>/runs/` or under it, or outside `root`, and never `bundle` or inside it. Proof bytes never
+/// land in the checkout's tracked tree or beside the pinned bundle files.
+pub fn check_out(out: &Path, tag: &str, root: &Path, bundle: &Path) -> Result<PathBuf, String> {
     let name = format!("{tag}.proof.bin");
     if out.file_name().and_then(|n| n.to_str()) != Some(name.as_str()) {
         return Err(format!("--out {} must be named {name}", out.display()));
@@ -96,6 +97,16 @@ pub fn check_out(out: &Path, tag: &str, root: &Path) -> Result<PathBuf, String> 
             "--out {} is inside the checkout {} and not under its runs/",
             out.display(),
             root.display()
+        ));
+    }
+    // A bundle directory that does not exist cannot hold the existing `dir`.
+    if let Ok(bundle) = fs::canonicalize(bundle)
+        && dir.starts_with(&bundle)
+    {
+        return Err(format!(
+            "--out {} is in the bundle directory {}",
+            out.display(),
+            bundle.display()
         ));
     }
     Ok(dir.join(name))

@@ -1,6 +1,7 @@
 //! `sp1-host prove`'s checks that need no GPU (`docs/EVM-GAS-MODEL.md` §8): an ELF or vkey other than
 //! the committed program's, a `fixedHash` other than its pin, and a proof path in the checkout's
-//! tracked tree are each rejected; the command exits before it starts the CUDA client.
+//! tracked tree or in the bundle directory are each rejected; the command exits before it starts the
+//! CUDA client.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -127,15 +128,33 @@ fn out_under_runs_or_outside_the_checkout_is_accepted() {
     fs::create_dir_all(root.join("runs/proofs")).unwrap();
     let outside = temp_dir("outside");
     assert_eq!(
-        check_out(&root.join("runs/B0L10.proof.bin"), "B0L10", &root).unwrap(),
+        check_out(
+            &root.join("runs/B0L10.proof.bin"),
+            "B0L10",
+            &root,
+            &root.join("runs/tinyllama")
+        )
+        .unwrap(),
         root.join("runs/B0L10.proof.bin")
     );
     assert_eq!(
-        check_out(&root.join("runs/proofs/head.proof.bin"), "head", &root).unwrap(),
+        check_out(
+            &root.join("runs/proofs/head.proof.bin"),
+            "head",
+            &root,
+            &root.join("runs/tinyllama")
+        )
+        .unwrap(),
         root.join("runs/proofs/head.proof.bin")
     );
     assert_eq!(
-        check_out(&outside.join("head.proof.bin"), "head", &root).unwrap(),
+        check_out(
+            &outside.join("head.proof.bin"),
+            "head",
+            &root,
+            &root.join("runs/tinyllama")
+        )
+        .unwrap(),
         outside.join("head.proof.bin")
     );
     fs::remove_dir_all(root).unwrap();
@@ -152,12 +171,24 @@ fn out_in_the_checkout_outside_runs_is_rejected() {
         "sp1/B0L10.proof.bin",
         "runsx/B0L10.proof.bin",
     ] {
-        let err = check_out(&root.join(out), "B0L10", &root).unwrap_err();
+        let err = check_out(
+            &root.join(out),
+            "B0L10",
+            &root,
+            &root.join("runs/tinyllama"),
+        )
+        .unwrap_err();
         assert!(err.contains("not under its runs/"), "{out}: {err}");
     }
     // `..` resolves before the check.
     fs::create_dir_all(root.join("runs")).unwrap();
-    check_out(&root.join("runs/../sp1/B0L10.proof.bin"), "B0L10", &root).unwrap_err();
+    check_out(
+        &root.join("runs/../sp1/B0L10.proof.bin"),
+        "B0L10",
+        &root,
+        &root.join("runs/tinyllama"),
+    )
+    .unwrap_err();
     fs::remove_dir_all(root).unwrap();
 }
 
@@ -166,13 +197,20 @@ fn out_not_named_after_the_tag_or_in_no_directory_is_rejected() {
     let dir = temp_dir("name");
     let root = repo_root();
     for out in ["B0L11.proof.bin", "B0L10.proof", "proof.bin"] {
-        let err = check_out(&dir.join(out), "B0L10", &root).unwrap_err();
+        let err =
+            check_out(&dir.join(out), "B0L10", &root, &root.join("runs/tinyllama")).unwrap_err();
         assert!(
             err.contains("must be named B0L10.proof.bin"),
             "{out}: {err}"
         );
     }
-    check_out(&dir.join("missing/B0L10.proof.bin"), "B0L10", &root).unwrap_err();
+    check_out(
+        &dir.join("missing/B0L10.proof.bin"),
+        "B0L10",
+        &root,
+        &root.join("runs/tinyllama"),
+    )
+    .unwrap_err();
     fs::remove_dir_all(dir).unwrap();
 }
 
@@ -188,4 +226,25 @@ fn prove_rejects_an_out_in_the_checkout_before_reading_the_elf() {
     assert_eq!(code, 2, "{stderr}");
     assert!(stderr.contains("not under its runs/"), "{stderr}");
     assert!(!out.exists());
+}
+
+#[test]
+fn out_in_the_bundle_directory_is_rejected() {
+    let root = temp_dir("root-bundle");
+    let bundle = root.join("runs/tinyllama");
+    fs::create_dir_all(bundle.join("proofs")).unwrap();
+    for out in [
+        "runs/tinyllama/B0L10.proof.bin",
+        "runs/tinyllama/proofs/B0L10.proof.bin",
+    ] {
+        let err = check_out(&root.join(out), "B0L10", &root, &bundle).unwrap_err();
+        assert!(err.contains("in the bundle directory"), "{out}: {err}");
+    }
+    // Beside it under runs/, and a bundle directory outside the checkout.
+    check_out(&root.join("runs/B0L10.proof.bin"), "B0L10", &root, &bundle).unwrap();
+    let outside = temp_dir("bundle-outside");
+    let err = check_out(&outside.join("B0L10.proof.bin"), "B0L10", &root, &outside).unwrap_err();
+    assert!(err.contains("in the bundle directory"), "{err}");
+    fs::remove_dir_all(root).unwrap();
+    fs::remove_dir_all(outside).unwrap();
 }
