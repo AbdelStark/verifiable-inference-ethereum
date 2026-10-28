@@ -78,8 +78,8 @@ mod tests {
     use sha2::{Digest, Sha256};
 
     use super::*;
-    use crate::grid::compute_token_hash;
     use crate::tinyllama_fixture::*;
+    use crate::token::compute_token_hash;
 
     /// No `fixedHash` is in the fixture yet; a stand-in that differs from every other field.
     fn stand_in_fixed_hash(tag: &str) -> [u8; 32] {

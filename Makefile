@@ -9,7 +9,7 @@ help:
 	@echo "  make anvil-demo  - Mine the dev-mode TinyLlama-1.1B 23-segment settlement (DeployDevAnvil.s.sol) on a local Osaka anvil node, check the receipts and print their gas"
 	@echo "  make sp1-vendor  - Build sp1/vendor/sash: SASH eb95bfa from its sha256-pinned tarball plus sp1/patches"
 	@echo "  make sp1-check   - Vendor SASH, check nitroo's Stwo and SASH's zk-prover library without the prover feature on stable, then cargo fmt --check, the segment check's unit tests, the executor tests and clippy -D warnings in sp1/ (needs SP1 v6.10.0 and protoc)"
-	@echo "  make sp1-docker  - Build the segment guest and stwo-bench reproducibly in the pinned SP1 v6.10.0 Docker image and print their ELF sha256"
+	@echo "  make sp1-docker  - Build the segment guest and stwo-bench reproducibly in the SP1 v6.10.0 Docker image pinned by digest, print their ELF sha256 and the segment guest's vkey, and compare both with sp1/segment-guest.elf.sha256 and sp1/segment-guest.vkey"
 	@echo "  make sash-synthetic"
 	@echo "                  - Linux + CUDA 12.9 toolkit only: build upstream SASH's prover, check its pinned digests, regenerate the synthetic corpus and its oracle records, and run the segment check's bundle and differential tests on it"
 	@echo "  make bundles-check"
@@ -60,7 +60,8 @@ check: rust-check
 anvil-demo:
 	contracts/script/anvil-settle.sh
 
-SP1_IMAGE := ghcr.io/succinctlabs/sp1:v6.10.0
+# The SP1 v6.10.0 image, by the digest sp1/scripts/docker-guests.sh pins.
+SP1_IMAGE := $(shell sed -n 's/^export SP1_DOCKER_IMAGE=//p' sp1/scripts/docker-guests.sh)
 
 sp1-vendor:
 	sp1/scripts/vendor-sash.sh
@@ -81,9 +82,7 @@ sp1-check: sp1-vendor
 	cd sp1 && cargo clippy --locked -p sp1-host --all-targets --features profiling -- -D warnings
 
 sp1-docker: sp1-vendor
-	cd sp1/segment-guest && cargo prove build --docker --tag v6.10.0 --locked --workspace-directory ../..
-	cd sp1/stwo-bench && cargo prove build --docker --tag v6.10.0 --locked --workspace-directory ../..
-	shasum -a 256 sp1/target/elf-compilation/docker/riscv64im-succinct-zkvm-elf/release/segment-guest sp1/target/elf-compilation/docker/riscv64im-succinct-zkvm-elf/release/stwo-bench
+	sp1/scripts/docker-guests.sh
 
 sash-synthetic:
 	sp1/scripts/sash-synthetic.sh

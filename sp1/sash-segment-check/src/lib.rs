@@ -14,8 +14,9 @@
 
 use std::fmt;
 
-use sash_evm_primitives::grid::{SegmentClaim, compute_token_hash};
+use sash_evm_primitives::grid::SegmentClaim;
 pub use sash_evm_primitives::segment::SegmentPublicValues;
+use sash_evm_primitives::token::compute_token_hash;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use zk_prover::bf16::KMAX_SOUND;
