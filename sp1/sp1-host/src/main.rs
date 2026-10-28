@@ -1,6 +1,7 @@
 //! `sp1-host`: runs the segment guest on one bundle in the SP1 executor, prints a guest's vkey, runs
 //! the controls on the real TinyLlama bundles, prints their proof sizes, or proves one segment on a
 //! GPU.
+//! [probe #62: a comment-only sp1-host change, reverted in the next commit]
 //!
 //! - `sp1-host execute [--elf PATH] --bundle DIR --tag T [--public-values PATH]`
 //! - `sp1-host vkey --elf PATH`
