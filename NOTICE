@@ -29,6 +29,18 @@ the patches modify:
     nitroo/crates/stwo/build.rs
     nitroo/crates/constraint-framework/src/lib.rs
 
+  sp1/patches/0002-move-gkr-verifier-to-core-lookups.patch:
+    nitroo/crates/stwo/src/core/mod.rs
+    nitroo/crates/stwo/src/core/lookups/mod.rs (new)
+    nitroo/crates/stwo/src/core/lookups/gkr_verifier.rs (new)
+    nitroo/crates/stwo/src/core/lookups/sumcheck.rs (new)
+    nitroo/crates/stwo/src/core/lookups/utils.rs (new)
+    nitroo/crates/stwo/src/prover/lookups/gkr_verifier.rs
+    nitroo/crates/stwo/src/prover/lookups/sumcheck.rs
+    nitroo/crates/stwo/src/prover/lookups/utils.rs
+    prover/src/gkr_key_tile.rs
+    prover/src/gkrlink.rs
+
 SASH's NOTICE (Apache-2.0 §4(d)), carried with its source:
 
   zk-prover

@@ -3,7 +3,7 @@
 Version: `0.3.0` (2026-10-27)
 Pinned upstream SASH revision: `sg-ai-safety-hub/zk-inference-prover @ eb95bfa887299d1637550228d42086c27cbb2b3b`
 Stwo as run by SASH: the vendored `nitroo/` copy in `zk-inference-prover @ eb95bfa`. It equals `AntChainOpenLabs/NitrooZK-stwo @ 41c2a05bdb1fc3e3762bc7804108e8bc269bb6fc` for the field, channel, Merkle and FRI primitives, and differs in `nitroo/crates/stwo/src/core/pcs/verifier.rs`, `nitroo/crates/stwo/src/core/verifier.rs`, `nitroo/crates/stwo/src/core/air/components.rs` and `nitroo/crates/constraint-framework`.
-Files patched against `eb95bfa` for the segment guests' verifier build (§1.1), by `sp1/patches/`: `nitroo/crates/stwo/build.rs`, `nitroo/crates/constraint-framework/src/lib.rs`.
+Files patched against `eb95bfa` for the segment guests' verifier build (§1.1), by `sp1/patches/`: `nitroo/crates/stwo/build.rs`, `nitroo/crates/constraint-framework/src/lib.rs`, `nitroo/crates/stwo/src/core/mod.rs`, `nitroo/crates/stwo/src/core/lookups/{mod,gkr_verifier,sumcheck,utils}.rs` (new), `nitroo/crates/stwo/src/prover/lookups/{gkr_verifier,sumcheck,utils}.rs`, `prover/src/gkr_key_tile.rs`, `prover/src/gkrlink.rs`.
 
 ## 1. Proved statement and settlement digests
 

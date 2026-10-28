@@ -1,0 +1,1427 @@
+Move nitroo's GKR verifier out of the prover feature, to stwo::core::lookups.
+
+Part of the verifier-only build of SASH eb95bfa that the SP1 segment guest runs
+(verifiable-inference-ethereum SPEC.md §1.1). Upstream source is Apache-2.0;
+this patch modifies it (Apache-2.0 §4(b)).
+
+SASH's verify_composed runs a LogUp-GKR batch verification whenever
+gkr_key_tiles is set, but nitroo keeps that verifier in stwo::prover::lookups,
+which exists only with the prover feature; that feature needs array_chunks,
+which Rust 1.90 removed, so it cannot build in an SP1 guest. The verifier half
+uses only core types, so it moves to a new stwo::core::lookups:
+
+- core/lookups/gkr_verifier.rs: everything in prover/lookups/gkr_verifier.rs
+  before its tests (partially_verify_batch, GkrBatchProof, GkrArtifact, Gate,
+  GkrMask, GkrError, LayerIndex);
+- core/lookups/sumcheck.rs: the verifier half of prover/lookups/sumcheck.rs
+  (partially_verify, SumcheckProof, MAX_DEGREE, SumcheckError, RoundIndex);
+- core/lookups/utils.rs: all of prover/lookups/utils.rs, with its tests.
+
+Function bodies are unchanged. prover/lookups/{gkr_verifier,sumcheck}.rs
+re-export the moved items (`pub use crate::core::lookups::<mod>::*;`) and keep
+their tests and the prover half, and prover/lookups/utils.rs becomes a
+re-export, so prover-side imports compile unchanged. SASH's verifier imports
+(prover/src/gkr_key_tile.rs, prover/src/gkrlink.rs) point at the new path.
+
+--- a/nitroo/crates/stwo/src/core/lookups/gkr_verifier.rs
++++ b/nitroo/crates/stwo/src/core/lookups/gkr_verifier.rs
+@@ -0,0 +1,281 @@
++//! GKR batch verifier for Grand Product and LogUp lookup arguments.
++use thiserror::Error;
++
++use super::sumcheck::{SumcheckError, SumcheckProof};
++use super::utils::{eq, fold_mle_evals, random_linear_combination};
++use crate::core::channel::Channel;
++use crate::core::fields::m31::BaseField;
++use crate::core::fields::qm31::SecureField;
++use crate::core::Fraction;
++use crate::core::lookups::sumcheck;
++
++/// Partially verifies a batch GKR proof.
++///
++/// On successful verification the function returns a [`GkrArtifact`] which stores the out-of-domain
++/// point and claimed evaluations in the input layer columns for each instance at the OOD point.
++/// These claimed evaluations are not checked in this function - hence partial verification.
++pub fn partially_verify_batch(
++    gate_by_instance: Vec<Gate>,
++    proof: &GkrBatchProof,
++    channel: &mut impl Channel,
++) -> Result<GkrArtifact, GkrError> {
++    let GkrBatchProof {
++        sumcheck_proofs,
++        layer_masks_by_instance,
++        output_claims_by_instance,
++    } = proof;
++
++    if layer_masks_by_instance.len() != output_claims_by_instance.len() {
++        return Err(GkrError::MalformedProof);
++    }
++
++    let n_instances = layer_masks_by_instance.len();
++    let instance_n_layers = |instance: usize| layer_masks_by_instance[instance].len();
++    let n_layers = (0..n_instances).map(instance_n_layers).max().unwrap();
++
++    if n_layers != sumcheck_proofs.len() {
++        return Err(GkrError::MalformedProof);
++    }
++
++    if gate_by_instance.len() != n_instances {
++        return Err(GkrError::NumInstancesMismatch {
++            given: gate_by_instance.len(),
++            proof: n_instances,
++        });
++    }
++
++    let mut ood_point = vec![];
++    let mut claims_to_verify_by_instance = vec![None; n_instances];
++
++    for (layer, sumcheck_proof) in sumcheck_proofs.iter().enumerate() {
++        let n_remaining_layers = n_layers - layer;
++
++        // Check for output layers.
++        for instance in 0..n_instances {
++            if instance_n_layers(instance) == n_remaining_layers {
++                let output_claims = output_claims_by_instance[instance].clone();
++                claims_to_verify_by_instance[instance] = Some(output_claims);
++            }
++        }
++
++        // Seed the channel with layer claims.
++        for claims_to_verify in claims_to_verify_by_instance.iter().flatten() {
++            channel.mix_felts(claims_to_verify);
++        }
++
++        let sumcheck_alpha = channel.draw_secure_felt();
++        let instance_lambda = channel.draw_secure_felt();
++
++        let mut sumcheck_claims = Vec::new();
++        let mut sumcheck_instances = Vec::new();
++
++        // Prepare the sumcheck claim.
++        for (instance, claims_to_verify) in claims_to_verify_by_instance.iter().enumerate() {
++            if let Some(claims_to_verify) = claims_to_verify {
++                let n_unused_variables = n_layers - instance_n_layers(instance);
++                let doubling_factor = BaseField::from(1 << n_unused_variables);
++                let claim =
++                    random_linear_combination(claims_to_verify, instance_lambda) * doubling_factor;
++                sumcheck_claims.push(claim);
++                sumcheck_instances.push(instance);
++            }
++        }
++
++        let sumcheck_claim = random_linear_combination(&sumcheck_claims, sumcheck_alpha);
++        let (sumcheck_ood_point, sumcheck_eval) =
++            sumcheck::partially_verify(sumcheck_claim, sumcheck_proof, channel)
++                .map_err(|source| GkrError::InvalidSumcheck { layer, source })?;
++
++        let mut layer_evals = Vec::new();
++
++        // Evaluate the circuit locally at sumcheck OOD point.
++        for &instance in &sumcheck_instances {
++            let n_unused = n_layers - instance_n_layers(instance);
++            let mask = &layer_masks_by_instance[instance][layer - n_unused];
++            let gate = &gate_by_instance[instance];
++            let gate_output = gate.eval(mask).map_err(|InvalidNumMaskColumnsError| {
++                let instance_layer = instance_n_layers(layer) - n_remaining_layers;
++                GkrError::InvalidMask {
++                    instance,
++                    instance_layer,
++                }
++            })?;
++            // TODO: Consider simplifying the code by just using the same eq eval for all instances
++            // regardless of size.
++            let eq_eval = eq(&ood_point[n_unused..], &sumcheck_ood_point[n_unused..]);
++            layer_evals.push(eq_eval * random_linear_combination(&gate_output, instance_lambda));
++        }
++
++        let layer_eval = random_linear_combination(&layer_evals, sumcheck_alpha);
++
++        if sumcheck_eval != layer_eval {
++            return Err(GkrError::CircuitCheckFailure {
++                claim: sumcheck_eval,
++                output: layer_eval,
++                layer,
++            });
++        }
++
++        // Seed the channel with the layer masks.
++        for &instance in &sumcheck_instances {
++            let n_unused = n_layers - instance_n_layers(instance);
++            let mask = &layer_masks_by_instance[instance][layer - n_unused];
++            channel.mix_felts(mask.columns().as_flattened());
++        }
++
++        // Set the OOD evaluation point for layer above.
++        let challenge = channel.draw_secure_felt();
++        ood_point = sumcheck_ood_point;
++        ood_point.push(challenge);
++
++        // Set the claims to verify in the layer above.
++        for instance in sumcheck_instances {
++            let n_unused = n_layers - instance_n_layers(instance);
++            let mask = &layer_masks_by_instance[instance][layer - n_unused];
++            claims_to_verify_by_instance[instance] = Some(mask.reduce_at_point(challenge));
++        }
++    }
++
++    let claims_to_verify_by_instance = claims_to_verify_by_instance
++        .into_iter()
++        .map(Option::unwrap)
++        .collect();
++
++    Ok(GkrArtifact {
++        ood_point,
++        claims_to_verify_by_instance,
++        n_variables_by_instance: (0..n_instances).map(instance_n_layers).collect(),
++    })
++}
++
++/// Batch GKR proof.
++#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
++pub struct GkrBatchProof {
++    /// Sum-check proof for each layer.
++    pub sumcheck_proofs: Vec<SumcheckProof>,
++    /// Mask for each layer for each instance.
++    pub layer_masks_by_instance: Vec<Vec<GkrMask>>,
++    /// Column circuit outputs for each instance.
++    pub output_claims_by_instance: Vec<Vec<SecureField>>,
++}
++
++/// Values of interest obtained from the execution of the GKR protocol.
++pub struct GkrArtifact {
++    /// Out-of-domain (OOD) point for evaluating columns in the input layer.
++    pub ood_point: Vec<SecureField>,
++    /// The claimed evaluation at `ood_point` for each column in the input layer of each instance.
++    pub claims_to_verify_by_instance: Vec<Vec<SecureField>>,
++    /// The number of variables that interpolate the input layer of each instance.
++    pub n_variables_by_instance: Vec<usize>,
++}
++
++/// Defines how a circuit operates locally on two input rows to produce a single output row.
++/// This local 2-to-1 constraint is what gives the whole circuit its "binary tree" structure.
++///
++/// Binary tree structured circuits have a highly regular wiring pattern that fit the structure of
++/// the circuits defined in [Thaler13] which allow for efficient linear time (linear in size of the
++/// circuit) GKR prover implementations.
++///
++/// [Thaler13]: https://eprint.iacr.org/2013/351.pdf
++#[derive(Debug, Clone, Copy)]
++pub enum Gate {
++    LogUp,
++    GrandProduct,
++}
++
++impl Gate {
++    /// Returns the output after applying the gate to the mask.
++    fn eval(&self, mask: &GkrMask) -> Result<Vec<SecureField>, InvalidNumMaskColumnsError> {
++        Ok(match self {
++            Self::LogUp => {
++                if mask.columns().len() != 2 {
++                    return Err(InvalidNumMaskColumnsError);
++                }
++
++                let [numerator_a, numerator_b] = mask.columns()[0];
++                let [denominator_a, denominator_b] = mask.columns()[1];
++
++                let a = Fraction::new(numerator_a, denominator_a);
++                let b = Fraction::new(numerator_b, denominator_b);
++                let res = a + b;
++
++                vec![res.numerator, res.denominator]
++            }
++            Self::GrandProduct => {
++                if mask.columns().len() != 1 {
++                    return Err(InvalidNumMaskColumnsError);
++                }
++
++                let [a, b] = mask.columns()[0];
++                vec![a * b]
++            }
++        })
++    }
++}
++
++/// Mask has an invalid number of columns
++#[derive(Debug)]
++struct InvalidNumMaskColumnsError;
++
++/// Stores two evaluations of each column in a GKR layer.
++#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
++pub struct GkrMask {
++    columns: Vec<[SecureField; 2]>,
++}
++
++impl GkrMask {
++    pub const fn new(columns: Vec<[SecureField; 2]>) -> Self {
++        Self { columns }
++    }
++
++    pub fn to_rows(&self) -> [Vec<SecureField>; 2] {
++        self.columns.iter().map(|[a, b]| (a, b)).unzip().into()
++    }
++
++    pub fn columns(&self) -> &[[SecureField; 2]] {
++        &self.columns
++    }
++
++    /// Returns all `p_i(x)` where `p_i` interpolates column `i` of the mask on `{0, 1}`.
++    pub fn reduce_at_point(&self, x: SecureField) -> Vec<SecureField> {
++        self.columns
++            .iter()
++            .map(|&[v0, v1]| fold_mle_evals(x, v0, v1))
++            .collect()
++    }
++}
++
++/// Error encountered during GKR protocol verification.
++#[derive(Error, Debug)]
++pub enum GkrError {
++    /// The proof is malformed.
++    #[error("proof data is invalid")]
++    MalformedProof,
++    /// Mask has an invalid number of columns.
++    #[error("mask in layer {instance_layer} of instance {instance} is invalid")]
++    InvalidMask {
++        instance: usize,
++        /// Layer of the instance (but not necessarily the batch).
++        instance_layer: LayerIndex,
++    },
++    /// There is a mismatch between the number of instances in the proof and the number of
++    /// instances passed for verification.
++    #[error("provided an invalid number of instances (given {given}, proof expects {proof})")]
++    NumInstancesMismatch { given: usize, proof: usize },
++    /// There was an error with one of the sumcheck proofs.
++    #[error("sum-check invalid in layer {layer}: {source}")]
++    InvalidSumcheck {
++        layer: LayerIndex,
++        source: SumcheckError,
++    },
++    /// The circuit polynomial the verifier evaluated doesn't match claim from sumcheck.
++    #[error("circuit check failed in layer {layer} (calculated {output}, claim {claim})")]
++    CircuitCheckFailure {
++        claim: SecureField,
++        output: SecureField,
++        layer: LayerIndex,
++    },
++}
++
++/// GKR layer index where 0 corresponds to the output layer.
++pub type LayerIndex = usize;
+--- a/nitroo/crates/stwo/src/core/lookups/mod.rs
++++ b/nitroo/crates/stwo/src/core/lookups/mod.rs
+@@ -0,0 +1,3 @@
++pub mod gkr_verifier;
++pub mod sumcheck;
++pub mod utils;
+--- a/nitroo/crates/stwo/src/core/lookups/sumcheck.rs
++++ b/nitroo/crates/stwo/src/core/lookups/sumcheck.rs
+@@ -0,0 +1,69 @@
++//! Sum-check protocol verifier: checks claims about `sum_x g(x)` for all x in `{0, 1}^n`.
++
++use num_traits::{One, Zero};
++use thiserror::Error;
++
++use super::utils::UnivariatePoly;
++use crate::core::channel::Channel;
++use crate::core::fields::qm31::SecureField;
++
++/// Partially verifies a sum-check proof.
++///
++/// Only "partial" since it does not fully verify the prover's claimed evaluation on the variable
++/// assignment but checks if the sum of the round polynomials evaluated on `0` and `1` matches the
++/// claim for each round. If the proof passes these checks, the variable assignment and the prover's
++/// claimed evaluation are returned for the caller to validate otherwise an [`Err`] is returned.
++///
++/// Output is of the form `(variable_assignment, claimed_eval)`.
++pub fn partially_verify(
++    mut claim: SecureField,
++    proof: &SumcheckProof,
++    channel: &mut impl Channel,
++) -> Result<(Vec<SecureField>, SecureField), SumcheckError> {
++    let mut assignment = Vec::new();
++
++    for (round, round_poly) in proof.round_polys.iter().enumerate() {
++        if round_poly.degree() > MAX_DEGREE {
++            return Err(SumcheckError::DegreeInvalid { round });
++        }
++
++        // TODO: optimize this by sending one less coefficient, and computing it from the
++        // claim, instead of checking the claim. (Can also be done by quotienting).
++        let sum = round_poly.eval_at_point(Zero::zero()) + round_poly.eval_at_point(One::one());
++
++        if claim != sum {
++            return Err(SumcheckError::SumInvalid { claim, sum, round });
++        }
++
++        channel.mix_felts(round_poly);
++        let challenge = channel.draw_secure_felt();
++        claim = round_poly.eval_at_point(challenge);
++        assignment.push(challenge);
++    }
++
++    Ok((assignment, claim))
++}
++
++#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
++pub struct SumcheckProof {
++    pub round_polys: Vec<UnivariatePoly<SecureField>>,
++}
++
++/// Max degree of polynomials the verifier accepts in each round of the protocol.
++pub const MAX_DEGREE: usize = 3;
++
++/// Sum-check protocol verification error.
++#[derive(Error, Debug)]
++pub enum SumcheckError {
++    #[error("degree of the polynomial in round {round} is too high")]
++    DegreeInvalid { round: RoundIndex },
++    #[error("sum does not match the claim in round {round} (sum {sum}, claim {claim})")]
++    SumInvalid {
++        claim: SecureField,
++        sum: SecureField,
++        round: RoundIndex,
++    },
++}
++
++/// Sum-check round index where 0 corresponds to the first round.
++pub type RoundIndex = usize;
+--- a/nitroo/crates/stwo/src/core/lookups/utils.rs
++++ b/nitroo/crates/stwo/src/core/lookups/utils.rs
+@@ -0,0 +1,315 @@
++use std::iter::zip;
++use std::ops::{Add, Deref, Mul, Neg, Sub};
++
++use num_traits::Zero;
++
++use crate::core::fields::qm31::SecureField;
++use crate::core::fields::{ExtensionOf, Field};
++use crate::core::Fraction;
++
++/// Univariate polynomial stored as coefficients in the monomial basis.
++#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
++pub struct UnivariatePoly<F: Field>(Vec<F>);
++
++impl<F: Field> UnivariatePoly<F> {
++    pub fn new(coeffs: Vec<F>) -> Self {
++        let mut polynomial = Self(coeffs);
++        polynomial.truncate_leading_zeros();
++        polynomial
++    }
++
++    pub fn eval_at_point(&self, x: F) -> F {
++        horner_eval(&self.0, x)
++    }
++
++    // <https://en.wikibooks.org/wiki/Algorithm_Implementation/Mathematics/Polynomial_interpolation>
++    pub fn interpolate_lagrange(xs: &[F], ys: &[F]) -> Self {
++        assert_eq!(xs.len(), ys.len());
++
++        let mut coeffs = Self::zero();
++
++        for (i, (xi, yi)) in zip(xs, ys).enumerate() {
++            let mut prod = *yi;
++
++            for (j, xj) in xs.iter().enumerate() {
++                if i != j {
++                    prod /= *xi - *xj;
++                }
++            }
++
++            let mut term = Self::new(vec![prod]);
++
++            for (j, xj) in xs.iter().enumerate() {
++                if i != j {
++                    term = term * (Self::x() - Self::new(vec![*xj]));
++                }
++            }
++
++            coeffs = coeffs + term;
++        }
++
++        coeffs.truncate_leading_zeros();
++
++        coeffs
++    }
++
++    pub fn degree(&self) -> usize {
++        let mut coeffs = self.0.iter().rev();
++        let _ = (&mut coeffs).take_while(|v| v.is_zero());
++        coeffs.len().saturating_sub(1)
++    }
++
++    fn x() -> Self {
++        Self(vec![F::zero(), F::one()])
++    }
++
++    fn truncate_leading_zeros(&mut self) {
++        while self.0.last() == Some(&F::zero()) {
++            self.0.pop();
++        }
++    }
++}
++
++impl<F: Field> From<F> for UnivariatePoly<F> {
++    fn from(value: F) -> Self {
++        Self::new(vec![value])
++    }
++}
++
++impl<F: Field> Mul<F> for UnivariatePoly<F> {
++    type Output = Self;
++
++    fn mul(mut self, rhs: F) -> Self {
++        self.0.iter_mut().for_each(|coeff| *coeff *= rhs);
++        self
++    }
++}
++
++impl<F: Field> Mul for UnivariatePoly<F> {
++    type Output = Self;
++
++    fn mul(mut self, mut rhs: Self) -> Self {
++        if self.is_zero() || rhs.is_zero() {
++            return Self::zero();
++        }
++
++        self.truncate_leading_zeros();
++        rhs.truncate_leading_zeros();
++
++        let mut res = vec![F::zero(); self.0.len() + rhs.0.len() - 1];
++
++        for (i, coeff_a) in self.0.into_iter().enumerate() {
++            for (j, coeff_b) in rhs.0.iter().enumerate() {
++                res[i + j] += coeff_a * *coeff_b;
++            }
++        }
++
++        Self::new(res)
++    }
++}
++
++impl<F: Field> Add for UnivariatePoly<F> {
++    type Output = Self;
++
++    fn add(self, rhs: Self) -> Self {
++        let n = self.0.len().max(rhs.0.len());
++        let mut res = Vec::new();
++
++        for i in 0..n {
++            res.push(match (self.0.get(i), rhs.0.get(i)) {
++                (Some(a), Some(b)) => *a + *b,
++                (Some(a), None) | (None, Some(a)) => *a,
++                _ => unreachable!(),
++            })
++        }
++
++        Self(res)
++    }
++}
++
++impl<F: Field> Sub for UnivariatePoly<F> {
++    type Output = Self;
++
++    fn sub(self, rhs: Self) -> Self {
++        self + (-rhs)
++    }
++}
++
++impl<F: Field> Neg for UnivariatePoly<F> {
++    type Output = Self;
++
++    fn neg(self) -> Self {
++        Self(self.0.into_iter().map(|v| -v).collect())
++    }
++}
++
++impl<F: Field> Zero for UnivariatePoly<F> {
++    fn zero() -> Self {
++        Self(vec![])
++    }
++
++    fn is_zero(&self) -> bool {
++        self.0.iter().all(F::is_zero)
++    }
++}
++
++impl<F: Field> Deref for UnivariatePoly<F> {
++    type Target = [F];
++
++    fn deref(&self) -> &[F] {
++        &self.0
++    }
++}
++
++/// Evaluates univariate polynomial using [Horner's method].
++///
++/// [Horner's method]: https://en.wikipedia.org/wiki/Horner%27s_method
++pub fn horner_eval<F: Field>(coeffs: &[F], x: F) -> F {
++    coeffs
++        .iter()
++        .rfold(F::zero(), |acc, coeff| acc * x + *coeff)
++}
++
++/// Returns `v_0 + alpha * v_1 + ... + alpha^(n-1) * v_{n-1}`.
++pub fn random_linear_combination(v: &[SecureField], alpha: SecureField) -> SecureField {
++    horner_eval(v, alpha)
++}
++
++/// Evaluates the lagrange kernel of the boolean hypercube.
++///
++/// The lagrange kernel of the boolean hypercube is a multilinear extension of the function that
++/// when given `x, y` in `{0, 1}^n` evaluates to 1 if `x = y`, and evaluates to 0 otherwise.
++pub fn eq<F: Field>(x: &[F], y: &[F]) -> F {
++    assert_eq!(x.len(), y.len());
++    zip(x, y)
++        .map(|(xi, yi)| *xi * *yi + (F::one() - *xi) * (F::one() - *yi))
++        .product()
++}
++
++/// Computes `eq(0, assignment) * eval0 + eq(1, assignment) * eval1`.
++pub fn fold_mle_evals<F>(assignment: SecureField, eval0: F, eval1: F) -> SecureField
++where
++    F: Field,
++    SecureField: ExtensionOf<F>,
++{
++    assignment * (eval1 - eval0) + eval0
++}
++
++/// Represents the fraction `1 / x`
++pub struct Reciprocal<T> {
++    x: T,
++}
++
++impl<T> Reciprocal<T> {
++    pub const fn new(x: T) -> Self {
++        Self { x }
++    }
++}
++
++impl<T: Add<Output = T> + Mul<Output = T> + Clone> Add for Reciprocal<T> {
++    type Output = Fraction<T, T>;
++
++    fn add(self, rhs: Self) -> Fraction<T, T> {
++        // `1/a + 1/b = (a + b)/(a * b)`
++        Fraction {
++            numerator: self.x.clone() + rhs.x.clone(),
++            denominator: self.x * rhs.x,
++        }
++    }
++}
++
++impl<T: Sub<Output = T> + Mul<Output = T> + Clone> Sub for Reciprocal<T> {
++    type Output = Fraction<T, T>;
++
++    fn sub(self, rhs: Self) -> Fraction<T, T> {
++        // `1/a - 1/b = (b - a)/(a * b)`
++        Fraction {
++            numerator: rhs.x.clone() - self.x.clone(),
++            denominator: self.x * rhs.x,
++        }
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use std::iter::zip;
++
++    use num_traits::{One, Zero};
++
++    use super::{horner_eval, UnivariatePoly};
++    use crate::core::fields::m31::BaseField;
++    use crate::core::fields::qm31::SecureField;
++    use crate::core::fields::FieldExpOps;
++    use crate::core::Fraction;
++    use crate::core::lookups::utils::eq;
++
++    #[test]
++    fn lagrange_interpolation_works() {
++        let xs = [5, 1, 3, 9].map(BaseField::from);
++        let ys = [1, 2, 3, 4].map(BaseField::from);
++
++        let poly = UnivariatePoly::interpolate_lagrange(&xs, &ys);
++
++        for (x, y) in zip(xs, ys) {
++            assert_eq!(poly.eval_at_point(x), y, "mismatch for x={x}");
++        }
++    }
++
++    #[test]
++    fn horner_eval_works() {
++        let coeffs = [BaseField::from(9), BaseField::from(2), BaseField::from(3)];
++        let x = BaseField::from(7);
++
++        let eval = horner_eval(&coeffs, x);
++
++        assert_eq!(eval, coeffs[0] + coeffs[1] * x + coeffs[2] * x.square());
++    }
++
++    #[test]
++    fn eq_identical_hypercube_points_returns_one() {
++        let zero = SecureField::zero();
++        let one = SecureField::one();
++        let a = &[one, zero, one];
++
++        let eq_eval = eq(a, a);
++
++        assert_eq!(eq_eval, one);
++    }
++
++    #[test]
++    fn eq_different_hypercube_points_returns_zero() {
++        let zero = SecureField::zero();
++        let one = SecureField::one();
++        let a = &[one, zero, one];
++        let b = &[one, zero, zero];
++
++        let eq_eval = eq(a, b);
++
++        assert_eq!(eq_eval, zero);
++    }
++
++    #[test]
++    #[should_panic]
++    fn eq_different_size_points() {
++        let zero = SecureField::zero();
++        let one = SecureField::one();
++
++        eq(&[zero, one], &[zero]);
++    }
++
++    #[test]
++    fn fraction_addition_works() {
++        let a = Fraction::new(BaseField::from(1), BaseField::from(3));
++        let b = Fraction::new(BaseField::from(2), BaseField::from(6));
++
++        let Fraction {
++            numerator,
++            denominator,
++        } = a + b;
++
++        assert_eq!(
++            numerator / denominator,
++            BaseField::from(2) / BaseField::from(3)
++        );
++    }
++}
+--- a/nitroo/crates/stwo/src/core/mod.rs
++++ b/nitroo/crates/stwo/src/core/mod.rs
+@@ -10,6 +10,7 @@
+ mod fraction;
+ pub use fraction::Fraction;
+ pub mod fri;
++pub mod lookups;
+ pub mod pcs;
+ pub mod poly;
+ pub mod proof;
+--- a/nitroo/crates/stwo/src/prover/lookups/gkr_verifier.rs
++++ b/nitroo/crates/stwo/src/prover/lookups/gkr_verifier.rs
+@@ -1,284 +1,5 @@
+ //! GKR batch verifier for Grand Product and LogUp lookup arguments.
+-use thiserror::Error;
+-
+-use super::sumcheck::{SumcheckError, SumcheckProof};
+-use super::utils::{eq, fold_mle_evals, random_linear_combination};
+-use crate::core::channel::Channel;
+-use crate::core::fields::m31::BaseField;
+-use crate::core::fields::qm31::SecureField;
+-use crate::core::Fraction;
+-use crate::prover::lookups::sumcheck;
+-
+-/// Partially verifies a batch GKR proof.
+-///
+-/// On successful verification the function returns a [`GkrArtifact`] which stores the out-of-domain
+-/// point and claimed evaluations in the input layer columns for each instance at the OOD point.
+-/// These claimed evaluations are not checked in this function - hence partial verification.
+-pub fn partially_verify_batch(
+-    gate_by_instance: Vec<Gate>,
+-    proof: &GkrBatchProof,
+-    channel: &mut impl Channel,
+-) -> Result<GkrArtifact, GkrError> {
+-    let GkrBatchProof {
+-        sumcheck_proofs,
+-        layer_masks_by_instance,
+-        output_claims_by_instance,
+-    } = proof;
+-
+-    if layer_masks_by_instance.len() != output_claims_by_instance.len() {
+-        return Err(GkrError::MalformedProof);
+-    }
+-
+-    let n_instances = layer_masks_by_instance.len();
+-    let instance_n_layers = |instance: usize| layer_masks_by_instance[instance].len();
+-    let n_layers = (0..n_instances).map(instance_n_layers).max().unwrap();
+-
+-    if n_layers != sumcheck_proofs.len() {
+-        return Err(GkrError::MalformedProof);
+-    }
+-
+-    if gate_by_instance.len() != n_instances {
+-        return Err(GkrError::NumInstancesMismatch {
+-            given: gate_by_instance.len(),
+-            proof: n_instances,
+-        });
+-    }
+-
+-    let mut ood_point = vec![];
+-    let mut claims_to_verify_by_instance = vec![None; n_instances];
+-
+-    for (layer, sumcheck_proof) in sumcheck_proofs.iter().enumerate() {
+-        let n_remaining_layers = n_layers - layer;
+-
+-        // Check for output layers.
+-        for instance in 0..n_instances {
+-            if instance_n_layers(instance) == n_remaining_layers {
+-                let output_claims = output_claims_by_instance[instance].clone();
+-                claims_to_verify_by_instance[instance] = Some(output_claims);
+-            }
+-        }
+-
+-        // Seed the channel with layer claims.
+-        for claims_to_verify in claims_to_verify_by_instance.iter().flatten() {
+-            channel.mix_felts(claims_to_verify);
+-        }
+-
+-        let sumcheck_alpha = channel.draw_secure_felt();
+-        let instance_lambda = channel.draw_secure_felt();
+-
+-        let mut sumcheck_claims = Vec::new();
+-        let mut sumcheck_instances = Vec::new();
+-
+-        // Prepare the sumcheck claim.
+-        for (instance, claims_to_verify) in claims_to_verify_by_instance.iter().enumerate() {
+-            if let Some(claims_to_verify) = claims_to_verify {
+-                let n_unused_variables = n_layers - instance_n_layers(instance);
+-                let doubling_factor = BaseField::from(1 << n_unused_variables);
+-                let claim =
+-                    random_linear_combination(claims_to_verify, instance_lambda) * doubling_factor;
+-                sumcheck_claims.push(claim);
+-                sumcheck_instances.push(instance);
+-            }
+-        }
+-
+-        let sumcheck_claim = random_linear_combination(&sumcheck_claims, sumcheck_alpha);
+-        let (sumcheck_ood_point, sumcheck_eval) =
+-            sumcheck::partially_verify(sumcheck_claim, sumcheck_proof, channel)
+-                .map_err(|source| GkrError::InvalidSumcheck { layer, source })?;
+-
+-        let mut layer_evals = Vec::new();
+-
+-        // Evaluate the circuit locally at sumcheck OOD point.
+-        for &instance in &sumcheck_instances {
+-            let n_unused = n_layers - instance_n_layers(instance);
+-            let mask = &layer_masks_by_instance[instance][layer - n_unused];
+-            let gate = &gate_by_instance[instance];
+-            let gate_output = gate.eval(mask).map_err(|InvalidNumMaskColumnsError| {
+-                let instance_layer = instance_n_layers(layer) - n_remaining_layers;
+-                GkrError::InvalidMask {
+-                    instance,
+-                    instance_layer,
+-                }
+-            })?;
+-            // TODO: Consider simplifying the code by just using the same eq eval for all instances
+-            // regardless of size.
+-            let eq_eval = eq(&ood_point[n_unused..], &sumcheck_ood_point[n_unused..]);
+-            layer_evals.push(eq_eval * random_linear_combination(&gate_output, instance_lambda));
+-        }
+-
+-        let layer_eval = random_linear_combination(&layer_evals, sumcheck_alpha);
+-
+-        if sumcheck_eval != layer_eval {
+-            return Err(GkrError::CircuitCheckFailure {
+-                claim: sumcheck_eval,
+-                output: layer_eval,
+-                layer,
+-            });
+-        }
+-
+-        // Seed the channel with the layer masks.
+-        for &instance in &sumcheck_instances {
+-            let n_unused = n_layers - instance_n_layers(instance);
+-            let mask = &layer_masks_by_instance[instance][layer - n_unused];
+-            channel.mix_felts(mask.columns().as_flattened());
+-        }
+-
+-        // Set the OOD evaluation point for layer above.
+-        let challenge = channel.draw_secure_felt();
+-        ood_point = sumcheck_ood_point;
+-        ood_point.push(challenge);
+-
+-        // Set the claims to verify in the layer above.
+-        for instance in sumcheck_instances {
+-            let n_unused = n_layers - instance_n_layers(instance);
+-            let mask = &layer_masks_by_instance[instance][layer - n_unused];
+-            claims_to_verify_by_instance[instance] = Some(mask.reduce_at_point(challenge));
+-        }
+-    }
+-
+-    let claims_to_verify_by_instance = claims_to_verify_by_instance
+-        .into_iter()
+-        .map(Option::unwrap)
+-        .collect();
+-
+-    Ok(GkrArtifact {
+-        ood_point,
+-        claims_to_verify_by_instance,
+-        n_variables_by_instance: (0..n_instances).map(instance_n_layers).collect(),
+-    })
+-}
+-
+-/// Batch GKR proof.
+-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+-pub struct GkrBatchProof {
+-    /// Sum-check proof for each layer.
+-    pub sumcheck_proofs: Vec<SumcheckProof>,
+-    /// Mask for each layer for each instance.
+-    pub layer_masks_by_instance: Vec<Vec<GkrMask>>,
+-    /// Column circuit outputs for each instance.
+-    pub output_claims_by_instance: Vec<Vec<SecureField>>,
+-}
+-
+-/// Values of interest obtained from the execution of the GKR protocol.
+-pub struct GkrArtifact {
+-    /// Out-of-domain (OOD) point for evaluating columns in the input layer.
+-    pub ood_point: Vec<SecureField>,
+-    /// The claimed evaluation at `ood_point` for each column in the input layer of each instance.
+-    pub claims_to_verify_by_instance: Vec<Vec<SecureField>>,
+-    /// The number of variables that interpolate the input layer of each instance.
+-    pub n_variables_by_instance: Vec<usize>,
+-}
+-
+-/// Defines how a circuit operates locally on two input rows to produce a single output row.
+-/// This local 2-to-1 constraint is what gives the whole circuit its "binary tree" structure.
+-///
+-/// Binary tree structured circuits have a highly regular wiring pattern that fit the structure of
+-/// the circuits defined in [Thaler13] which allow for efficient linear time (linear in size of the
+-/// circuit) GKR prover implementations.
+-///
+-/// [Thaler13]: https://eprint.iacr.org/2013/351.pdf
+-#[derive(Debug, Clone, Copy)]
+-pub enum Gate {
+-    LogUp,
+-    GrandProduct,
+-}
+-
+-impl Gate {
+-    /// Returns the output after applying the gate to the mask.
+-    fn eval(&self, mask: &GkrMask) -> Result<Vec<SecureField>, InvalidNumMaskColumnsError> {
+-        Ok(match self {
+-            Self::LogUp => {
+-                if mask.columns().len() != 2 {
+-                    return Err(InvalidNumMaskColumnsError);
+-                }
+-
+-                let [numerator_a, numerator_b] = mask.columns()[0];
+-                let [denominator_a, denominator_b] = mask.columns()[1];
+-
+-                let a = Fraction::new(numerator_a, denominator_a);
+-                let b = Fraction::new(numerator_b, denominator_b);
+-                let res = a + b;
+-
+-                vec![res.numerator, res.denominator]
+-            }
+-            Self::GrandProduct => {
+-                if mask.columns().len() != 1 {
+-                    return Err(InvalidNumMaskColumnsError);
+-                }
+-
+-                let [a, b] = mask.columns()[0];
+-                vec![a * b]
+-            }
+-        })
+-    }
+-}
+-
+-/// Mask has an invalid number of columns
+-#[derive(Debug)]
+-struct InvalidNumMaskColumnsError;
+-
+-/// Stores two evaluations of each column in a GKR layer.
+-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+-pub struct GkrMask {
+-    columns: Vec<[SecureField; 2]>,
+-}
+-
+-impl GkrMask {
+-    pub const fn new(columns: Vec<[SecureField; 2]>) -> Self {
+-        Self { columns }
+-    }
+-
+-    pub fn to_rows(&self) -> [Vec<SecureField>; 2] {
+-        self.columns.iter().map(|[a, b]| (a, b)).unzip().into()
+-    }
+-
+-    pub fn columns(&self) -> &[[SecureField; 2]] {
+-        &self.columns
+-    }
+-
+-    /// Returns all `p_i(x)` where `p_i` interpolates column `i` of the mask on `{0, 1}`.
+-    pub fn reduce_at_point(&self, x: SecureField) -> Vec<SecureField> {
+-        self.columns
+-            .iter()
+-            .map(|&[v0, v1]| fold_mle_evals(x, v0, v1))
+-            .collect()
+-    }
+-}
+-
+-/// Error encountered during GKR protocol verification.
+-#[derive(Error, Debug)]
+-pub enum GkrError {
+-    /// The proof is malformed.
+-    #[error("proof data is invalid")]
+-    MalformedProof,
+-    /// Mask has an invalid number of columns.
+-    #[error("mask in layer {instance_layer} of instance {instance} is invalid")]
+-    InvalidMask {
+-        instance: usize,
+-        /// Layer of the instance (but not necessarily the batch).
+-        instance_layer: LayerIndex,
+-    },
+-    /// There is a mismatch between the number of instances in the proof and the number of
+-    /// instances passed for verification.
+-    #[error("provided an invalid number of instances (given {given}, proof expects {proof})")]
+-    NumInstancesMismatch { given: usize, proof: usize },
+-    /// There was an error with one of the sumcheck proofs.
+-    #[error("sum-check invalid in layer {layer}: {source}")]
+-    InvalidSumcheck {
+-        layer: LayerIndex,
+-        source: SumcheckError,
+-    },
+-    /// The circuit polynomial the verifier evaluated doesn't match claim from sumcheck.
+-    #[error("circuit check failed in layer {layer} (calculated {output}, claim {claim})")]
+-    CircuitCheckFailure {
+-        claim: SecureField,
+-        output: SecureField,
+-        layer: LayerIndex,
+-    },
+-}
+-
+-/// GKR layer index where 0 corresponds to the output layer.
+-pub type LayerIndex = usize;
++pub use crate::core::lookups::gkr_verifier::*;
+ 
+ #[cfg(test)]
+ mod tests {
+--- a/nitroo/crates/stwo/src/prover/lookups/sumcheck.rs
++++ b/nitroo/crates/stwo/src/prover/lookups/sumcheck.rs
+@@ -8,9 +8,9 @@
+ 
+ use itertools::Itertools;
+ use num_traits::{One, Zero};
+-use thiserror::Error;
+ 
+ use super::utils::UnivariatePoly;
++pub use crate::core::lookups::sumcheck::*;
+ use crate::core::channel::Channel;
+ use crate::core::fields::m31::BaseField;
+ use crate::core::fields::qm31::SecureField;
+@@ -184,67 +184,6 @@
+         .iter()
+         .rfold(Zero::zero(), |acc, poly| acc * alpha + poly.clone())
+ }
+-
+-/// Partially verifies a sum-check proof.
+-///
+-/// Only "partial" since it does not fully verify the prover's claimed evaluation on the variable
+-/// assignment but checks if the sum of the round polynomials evaluated on `0` and `1` matches the
+-/// claim for each round. If the proof passes these checks, the variable assignment and the prover's
+-/// claimed evaluation are returned for the caller to validate otherwise an [`Err`] is returned.
+-///
+-/// Output is of the form `(variable_assignment, claimed_eval)`.
+-pub fn partially_verify(
+-    mut claim: SecureField,
+-    proof: &SumcheckProof,
+-    channel: &mut impl Channel,
+-) -> Result<(Vec<SecureField>, SecureField), SumcheckError> {
+-    let mut assignment = Vec::new();
+-
+-    for (round, round_poly) in proof.round_polys.iter().enumerate() {
+-        if round_poly.degree() > MAX_DEGREE {
+-            return Err(SumcheckError::DegreeInvalid { round });
+-        }
+-
+-        // TODO: optimize this by sending one less coefficient, and computing it from the
+-        // claim, instead of checking the claim. (Can also be done by quotienting).
+-        let sum = round_poly.eval_at_point(Zero::zero()) + round_poly.eval_at_point(One::one());
+-
+-        if claim != sum {
+-            return Err(SumcheckError::SumInvalid { claim, sum, round });
+-        }
+-
+-        channel.mix_felts(round_poly);
+-        let challenge = channel.draw_secure_felt();
+-        claim = round_poly.eval_at_point(challenge);
+-        assignment.push(challenge);
+-    }
+-
+-    Ok((assignment, claim))
+-}
+-
+-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+-pub struct SumcheckProof {
+-    pub round_polys: Vec<UnivariatePoly<SecureField>>,
+-}
+-
+-/// Max degree of polynomials the verifier accepts in each round of the protocol.
+-pub const MAX_DEGREE: usize = 3;
+-
+-/// Sum-check protocol verification error.
+-#[derive(Error, Debug)]
+-pub enum SumcheckError {
+-    #[error("degree of the polynomial in round {round} is too high")]
+-    DegreeInvalid { round: RoundIndex },
+-    #[error("sum does not match the claim in round {round} (sum {sum}, claim {claim})")]
+-    SumInvalid {
+-        claim: SecureField,
+-        sum: SecureField,
+-        round: RoundIndex,
+-    },
+-}
+-
+-/// Sum-check round index where 0 corresponds to the first round.
+-pub type RoundIndex = usize;
+ 
+ #[cfg(test)]
+ mod tests {
+--- a/nitroo/crates/stwo/src/prover/lookups/utils.rs
++++ b/nitroo/crates/stwo/src/prover/lookups/utils.rs
+@@ -1,315 +1 @@
+-use std::iter::zip;
+-use std::ops::{Add, Deref, Mul, Neg, Sub};
+-
+-use num_traits::Zero;
+-
+-use crate::core::fields::qm31::SecureField;
+-use crate::core::fields::{ExtensionOf, Field};
+-use crate::core::Fraction;
+-
+-/// Univariate polynomial stored as coefficients in the monomial basis.
+-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+-pub struct UnivariatePoly<F: Field>(Vec<F>);
+-
+-impl<F: Field> UnivariatePoly<F> {
+-    pub fn new(coeffs: Vec<F>) -> Self {
+-        let mut polynomial = Self(coeffs);
+-        polynomial.truncate_leading_zeros();
+-        polynomial
+-    }
+-
+-    pub fn eval_at_point(&self, x: F) -> F {
+-        horner_eval(&self.0, x)
+-    }
+-
+-    // <https://en.wikibooks.org/wiki/Algorithm_Implementation/Mathematics/Polynomial_interpolation>
+-    pub fn interpolate_lagrange(xs: &[F], ys: &[F]) -> Self {
+-        assert_eq!(xs.len(), ys.len());
+-
+-        let mut coeffs = Self::zero();
+-
+-        for (i, (xi, yi)) in zip(xs, ys).enumerate() {
+-            let mut prod = *yi;
+-
+-            for (j, xj) in xs.iter().enumerate() {
+-                if i != j {
+-                    prod /= *xi - *xj;
+-                }
+-            }
+-
+-            let mut term = Self::new(vec![prod]);
+-
+-            for (j, xj) in xs.iter().enumerate() {
+-                if i != j {
+-                    term = term * (Self::x() - Self::new(vec![*xj]));
+-                }
+-            }
+-
+-            coeffs = coeffs + term;
+-        }
+-
+-        coeffs.truncate_leading_zeros();
+-
+-        coeffs
+-    }
+-
+-    pub fn degree(&self) -> usize {
+-        let mut coeffs = self.0.iter().rev();
+-        let _ = (&mut coeffs).take_while(|v| v.is_zero());
+-        coeffs.len().saturating_sub(1)
+-    }
+-
+-    fn x() -> Self {
+-        Self(vec![F::zero(), F::one()])
+-    }
+-
+-    fn truncate_leading_zeros(&mut self) {
+-        while self.0.last() == Some(&F::zero()) {
+-            self.0.pop();
+-        }
+-    }
+-}
+-
+-impl<F: Field> From<F> for UnivariatePoly<F> {
+-    fn from(value: F) -> Self {
+-        Self::new(vec![value])
+-    }
+-}
+-
+-impl<F: Field> Mul<F> for UnivariatePoly<F> {
+-    type Output = Self;
+-
+-    fn mul(mut self, rhs: F) -> Self {
+-        self.0.iter_mut().for_each(|coeff| *coeff *= rhs);
+-        self
+-    }
+-}
+-
+-impl<F: Field> Mul for UnivariatePoly<F> {
+-    type Output = Self;
+-
+-    fn mul(mut self, mut rhs: Self) -> Self {
+-        if self.is_zero() || rhs.is_zero() {
+-            return Self::zero();
+-        }
+-
+-        self.truncate_leading_zeros();
+-        rhs.truncate_leading_zeros();
+-
+-        let mut res = vec![F::zero(); self.0.len() + rhs.0.len() - 1];
+-
+-        for (i, coeff_a) in self.0.into_iter().enumerate() {
+-            for (j, coeff_b) in rhs.0.iter().enumerate() {
+-                res[i + j] += coeff_a * *coeff_b;
+-            }
+-        }
+-
+-        Self::new(res)
+-    }
+-}
+-
+-impl<F: Field> Add for UnivariatePoly<F> {
+-    type Output = Self;
+-
+-    fn add(self, rhs: Self) -> Self {
+-        let n = self.0.len().max(rhs.0.len());
+-        let mut res = Vec::new();
+-
+-        for i in 0..n {
+-            res.push(match (self.0.get(i), rhs.0.get(i)) {
+-                (Some(a), Some(b)) => *a + *b,
+-                (Some(a), None) | (None, Some(a)) => *a,
+-                _ => unreachable!(),
+-            })
+-        }
+-
+-        Self(res)
+-    }
+-}
+-
+-impl<F: Field> Sub for UnivariatePoly<F> {
+-    type Output = Self;
+-
+-    fn sub(self, rhs: Self) -> Self {
+-        self + (-rhs)
+-    }
+-}
+-
+-impl<F: Field> Neg for UnivariatePoly<F> {
+-    type Output = Self;
+-
+-    fn neg(self) -> Self {
+-        Self(self.0.into_iter().map(|v| -v).collect())
+-    }
+-}
+-
+-impl<F: Field> Zero for UnivariatePoly<F> {
+-    fn zero() -> Self {
+-        Self(vec![])
+-    }
+-
+-    fn is_zero(&self) -> bool {
+-        self.0.iter().all(F::is_zero)
+-    }
+-}
+-
+-impl<F: Field> Deref for UnivariatePoly<F> {
+-    type Target = [F];
+-
+-    fn deref(&self) -> &[F] {
+-        &self.0
+-    }
+-}
+-
+-/// Evaluates univariate polynomial using [Horner's method].
+-///
+-/// [Horner's method]: https://en.wikipedia.org/wiki/Horner%27s_method
+-pub fn horner_eval<F: Field>(coeffs: &[F], x: F) -> F {
+-    coeffs
+-        .iter()
+-        .rfold(F::zero(), |acc, coeff| acc * x + *coeff)
+-}
+-
+-/// Returns `v_0 + alpha * v_1 + ... + alpha^(n-1) * v_{n-1}`.
+-pub fn random_linear_combination(v: &[SecureField], alpha: SecureField) -> SecureField {
+-    horner_eval(v, alpha)
+-}
+-
+-/// Evaluates the lagrange kernel of the boolean hypercube.
+-///
+-/// The lagrange kernel of the boolean hypercube is a multilinear extension of the function that
+-/// when given `x, y` in `{0, 1}^n` evaluates to 1 if `x = y`, and evaluates to 0 otherwise.
+-pub fn eq<F: Field>(x: &[F], y: &[F]) -> F {
+-    assert_eq!(x.len(), y.len());
+-    zip(x, y)
+-        .map(|(xi, yi)| *xi * *yi + (F::one() - *xi) * (F::one() - *yi))
+-        .product()
+-}
+-
+-/// Computes `eq(0, assignment) * eval0 + eq(1, assignment) * eval1`.
+-pub fn fold_mle_evals<F>(assignment: SecureField, eval0: F, eval1: F) -> SecureField
+-where
+-    F: Field,
+-    SecureField: ExtensionOf<F>,
+-{
+-    assignment * (eval1 - eval0) + eval0
+-}
+-
+-/// Represents the fraction `1 / x`
+-pub struct Reciprocal<T> {
+-    x: T,
+-}
+-
+-impl<T> Reciprocal<T> {
+-    pub const fn new(x: T) -> Self {
+-        Self { x }
+-    }
+-}
+-
+-impl<T: Add<Output = T> + Mul<Output = T> + Clone> Add for Reciprocal<T> {
+-    type Output = Fraction<T, T>;
+-
+-    fn add(self, rhs: Self) -> Fraction<T, T> {
+-        // `1/a + 1/b = (a + b)/(a * b)`
+-        Fraction {
+-            numerator: self.x.clone() + rhs.x.clone(),
+-            denominator: self.x * rhs.x,
+-        }
+-    }
+-}
+-
+-impl<T: Sub<Output = T> + Mul<Output = T> + Clone> Sub for Reciprocal<T> {
+-    type Output = Fraction<T, T>;
+-
+-    fn sub(self, rhs: Self) -> Fraction<T, T> {
+-        // `1/a - 1/b = (b - a)/(a * b)`
+-        Fraction {
+-            numerator: rhs.x.clone() - self.x.clone(),
+-            denominator: self.x * rhs.x,
+-        }
+-    }
+-}
+-
+-#[cfg(test)]
+-mod tests {
+-    use std::iter::zip;
+-
+-    use num_traits::{One, Zero};
+-
+-    use super::{horner_eval, UnivariatePoly};
+-    use crate::core::fields::m31::BaseField;
+-    use crate::core::fields::qm31::SecureField;
+-    use crate::core::fields::FieldExpOps;
+-    use crate::core::Fraction;
+-    use crate::prover::lookups::utils::eq;
+-
+-    #[test]
+-    fn lagrange_interpolation_works() {
+-        let xs = [5, 1, 3, 9].map(BaseField::from);
+-        let ys = [1, 2, 3, 4].map(BaseField::from);
+-
+-        let poly = UnivariatePoly::interpolate_lagrange(&xs, &ys);
+-
+-        for (x, y) in zip(xs, ys) {
+-            assert_eq!(poly.eval_at_point(x), y, "mismatch for x={x}");
+-        }
+-    }
+-
+-    #[test]
+-    fn horner_eval_works() {
+-        let coeffs = [BaseField::from(9), BaseField::from(2), BaseField::from(3)];
+-        let x = BaseField::from(7);
+-
+-        let eval = horner_eval(&coeffs, x);
+-
+-        assert_eq!(eval, coeffs[0] + coeffs[1] * x + coeffs[2] * x.square());
+-    }
+-
+-    #[test]
+-    fn eq_identical_hypercube_points_returns_one() {
+-        let zero = SecureField::zero();
+-        let one = SecureField::one();
+-        let a = &[one, zero, one];
+-
+-        let eq_eval = eq(a, a);
+-
+-        assert_eq!(eq_eval, one);
+-    }
+-
+-    #[test]
+-    fn eq_different_hypercube_points_returns_zero() {
+-        let zero = SecureField::zero();
+-        let one = SecureField::one();
+-        let a = &[one, zero, one];
+-        let b = &[one, zero, zero];
+-
+-        let eq_eval = eq(a, b);
+-
+-        assert_eq!(eq_eval, zero);
+-    }
+-
+-    #[test]
+-    #[should_panic]
+-    fn eq_different_size_points() {
+-        let zero = SecureField::zero();
+-        let one = SecureField::one();
+-
+-        eq(&[zero, one], &[zero]);
+-    }
+-
+-    #[test]
+-    fn fraction_addition_works() {
+-        let a = Fraction::new(BaseField::from(1), BaseField::from(3));
+-        let b = Fraction::new(BaseField::from(2), BaseField::from(6));
+-
+-        let Fraction {
+-            numerator,
+-            denominator,
+-        } = a + b;
+-
+-        assert_eq!(
+-            numerator / denominator,
+-            BaseField::from(2) / BaseField::from(3)
+-        );
+-    }
+-}
++pub use crate::core::lookups::utils::*;
+--- a/prover/src/gkr_key_tile.rs
++++ b/prover/src/gkr_key_tile.rs
+@@ -65,7 +65,7 @@
+ use stwo::prover::backend::simd::m31::{LOG_N_LANES, N_LANES};
+ use stwo::prover::backend::simd::qm31::PackedSecureField;
+ use stwo::prover::lookups::gkr_prover::{Layer, prove_batch};
+-use stwo::prover::lookups::gkr_verifier::{
++use stwo::core::lookups::gkr_verifier::{
+     Gate, GkrArtifact, GkrBatchProof, GkrError, partially_verify_batch,
+ };
+ use stwo::prover::lookups::mle::Mle;
+--- a/prover/src/gkrlink.rs
++++ b/prover/src/gkrlink.rs
+@@ -61,8 +61,8 @@
+ use stwo::prover::backend::simd::qm31::PackedSecureField;
+ use stwo::prover::backend::{Col, Column};
+ use stwo::prover::lookups::gkr_prover::GkrOps;
+-use stwo::prover::lookups::gkr_verifier::GkrArtifact;
+-use stwo::prover::lookups::utils::eq;
++use stwo::core::lookups::gkr_verifier::GkrArtifact;
++use stwo::core::lookups::utils::eq;
+ use stwo::prover::poly::circle::CircleEvaluation;
+ use stwo::prover::secure_column::SecureColumnByCoords;
+ use stwo::prover::ComponentProver;
