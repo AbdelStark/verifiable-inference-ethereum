@@ -6,7 +6,8 @@ clones stwo-cairo at the pinned commit, builds its prover, executes and proves t
 package's benchmarks for N = 2^12..2^18 with production parameters (`--verify`), runs the
 two reference-verifier calibrations, fits fixed + per-op costs and extrapolates to
 TinyLlama. A benchmark stops at the first N whose proof runs out of memory (--max-gib).
-Neither `make check` nor CI runs it: a full run takes about an hour on an M3 Max.
+Neither `make check` nor CI runs it: a full run takes about an hour on an M3 Max. Runs on
+macOS (`/usr/bin/time -l`) and Linux (GNU `/usr/bin/time -v`).
 
     python3 -I bench/stwo-cairo/run.py            # everything, then the report
     python3 -I bench/stwo-cairo/run.py --report   # only re-render the report from results
@@ -148,15 +149,56 @@ def setup(stwo):
     }
 
 
+MACOS = sys.platform == "darwin"
+
+
+def sysctl(key):
+    return run(["sysctl", "-n", key]).stdout.strip()
+
+
+def cgroup(name):
+    """A cgroup v2 limit of this process, or None if unlimited or absent."""
+    f = Path("/sys/fs/cgroup") / name
+    value = f.read_text().split() if f.exists() else ["max"]
+    return None if value[0] == "max" else [int(x) for x in value]
+
+
+def meminfo_kib(key):
+    return int(re.search(rf"^{key}:\s+(\d+) kB", Path("/proc/meminfo").read_text(), re.M).group(1))
+
+
+def ram_gib():
+    """Memory a proof can use: physical RAM, or the cgroup limit if lower."""
+    if MACOS:
+        return int(sysctl("hw.memsize")) / 2**30
+    limit = cgroup("memory.max")
+    return min(meminfo_kib("MemTotal") * 1024, limit[0] if limit else math.inf) / 2**30
+
+
 def machine():
-    def sysctl(key):
-        return run(["sysctl", "-n", key]).stdout.strip()
+    if MACOS:
+        return {
+            "cpu": sysctl("machdep.cpu.brand_string"),
+            "cores": f"{sysctl('hw.ncpu')} ({sysctl('hw.perflevel0.physicalcpu')} performance"
+                     f" + {sysctl('hw.perflevel1.physicalcpu')} efficiency)",
+            "ram_gib": ram_gib(),
+            "os": f"macOS {platform.mac_ver()[0]}",
+        }
+    info = Path("/proc/cpuinfo").read_text()
+    blocks = [dict(re.findall(r"^([^\t:]+?)\s*: (.*)$", b, re.M)) for b in info.split("\n\n") if b.strip()]
+    host_cores = len({(b.get("physical id"), b.get("core id")) for b in blocks})
+    quota = cgroup("cpu.max")
+    usable = len(os.sched_getaffinity(0))
+    os_name = re.search(r'^PRETTY_NAME="?(.*?)"?$', Path("/etc/os-release").read_text(), re.M).group(1)
     return {
-        "cpu": sysctl("machdep.cpu.brand_string"),
-        "cores": f"{sysctl('hw.ncpu')} ({sysctl('hw.perflevel0.physicalcpu')} performance"
-                 f" + {sysctl('hw.perflevel1.physicalcpu')} efficiency)",
-        "ram_gib": int(sysctl("hw.memsize")) / 2**30,
-        "os": f"macOS {platform.mac_ver()[0]}",
+        "cpu": blocks[0].get("model name", platform.machine()),
+        "cores": f"{usable} ("
+                 + (f"cgroup quota {quota[0] / quota[1]:g} CPUs; " if quota else "")
+                 + f"host: {len(blocks)} logical, {host_cores} physical)",
+        "ram_gib": ram_gib(),
+        "host_ram_gib": meminfo_kib("MemTotal") / 2**20,
+        "os": f"{os_name}, Linux {platform.release()}",
+        "flags": [f for f in ("avx2", "avx512f", "sha_ni") if f in blocks[0].get("flags", "").split()],
     }
 
 
@@ -179,27 +221,50 @@ def scarb_execute(args):
 
 
 def swap_used_mib():
+    if not MACOS:
+        return (meminfo_kib("SwapTotal") - meminfo_kib("SwapFree")) / 1024
     out = run(["sysctl", "-n", "vm.swapusage"]).stdout
     return float(re.search(r"used = ([\d.]+)M", out).group(1))
 
 
+def child_pid(pid):
+    if MACOS:
+        kids = subprocess.run(["pgrep", "-P", str(pid)], capture_output=True, text=True).stdout
+    else:
+        f = Path(f"/proc/{pid}/task/{pid}/children")
+        kids = f.read_text() if f.exists() else ""
+    return kids.split()[0] if kids.split() else None
+
+
 def footprint_bytes(pid):
-    """Physical footprint, compressed and swapped-out memory included, as top's MEM shows it."""
+    """macOS: physical footprint, compressed and swapped-out memory included, as top's MEM shows
+    it. Linux: resident set size."""
+    if not MACOS:
+        f = Path(f"/proc/{pid}/status")
+        m = re.search(r"^VmRSS:\s+(\d+) kB", f.read_text(), re.M) if f.exists() else None
+        return int(m.group(1)) * 1024 if m else 0
     out = subprocess.run(["top", "-l", "1", "-pid", str(pid), "-stats", "mem"],
                          capture_output=True, text=True).stdout.split()
     m = re.fullmatch(r"([\d.]+)([BKMGT])[+-]?", out[-1]) if out else None
     return float(m.group(1)) * 1024 ** "BKMGT".index(m.group(2)) if m else 0
 
 
+def wall_seconds(text):
+    if MACOS:
+        return float(re.search(r"([\d.]+) real", text).group(1))
+    clock = re.search(r"Elapsed \(wall clock\) time \(h:mm:ss or m:ss\): ([\d:.]+)", text).group(1)
+    return sum(float(x) * 60**i for i, x in enumerate(reversed(clock.split(":"))))
+
+
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
 
 
-def prove(bins, program, args, proof, log, max_gib):
+def prove(bins, program, args, proof, log, max_gib, settle_s):
     """Proves and verifies with run_and_prove; returns timings and what the logs report."""
-    cmd = ["/usr/bin/time", "-l", bins / "run_and_prove", "--program", program,
+    cmd = ["/usr/bin/time", "-l" if MACOS else "-v", bins / "run_and_prove", "--program", program,
            "--program_type", "executable", "--program_arguments_file", args,
            "--proof_path", proof, "--verify"]
-    for _ in range(18):  # timings: wait up to 3 min for the 1-minute load to settle below 3
+    for _ in range(settle_s // 10):  # timings: wait for the 1-minute load to settle below 3
         if os.getloadavg()[0] < 3:
             break
         time.sleep(10)
@@ -212,27 +277,35 @@ def prove(bins, program, args, proof, log, max_gib):
 
         def watchdog():  # macOS compresses and swaps rather than failing an allocation
             while p.poll() is None:
-                kids = subprocess.run(["pgrep", "-P", str(p.pid)], capture_output=True,
-                                      text=True).stdout.split()
-                if kids and footprint_bytes(kids[0]) > max_gib * 2**30:
+                kid = child_pid(p.pid)
+                if kid and footprint_bytes(kid) > max_gib * 2**30:
                     killed.append(True)
-                    subprocess.run(["kill", "-9", kids[0]])
+                    os.kill(int(kid), 9)
                     return
                 time.sleep(0.5)
         threading.Thread(target=watchdog, daemon=True).start()
         p.wait()
     text = ANSI.sub("", Path(log).read_text(errors="replace"))
     r = {"load_avg": [round(x, 2) for x in load], "swap_mib": [swap_before, swap_used_mib()]}
-    for key, label in [("max_rss_b", "maximum resident set size"),
-                       ("peak_footprint_b", "peak memory footprint")]:
-        found = re.search(rf"(\d+)\s+{label}", text)
+    if MACOS:
+        for key, label in [("max_rss_b", "maximum resident set size"),
+                           ("peak_footprint_b", "peak memory footprint")]:
+            found = re.search(rf"(\d+)\s+{label}", text)
+            if found:
+                r[key] = int(found.group(1))
+    else:
+        found = re.search(r"Maximum resident set size \(kbytes\): (\d+)", text)
         if found:
-            r[key] = int(found.group(1))
+            r["max_rss_b"] = int(found.group(1)) * 1024
     if killed:
-        return dict(r, status=f"out of memory: footprint above {max_gib:g} GiB, stopped")
+        return dict(r, status=f"out of memory: {'footprint' if MACOS else 'RSS'} above "
+                              f"{max_gib:g} GiB, stopped")
     if "terminated abnormally" in text:
         return dict(r, status=f"out of memory: killed by macOS at a peak footprint of "
                               f"{r['peak_footprint_b'] / 2**30:.1f} GiB")
+    if "Command terminated by signal 9" in text:
+        return dict(r, status=f"out of memory: killed at a peak RSS of "
+                              f"{r['max_rss_b'] / 2**30:.1f} GiB")
     if "Proved successfully" not in text:
         return dict(r, status="failed, see " + str(log))
     cells = re.search(r"Witness trace cells: \[(\d+), (\d+), (\d+)\]", text).groups()
@@ -247,7 +320,7 @@ def prove(bins, program, args, proof, log, max_gib):
     return dict(
         r,
         status="verified",
-        prove_s=float(re.search(r"([\d.]+) real", text).group(1)),
+        prove_s=wall_seconds(text),
         prover_steps=int(re.search(r"Num steps: (\d+)", text).group(1)),
         cells={"preprocessed": int(cells[0]), "base": int(cells[1]), "interaction": int(cells[2])},
         relation_uses=uses,
@@ -303,7 +376,7 @@ def growing_cells(rows, cols, pad):
                * (cols[c]["base"] + cols[c]["interaction"]) for c, v in rows.items())
 
 
-def measure(stwo, bins, out, benches, log_ns, max_gib):
+def measure(stwo, bins, out, benches, log_ns, max_gib, settle_s):
     executable = HERE / "target/dev" / f"{PACKAGE}.executable.json"
     program = out / f"{PACKAGE}.all_builtins.executable.json"
     program.write_text(json.dumps(with_all_builtins(json.loads(executable.read_text()))))
@@ -317,7 +390,7 @@ def measure(stwo, bins, out, benches, log_ns, max_gib):
             row = {"bench": bench, "log_n": log_n, "n": n, **scarb_execute(args)}
             row["resources"] = execution_resources(bins, program, args, out / f"{tag}.resources.json")
             row.update(prove(bins, program, args, out / f"{tag}.proof.json", out / f"{tag}.log",
-                             max_gib))
+                             max_gib, settle_s))
             with open(results, "a") as f:
                 f.write(json.dumps(row) + "\n")
             print(f"{tag}: {row['status']} {row.get('prove_s')} s", flush=True)
@@ -349,11 +422,12 @@ def calibration_runs(stwo, bins, out):
     return rows, program
 
 
-def calibrate(stwo, bins, out, max_gib):
+def calibrate(stwo, bins, out, max_gib, settle_s):
     rows, program = calibration_runs(stwo, bins, out)
     ver = stwo / "stwo_cairo_verifier"
     rows[0].update(prove(bins, program, ver / rows[0]["arguments"],
-                         out / "calibration.proof.json", out / "calibration.log", max_gib))
+                         out / "calibration.proof.json", out / "calibration.log", max_gib,
+                         settle_s))
     (out / "calibration.json").write_text(json.dumps(rows, indent=1))
 
 
@@ -406,12 +480,17 @@ def report(stwo, out):
     lines = []
     w = lines.append
     m = meta["machine"]
-    w(f"Machine: {m['cpu']}, {m['cores']} cores, {m['ram_gib']:.0f} GiB, {m['os']}.")
+    macos = m["os"].startswith("macOS")
+    w(f"Machine: {m['cpu']}, {m['cores']} cores, {m['ram_gib']:.0f} GiB"
+      + (f" (host {m['host_ram_gib']:.0f} GiB)" if "host_ram_gib" in m else "") + f", {m['os']}"
+      + (f", CPU flags {', '.join(m['flags'])}" if m.get("flags") else "") + ".")
     w(f"Toolchains: {meta['versions']['scarb']}; {meta['versions']['rustc']}; "
       f"stwo-cairo {meta['versions']['stwo_cairo']}.")
     w("")
-    w("Time is `/usr/bin/time -l` wall time of the whole `run_and_prove` command: Cairo VM run, "
-      "adaptation, proving, verification and writing the proof.")
+    w(f"Time is {'`/usr/bin/time -l`' if macos else 'GNU `/usr/bin/time -v`'} wall time of the "
+      "whole `run_and_prove` command: Cairo VM run, adaptation, proving, verification and "
+      "writing the proof." + ("" if macos else " Linux reports no peak footprint: peak RSS is the "
+                              "figure that has to fit in RAM."))
     w("")
 
     # Every verified run: the growing components' rows from get_execution_resources must give the
@@ -457,7 +536,8 @@ def report(stwo, out):
             "cells": fit([(r["n"], trace_cells(r)) for r in ok]),
             "prove_s": fit([(r["n"], r["prove_s"]) for r in ok]),
             "rss_gib": fit([(r["n"], r["max_rss_b"] / 2**30) for r in ok]),
-            "footprint_gib": fit([(r["n"], r["peak_footprint_b"] / 2**30) for r in ok]),
+            "footprint_gib": fit([(r["n"], r["peak_footprint_b"] / 2**30) for r in ok])
+            if all("peak_footprint_b" in r for r in ok) else None,
         }
         uses = {}
         for rel in ok[-1]["relation_uses"] if ok else []:
@@ -540,12 +620,16 @@ def report(stwo, out):
             if "status" not in c:
                 w(head + "executed only | | | | | | | |")
             elif c["status"] != "verified":
-                w(head + f"— | — | — | — | — | {c.get('peak_footprint_b', 0) / 2**30:.1f} | "
+                w(head + "— | — | — | — | — | "
+                  + (f"{c['peak_footprint_b'] / 2**30:.1f}" if "peak_footprint_b" in c else "—")
+                  + " | "
                   f"{loads(c)} | {c['status']} |")
             else:
                 w(head + f"{c['prove_s']:.1f} | {fmt(c['steps'] / c['prove_s'])} | "
                   f"{fmt(trace_cells(c))} | {trace_cells(c) / c['steps']:,.0f} | "
-                  f"{c['max_rss_b'] / 2**30:.1f} | {c['peak_footprint_b'] / 2**30:.1f} | "
+                  f"{c['max_rss_b'] / 2**30:.1f} | "
+                  + (f"{c['peak_footprint_b'] / 2**30:.1f}" if "peak_footprint_b" in c else "—")
+                  + " | "
                   f"{loads(c)} | verified |")
         w("")
         w("Whole-run cells per step at each benchmark's largest verified N: " + ", ".join(
@@ -712,12 +796,13 @@ def extrapolate(fits, cols, fixed_cells, cal, rows, w):
     w(f"| Trace cells, padded | {pad:.3g} | "
       + (f"{pad * r['Trace cells']:.3g}" if r else "—") + " | |")
     w(f"| Time, fit (s) | {fmt(t_fit)} | {scaled(t_fit, 'Time (s)')} | |")
-    fp = md.total("footprint_gib")
-    w(f"| Peak footprint (GiB) | {fmt(fp)} | — | |")
+    mem_key = "footprint_gib" if md.fits["blake2s"]["footprint_gib"] else "rss_gib"
+    w(f"| Peak {'footprint' if mem_key == 'footprint_gib' else 'RSS'} (GiB) | "
+      f"{fmt(md.total(mem_key))} | — | |")
     w("")
     w("Growing components of the largest segment, rows (log size): " + ", ".join(
         f"`{c}` {fmt(total_rows(grow[c]))} ({s:.0f})"
-        for c, s in sorted(sizes.items(), key=lambda x: -x[1]) if s >= top - 3) + ".")
+        for c, s in sorted(sizes.items(), key=lambda x: (-x[1], x[0])) if s >= top - 3) + ".")
     w("")
 
 
@@ -727,8 +812,12 @@ def main():
     ap.add_argument("--out", type=Path, default=REPO / "runs/stwo-unit-costs")
     ap.add_argument("--bench", choices=BENCHES, action="append")
     ap.add_argument("--log-n", type=int, action="append", help="default: 12..18")
-    ap.add_argument("--max-gib", type=float, default=35,
-                    help="stop a proof whose memory footprint passes this: out of memory")
+    ap.add_argument("--max-gib", type=float, default=ram_gib() - 1,
+                    help="stop a proof whose memory footprint (macOS) or RSS (Linux) passes "
+                         "this: out of memory (default: RAM - 1 GiB)")
+    ap.add_argument("--settle-s", type=int, default=180,
+                    help="wait up to this long before each proof for the 1-minute load to fall "
+                         "below 3")
     ap.add_argument("--skip-benchmarks", action="store_true")
     ap.add_argument("--skip-calibration", action="store_true")
     ap.add_argument("--report", action="store_true", help="only re-render the report")
@@ -741,9 +830,9 @@ def main():
         bins = stwo / "target/release"
         if not a.skip_benchmarks:
             measure(stwo, bins, out, a.bench or list(BENCHES), a.log_n or list(LOG_NS),
-                    a.max_gib)
+                    a.max_gib, a.settle_s)
         if not a.skip_calibration:
-            calibrate(stwo, bins, out, a.max_gib)
+            calibrate(stwo, bins, out, a.max_gib, a.settle_s)
     report(stwo, out)
 
 
