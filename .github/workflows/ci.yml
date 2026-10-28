@@ -102,6 +102,16 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: sp1 -> target
+      # Before any cargo command in sp1/: its path dependencies on SASH don't exist until it runs.
+      - name: Vendor SASH eb95bfa (sha256-pinned tarball plus sp1/patches)
+        run: sp1/scripts/vendor-sash.sh
+      - name: Check nitroo's Stwo without the prover feature on stable (no CUDA)
+        working-directory: sp1/vendor/sash/nitroo
+        env:
+          CARGO_TARGET_DIR: ${{ github.workspace }}/sp1/target/nitroo-check
+        run: |
+          cargo +1.99.1 check --locked --no-default-features --features std -p stwo
+          cargo +1.99.1 check --locked --no-default-features --features std -p stwo-constraint-framework
       - name: Format check
         working-directory: sp1
         run: cargo fmt -- --check
@@ -109,11 +119,16 @@ jobs:
       - name: Executor tests (token-hash guest, SPEC.md §1.1 rule 1)
         working-directory: sp1
         run: cargo test --locked --workspace
+      - name: stwo-bench in the profiling executor (cycle-tracker regions)
+        working-directory: sp1
+        run: cargo test --locked -p sp1-host --features profiling
       - name: Clippy
         working-directory: sp1
-        run: cargo clippy --locked --workspace --all-targets -- -D warnings
-      - name: Reproducible guest build in the pinned SP1 Docker image
-        working-directory: sp1/segment-guest
         run: |
-          cargo prove build --docker --tag v6.10.0 --locked --workspace-directory ../..
-          shasum -a 256 ../target/elf-compilation/docker/riscv64im-succinct-zkvm-elf/release/segment-guest
+          cargo clippy --locked --workspace --all-targets -- -D warnings
+          cargo clippy --locked -p sp1-host --all-targets --features profiling -- -D warnings
+      - name: Reproducible guest builds in the pinned SP1 Docker image
+        run: |
+          (cd sp1/segment-guest && cargo prove build --docker --tag v6.10.0 --locked --workspace-directory ../..)
+          (cd sp1/stwo-bench && cargo prove build --docker --tag v6.10.0 --locked --workspace-directory ../..)
+          shasum -a 256 sp1/target/elf-compilation/docker/riscv64im-succinct-zkvm-elf/release/segment-guest sp1/target/elf-compilation/docker/riscv64im-succinct-zkvm-elf/release/stwo-bench

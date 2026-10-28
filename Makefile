@@ -1,4 +1,4 @@
-.PHONY: help check rust-check vectors forge-test anvil-demo sp1-check sp1-docker bundles-check clean
+.PHONY: help check rust-check vectors forge-test anvil-demo sp1-vendor sp1-check sp1-docker bundles-check clean
 
 help:
 	@echo "Targets:"
@@ -7,8 +7,9 @@ help:
 	@echo "  make vectors     - Regenerate contracts/src/sash/TinyLlamaFixture.sol from the Rust TinyLlama fixture"
 	@echo "  make forge-test  - Check Solidity format, build against foundry.lock, lint, run the Foundry suite with gas report, and check the gas snapshots against the index"
 	@echo "  make anvil-demo  - Mine the dev-mode TinyLlama-1.1B 23-segment settlement (DeployDevAnvil.s.sol) on a local Osaka anvil node, check the receipts and print their gas"
-	@echo "  make sp1-check   - Run cargo fmt --check, clippy -D warnings and the executor tests of the SP1 workspace in sp1/ (needs SP1 v6.10.0 and protoc)"
-	@echo "  make sp1-docker  - Build the segment guest reproducibly in the pinned SP1 v6.10.0 Docker image and print its ELF sha256"
+	@echo "  make sp1-vendor  - Build sp1/vendor/sash: SASH eb95bfa from its sha256-pinned tarball plus sp1/patches"
+	@echo "  make sp1-check   - Vendor SASH, check nitroo's Stwo without the prover feature on stable, then cargo fmt --check, the executor tests and clippy -D warnings in sp1/ (needs SP1 v6.10.0 and protoc)"
+	@echo "  make sp1-docker  - Build the segment guest and stwo-bench reproducibly in the pinned SP1 v6.10.0 Docker image and print their ELF sha256"
 	@echo "  make bundles-check"
 	@echo "                  - Check the 69 TinyLlama proof bundle files in BUNDLES (default runs/tinyllama) against sp1/pins/tinyllama.sha256"
 	@echo "  make clean       - Clean build outputs"
@@ -54,15 +55,27 @@ anvil-demo:
 
 SP1_IMAGE := ghcr.io/succinctlabs/sp1:v6.10.0
 
-# Tests before clippy: they build the guest ELF, which sp1-build skips under clippy but `include_elf!` needs.
-sp1-check:
+sp1-vendor:
+	sp1/scripts/vendor-sash.sh
+
+# nitroo's own -Dwarnings applies to the no-prover check because it runs in nitroo/; +1.99.1 overrides
+# nitroo's nightly rust-toolchain.toml. Tests run before clippy: they build the guest ELFs, which
+# sp1-build skips under clippy but `include_elf!` needs.
+NITROO_CHECK = cd sp1/vendor/sash/nitroo && CARGO_TARGET_DIR="$(CURDIR)/sp1/target/nitroo-check" cargo +1.99.1 check --locked --no-default-features --features std
+
+sp1-check: sp1-vendor
+	$(NITROO_CHECK) -p stwo
+	$(NITROO_CHECK) -p stwo-constraint-framework
 	cd sp1 && cargo fmt -- --check
 	cd sp1 && cargo test --locked --workspace
+	cd sp1 && cargo test --locked -p sp1-host --features profiling
 	cd sp1 && cargo clippy --locked --workspace --all-targets -- -D warnings
+	cd sp1 && cargo clippy --locked -p sp1-host --all-targets --features profiling -- -D warnings
 
-sp1-docker:
+sp1-docker: sp1-vendor
 	cd sp1/segment-guest && cargo prove build --docker --tag v6.10.0 --locked --workspace-directory ../..
-	shasum -a 256 sp1/target/elf-compilation/docker/riscv64im-succinct-zkvm-elf/release/segment-guest
+	cd sp1/stwo-bench && cargo prove build --docker --tag v6.10.0 --locked --workspace-directory ../..
+	shasum -a 256 sp1/target/elf-compilation/docker/riscv64im-succinct-zkvm-elf/release/segment-guest sp1/target/elf-compilation/docker/riscv64im-succinct-zkvm-elf/release/stwo-bench
 
 BUNDLES ?= runs/tinyllama
 
