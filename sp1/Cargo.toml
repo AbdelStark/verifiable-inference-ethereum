@@ -4,8 +4,9 @@
 resolver = "3"
 members = ["segment-guest", "sp1-host", "stwo-bench"]
 # SASH at the pinned commit plus sp1/patches, built by scripts/vendor-sash.sh. SASH and nitroo are
-# workspaces of their own; the root Cargo.toml excludes the tree too (see there).
-exclude = ["vendor"]
+# workspaces of their own; the root Cargo.toml excludes the tree too (see there). sash-oracle is its own
+# workspace on SASH's nightly toolchain.
+exclude = ["vendor", "sash-oracle"]
 
 [workspace.package]
 version = "0.1.0"
