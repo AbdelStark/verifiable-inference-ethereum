@@ -12,7 +12,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use clap::{Parser, Subcommand};
 use sha2::{Digest, Sha256};
@@ -247,6 +247,30 @@ fn prove(elf: &Path, bundle: &Path, tag: &str, out: &Path) -> Result<ExitCode, S
     check_fixed_hash(&run.public_values, &pin)?;
     println!("OK: the executor's fixedHash equals its pin in sp1/pins/tinyllama.fixed.sha256");
 
+    // sp1-cuda's client and proving key spawn their cleanup on the current Tokio runtime when dropped
+    // (sp1-cuda 6.10.0 `client.rs`, `pk.rs`), and sp1-sdk's blocking API keeps its own runtime to
+    // itself: dropped outside a runtime context, they panic in the destructor and the process aborts.
+    // They live and drop inside this runtime's context. Dropping the client also kills
+    // `sp1-gpu-server` (`kill_on_drop`); the shutdown drops whatever of the cleanup has not run.
+    let runtime = tokio::runtime::Runtime::new().map_err(|e| e.to_string())?;
+    let proved = {
+        let _context = runtime.enter();
+        prove_on_gpu(elf, &input, &run.public_values, &pin, &out)
+    };
+    runtime.shutdown_timeout(Duration::from_secs(10));
+    proved?;
+    Ok(ExitCode::SUCCESS)
+}
+
+/// `sp1-host prove`'s GPU half: the CUDA client, the setup, the compressed proof, its checks against the
+/// executor's `public_values` and the `fixedHash` pin, and the proof file.
+fn prove_on_gpu(
+    elf: Elf,
+    input: &SegmentInput,
+    public_values: &[u8],
+    pin: &[u8; 32],
+    out: &Path,
+) -> Result<(), String> {
     // Building the client downloads `sp1-gpu-server` on first use and starts it: the warm-up, timed
     // apart from setup and proving.
     let t = Instant::now();
@@ -279,34 +303,35 @@ fn prove(elf: &Path, bundle: &Path, tag: &str, out: &Path) -> Result<ExitCode, S
         .verify(&proof, pk.verifying_key(), None)
         .map_err(|e| format!("the proof does not verify: {e}"))?;
     println!("verify time: {:.1} s", t.elapsed().as_secs_f64());
-    if proof.public_values.as_slice() != run.public_values.as_slice() {
+    if proof.public_values.as_slice() != public_values {
         return Err(format!(
             "the proof's public values {} differ from the executor's {}",
             hex::encode(proof.public_values.as_slice()),
-            hex::encode(&run.public_values)
+            hex::encode(public_values)
         ));
     }
-    println!("public values: {}", hex::encode(&run.public_values));
+    println!("public values: {}", hex::encode(public_values));
     println!("OK: the proof verifies and its public values equal the executor's, byte for byte");
-    let fixed_hash = check_fixed_hash(proof.public_values.as_slice(), &pin)?;
+    let fixed_hash = check_fixed_hash(proof.public_values.as_slice(), pin)?;
     println!(
         "OK: fixedHash {} equals its pin in sp1/pins/tinyllama.fixed.sha256",
         hex::encode(fixed_hash)
     );
 
     proof
-        .save(&out)
+        .save(out)
         .map_err(|e| format!("{}: {e}", out.display()))?;
-    let bytes = read(&out)?;
+    let bytes = read(out)?;
     println!("proof: {}", out.display());
     println!("proof size: {} bytes", bytes.len());
     println!("proof sha256: {}", hex::encode(Sha256::digest(&bytes)));
-    // Not `sp1-gpu-server`, which is still running: see its `VmHWM` above.
+    // Before the client drops and kills `sp1-gpu-server`, which would then count as an exited child:
+    // see its `VmHWM` above.
     println!(
         "peak RSS of sp1-host and its exited children (the executor): {} bytes",
         peak_rss()
     );
-    Ok(ExitCode::SUCCESS)
+    Ok(())
 }
 
 fn read(path: &Path) -> Result<Vec<u8>, String> {

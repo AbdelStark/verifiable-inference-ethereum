@@ -48,7 +48,7 @@ serde_json.workspace = true
 sha2 = "0.10.9"
 sp1-sdk = { workspace = true, features = ["cuda"] }
 stwo = { workspace = true, optional = true }
-tokio = { version = "1", features = ["sync"] }
+tokio = { version = "1", features = ["rt-multi-thread", "sync"] }
 zk-prover.workspace = true
 
 [build-dependencies]
