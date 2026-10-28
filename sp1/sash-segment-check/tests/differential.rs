@@ -134,9 +134,10 @@ fn check_segment_agrees_with_the_oracle() {
         }
     }
     // Where upstream accepts and the guest does not: the unbound bundles and the mutations that
-    // only SPEC.md §1.1's own rules refuse. Not `kmax_22`: `kmax` sizes the normalisation table
-    // the AIR reads, so upstream rejects that statement on its own (`sizes_ok` and `stark_ok`
-    // false, `OodsNotMatching`); `UnsoundDequant` is the first rule to see it.
+    // only SPEC.md §1.1's own rules refuse. Not the three `UnsoundDequant` mutations: `kmax` and
+    // the dequant variants size the tables and claims the AIR reads, so upstream rejects those
+    // statements on its own (`kmax_22`: `sizes_ok` and `stark_ok` false, `OodsNotMatching`; the
+    // other two: `claims shape mismatch`); `UnsoundDequant` is the first rule to see them.
     let want: BTreeSet<String> = [
         "sound_gkrfive",
         "skip_residual_stream",

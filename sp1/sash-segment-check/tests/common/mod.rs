@@ -162,7 +162,7 @@ fn flip_hex_digit(v: &mut Value) {
     *v = json!(format!("{}{last}", &s[..s.len() - 1]));
 }
 
-pub const MUTATIONS: [Mutation; 17] = [
+pub const MUTATIONS: [Mutation; 19] = [
     Mutation {
         name: "merkle_hash_flipped",
         base: "sound_aligned",
@@ -261,9 +261,37 @@ pub const MUTATIONS: [Mutation; 17] = [
         expect: "UnboundEdge",
     },
     Mutation {
+        // Both halves of rule 5: `kmax` above `KMAX_SOUND`, and the `pow2` and `chain` Specs'
+        // `2^(kmax + 9)` above `P`. The two below trip one half each.
         name: "kmax_22",
         base: "sound_aligned",
         apply: |b| b.edit_fixed(|f| f["params"]["kmax"] = json!(22)),
+        expect: "UnsoundDequant",
+    },
+    Mutation {
+        // Only `kmax <= KMAX_SOUND`: a `limbs` Spec is sound at any `kmax`.
+        name: "limbs_kmax_22",
+        base: "sound_aligned",
+        apply: |b| {
+            b.edit_fixed(|f| {
+                for m in f["params"]["mats"].as_array_mut().unwrap() {
+                    m["variant"] = json!("limbs");
+                }
+                f["params"]["kmax"] = json!(22);
+            })
+        },
+        expect: "UnsoundDequant",
+    },
+    Mutation {
+        // Only `Spec::sound()`, at `kmax` 16: a `fold` Spec with `q_bits + rem_bits = 7 + 24 > 30`.
+        name: "down_fold_rem_bits_24",
+        base: "sound_aligned",
+        apply: |b| {
+            b.edit_fixed(|f| {
+                f["params"]["mats"][6]["variant"] = json!("fold");
+                f["params"]["fold_rem_bits"] = json!(24);
+            })
+        },
         expect: "UnsoundDequant",
     },
     Mutation {

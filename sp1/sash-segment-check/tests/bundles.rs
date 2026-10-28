@@ -5,8 +5,10 @@
 mod common;
 
 use common::{Bundle, MUTATIONS, Outcome, oracle_records};
+use sash_segment_check::{Reject, check_statement, check_verdict};
 use sha2::{Digest, Sha256};
-use zk_prover::compose::Fixed;
+use zk_prover::common::Proof;
+use zk_prover::compose::{Claims, Fixed, Verdict, verify_composed_parsed};
 
 /// The positive bundles' public values, pinned. `derived_public_values` re-derives them without
 /// `check_segment`.
@@ -196,4 +198,40 @@ fn undecodable_proof_is_not_accepted() {
         matches!(&got, Err(sash_segment_check::Reject::NotAccepted { error: Some(e), .. }) if e.starts_with("unparseable proof")),
         "{got:?}"
     );
+}
+
+/// Rule 7 after the verifier, which no corpus bundle reaches with an open seam: `sound_aligned`'s
+/// own `Plan` and `Verdict` give its public values through `check_verdict`, the step
+/// `check_segment` returns them from, and `OpenSeam` once any one seam is opened, though upstream's
+/// `accepts()` still holds.
+#[test]
+#[ignore = "needs the synthetic corpus in SASH_SYNTHETIC_CORPUS (sash CI job)"]
+fn open_seam_after_the_verifier() {
+    let b = Bundle::load("sound_aligned");
+    let fixed: Fixed = serde_json::from_slice(&b.fixed).unwrap();
+    let claims: Claims = serde_json::from_slice(&b.claims).unwrap();
+    let proof: Proof = serde_json::from_slice(&b.proof).unwrap();
+    let (segment_index, plan) = check_statement(&fixed).unwrap();
+    let verdict = verify_composed_parsed(&fixed, &plan, &claims, proof);
+    let values = check_verdict(segment_index, &fixed, &plan, &verdict).unwrap();
+    assert_eq!(hex::encode(values.encode()), SOUND_ALIGNED);
+
+    let opens: [fn(&mut Verdict); 4] = [
+        |v| v.deq_out_open = vec!["q".into()],
+        |v| v.rq_scale_open = vec!["qkv/v".into()],
+        |v| v.ao_q_open = true,
+        |v| v.nn_open = true,
+    ];
+    for open in opens {
+        let mut v = verdict.clone();
+        open(&mut v);
+        assert!(v.accepts(), "upstream's accepts() ignores open seams");
+        assert!(
+            matches!(
+                check_verdict(segment_index, &fixed, &plan, &v),
+                Err(Reject::OpenSeam { .. })
+            ),
+            "{v:?}"
+        );
+    }
 }

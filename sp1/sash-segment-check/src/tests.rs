@@ -1,8 +1,9 @@
 //! One `SPEC.md` §1.1 rule at a time, on statements and verdicts built here. Rules 1 to 3 run before
 //! `Plan::new`, so their controls go through `check_segment` itself; rules 4, 5 and 7 are checked on
 //! a constructed binding table, dequant `Spec` and `Verdict`, since `Params::default()` is not a
-//! statement `Plan::new` accepts. The synthetic bundles (`tests/bundles.rs`) run every rule
-//! through `check_segment`.
+//! statement `Plan::new` accepts. The synthetic bundles (`tests/bundles.rs`) run rules 1 to 6
+//! through `check_segment`, and rule 7 through `check_verdict` on a bundle's own `Plan` and
+//! `Verdict` with a seam opened, since no corpus bundle has an open seam.
 
 use sash_evm_primitives::tinyllama_fixture::{TINYLLAMA_TOK_IN, TINYLLAMA_TOK_OUT};
 use serde_json::json;
@@ -295,12 +296,12 @@ fn accepting_verdict() -> Verdict {
 
 #[test]
 fn not_accepted() {
-    assert_eq!(check_verdict(&accepting_verdict()), Ok(()));
+    assert_eq!(verdict_rules(&accepting_verdict()), Ok(()));
     let mut v = accepting_verdict();
     v.root_ok = false;
     v.freivalds_ok = vec![true, false];
     assert_eq!(
-        check_verdict(&v),
+        verdict_rules(&v),
         Err(Reject::NotAccepted {
             failed: vec!["freivalds_ok".into(), "root_ok".into()],
             error: None
@@ -308,7 +309,7 @@ fn not_accepted() {
     );
     // Rule 6 before rule 7.
     v.nn_open = true;
-    assert!(matches!(check_verdict(&v), Err(Reject::NotAccepted { .. })));
+    assert!(matches!(verdict_rules(&v), Err(Reject::NotAccepted { .. })));
 }
 
 #[test]
@@ -324,7 +325,7 @@ fn open_seam() {
         open(&mut v);
         assert!(v.accepts(), "upstream's accepts() ignores open seams");
         assert_eq!(
-            check_verdict(&v),
+            verdict_rules(&v),
             Err(Reject::OpenSeam {
                 deq_out_open: v.deq_out_open.clone(),
                 rq_scale_open: v.rq_scale_open.clone(),

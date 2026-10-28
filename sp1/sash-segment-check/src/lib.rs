@@ -108,8 +108,7 @@ pub fn check_segment(
     let proof: Proof =
         bincode::deserialize(proof).map_err(|e| undecodable("proof", e.to_string()))?;
     let verdict = verify_composed_parsed(&fixed, &plan, &claims, proof);
-    check_verdict(&verdict)?;
-    Ok(public_values(segment_index, &fixed, &plan, &verdict))
+    check_verdict(segment_index, &fixed, &plan, &verdict)
 }
 
 fn undecodable(what: &str, e: String) -> Reject {
@@ -131,8 +130,19 @@ pub fn check_statement(fixed: &Fixed) -> Result<(u16, Plan), Reject> {
     Ok((segment_index, plan))
 }
 
-/// Rules 6 and 7 on the verifier build's `Verdict`.
-pub fn check_verdict(verdict: &Verdict) -> Result<(), Reject> {
+/// Rules 6 and 7 on the verifier build's `Verdict` for the statement `check_statement` passed,
+/// then the accepted segment's public values: the only way `check_segment` returns them.
+pub fn check_verdict(
+    segment_index: u16,
+    fixed: &Fixed,
+    plan: &Plan,
+    verdict: &Verdict,
+) -> Result<SegmentPublicValues, Reject> {
+    verdict_rules(verdict)?;
+    Ok(public_values(segment_index, fixed, plan, verdict))
+}
+
+fn verdict_rules(verdict: &Verdict) -> Result<(), Reject> {
     accepted(verdict)?;
     seams_closed(verdict)
 }
