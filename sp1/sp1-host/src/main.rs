@@ -1,6 +1,6 @@
 //! `sp1-host`: runs the segment guest on one bundle in the SP1 executor, prints a guest's vkey, runs
-//! the controls on the real TinyLlama bundles, prints their proof sizes, or proves one segment on a
-//! GPU.
+//! the controls on the real TinyLlama bundles, prints their proof sizes, proves one segment on a GPU,
+//! or renders `TinyLlamaFixture.sol` from the 23 segments' public values.
 //!
 //! - `sp1-host execute [--elf PATH] --bundle DIR --tag T [--public-values PATH]`
 //! - `sp1-host vkey --elf PATH`
@@ -8,6 +8,7 @@
 //! - `sp1-host controls --elf PATH --bundles DIR --out DIR --pins FILE`
 //! - `sp1-host sizes --bundles DIR`
 //! - `sp1-host trace-share --trace FILE [--function NAME]`
+//! - `sp1-host fixture-from-bundles --public-values DIR --bundles DIR --prompt-len L --out PATH`
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -17,6 +18,7 @@ use std::time::{Duration, Instant};
 use clap::{Parser, Subcommand};
 use sha2::{Digest, Sha256};
 use sp1_host::controls::CONTROLS;
+use sp1_host::fixture::{check_fixture_out, contracts_src, fixture_from_bundles};
 use sp1_host::prove::{
     FIXED_PINS, check_elf, check_fixed_hash, check_out, check_vkey, fixed_pin, gpu_server_vm_hwm,
     repo_root, vkey_text,
@@ -102,6 +104,24 @@ enum Command {
         /// (`<blake2[…]::Blake2sVarCore>::compress`).
         #[arg(long, default_value = "::Blake2sVarCore>::compress")]
         function: String,
+    },
+    /// Renders `TinyLlamaFixture.sol` from the 23 segments' `<tag>.public-values` (as
+    /// `sp1-host execute --public-values` writes them), `tok_in` of `B0L0.fixed.json` and `tok_out` of
+    /// `head.fixed.json`, after the assembly and grid checks; `modelId`, `eosTokenId` and the prompt
+    /// and response text come from `tinyllama_fixture.rs`.
+    FixtureFromBundles {
+        /// The directory holding `<tag>.public-values` for `B0L0..B0L21` and `head`.
+        #[arg(long)]
+        public_values: PathBuf,
+        /// The bundle directory holding `B0L0.fixed.json` and `head.fixed.json`.
+        #[arg(long)]
+        bundles: PathBuf,
+        /// The prompt length `L`: `promptIds = tokIn[0..L]`, `answerIds = tokOut[L-1..S]`.
+        #[arg(long)]
+        prompt_len: usize,
+        /// Where the rendered fixture goes; never under the checkout's `contracts/src`.
+        #[arg(long)]
+        out: PathBuf,
     },
 }
 
@@ -207,6 +227,18 @@ fn run(cli: Cli) -> Result<ExitCode, String> {
             println!("samples: {samples}");
             println!("under {function}: {matched}");
             println!("share: {:.4}", matched as f64 / samples as f64);
+            Ok(ExitCode::SUCCESS)
+        }
+        Command::FixtureFromBundles {
+            public_values,
+            bundles,
+            prompt_len,
+            out,
+        } => {
+            let out = check_fixture_out(&out, &contracts_src())?;
+            let rendered = fixture_from_bundles(&public_values, &bundles, prompt_len)?;
+            fs::write(&out, rendered).map_err(|e| format!("{}: {e}", out.display()))?;
+            println!("fixture: {}", out.display());
             Ok(ExitCode::SUCCESS)
         }
     }

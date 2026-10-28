@@ -273,6 +273,11 @@ jobs:
         env:
           SASH_SYNTHETIC_CORPUS: ${{ github.workspace }}/sp1/testdata/synthetic
         run: cargo test --release --locked -p sp1-host --test segment_guest -- --ignored --test-threads=1
+      - name: sp1-host fixture-from-bundles renders the committed TinyLlamaFixture.sol from the 23 TinyLlama public values and a corpus statement carrying the TinyLlama tokens
+        working-directory: sp1
+        env:
+          SASH_SYNTHETIC_CORPUS: ${{ github.workspace }}/sp1/testdata/synthetic
+        run: cargo test --release --locked -p sp1-host --test fixture -- --ignored
 
   sp1:
     name: SP1 segment guest executor suite on the sash job's synthetic corpus

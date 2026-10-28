@@ -13,7 +13,7 @@ help:
 	@echo "  make sash-synthetic"
 	@echo "                  - Linux + CUDA 12.9 toolkit only: build upstream SASH's prover, check its pinned digests, regenerate the synthetic corpus and its oracle records, and run the segment check's bundle and differential tests on it"
 	@echo "  make sp1-guest-suite"
-	@echo "                  - Check the synthetic corpus in SASH_SYNTHETIC_CORPUS (default sp1/testdata/synthetic) against sp1/testdata/synthetic.sha256 and run the segment guest in the SP1 executor on every bundle and bundle mutation"
+	@echo "                  - Check the synthetic corpus in SASH_SYNTHETIC_CORPUS (default sp1/testdata/synthetic) against sp1/testdata/synthetic.sha256, run the segment guest in the SP1 executor on every bundle and bundle mutation, and render TinyLlamaFixture.sol with sp1-host fixture-from-bundles from a corpus statement carrying the TinyLlama tokens"
 	@echo "  make bundles-check"
 	@echo "                  - Check the 69 TinyLlama proof bundle files in BUNDLES (default runs/tinyllama) against sp1/pins/tinyllama.sha256"
 	@echo "  make sp1-execute BUNDLES=runs/tinyllama OUT=<dir> [ELF=<path>] [PINS=write]"
@@ -97,14 +97,16 @@ sp1-docker: sp1-vendor
 sash-synthetic:
 	sp1/scripts/sash-synthetic.sh
 
-# The segment guest's executor suite (sp1-host/tests/segment_guest.rs), as the sp1 and sp1-cached CI
-# jobs run it. Release: a debug executor is too slow for ~1.5e9-cycle runs. One thread: the native
-# executor keeps guest memory in /dev/shm (~5 GB per run), and two concurrent runs overflow it (SIGBUS).
+# The segment guest's executor suite (sp1-host/tests/segment_guest.rs) and fixture-from-bundles on
+# the corpus (sp1-host/tests/fixture.rs), as the sp1 and sp1-cached CI jobs run them. Release: a
+# debug executor is too slow for ~1.5e9-cycle runs. One thread: the native executor keeps guest
+# memory in /dev/shm (~5 GB per run), and two concurrent runs overflow it (SIGBUS).
 SASH_SYNTHETIC_CORPUS ?= $(CURDIR)/sp1/testdata/synthetic
 
 sp1-guest-suite: sp1-vendor
 	cd "$(SASH_SYNTHETIC_CORPUS)" && shasum -a 256 --strict --quiet -c "$(CURDIR)/sp1/testdata/synthetic.sha256"
 	cd sp1 && SASH_SYNTHETIC_CORPUS="$(SASH_SYNTHETIC_CORPUS)" cargo test --release --locked -p sp1-host --test segment_guest -- --ignored --test-threads=1
+	cd sp1 && SASH_SYNTHETIC_CORPUS="$(SASH_SYNTHETIC_CORPUS)" cargo test --release --locked -p sp1-host --test fixture -- --ignored
 
 BUNDLES ?= runs/tinyllama
 
