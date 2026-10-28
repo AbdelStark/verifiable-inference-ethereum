@@ -11,3 +11,5 @@ These rows match the repository's GitHub milestones, which hold the full scope a
 | **M4: Public testnet settlement on Hoodi** | Deploy with `allowDevVerifier = false` to Hoodi (`560048`); Sepolia (`11155111`) is optional. Fork tests assert the deployed SP1 verifier's `VERIFIER_HASH` and `VERSION`; `SECURITY.md` gains a pre-deployment audit checklist, including Slither. Enroll the TinyLlama manifest and submit a live verification transaction. | A finalized Hoodi transaction settles the TinyLlama run and emits `InferenceVerified` with a non-dev `VerifierKind`, with `tx.gasLimit <= 16,777,216`; the gas breakdown reproduces the receipt's `gasUsed` as `max(standard + execution, floor)`; the fork id, addresses and transaction hash are recorded. |
 
 Native Stwo-in-Stwo recursion (M5) is not planned. It is reopened only if SASH proofs become consumable by StarkWare's circuit recursion, StarkWare publishes a Solidity S-two verifier, or a measured design fits `EIP-7825` (or a multi-transaction fact-registry design is accepted).
+
+<!-- probe: docs-only CI path (#62), never merged -->
