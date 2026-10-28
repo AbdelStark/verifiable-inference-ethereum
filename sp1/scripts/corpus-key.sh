@@ -3,9 +3,11 @@
 # sash-oracle: one hash over the path and content of every file they are built from, checked against
 # or run with. Any change to one of them misses the cache, and the sash job then runs in full
 # (sash-synthetic.sh). The SASH tarball enters through its pinned commit and sha256 in
-# vendor-sash.sh, the CUDA packages and the build environment through the sash job in ci.yml.
-# Drift the repository cannot see (runner image, NVIDIA's apt repository) is not in the key: pushes
-# to main and the weekly scheduled run never restore the cache.
+# vendor-sash.sh, the CUDA packages and the build environment through the sash job in ci.yml. The
+# packages are named by their CUDA minor release (cuda-nvcc-12-9, ...), not by the exact version apt
+# resolves, so a new 12.9 patch release does not change the key. That drift, and the rest the
+# repository cannot see (runner image, NVIDIA's apt repository, crates.io), is left to pushes to main
+# and the weekly scheduled run, which never restore the cache.
 set -euo pipefail
 
 cd "$(dirname "$0")/../.."
