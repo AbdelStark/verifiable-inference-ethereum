@@ -1,4 +1,4 @@
-Gate nitroo's CUDA build steps on the prover feature.
+Gate nitroo's CUDA build steps on the prover feature. [probe #62: header-only change, reverted]
 
 Part of the verifier-only build of SASH eb95bfa that the SP1 segment guest runs
 (verifiable-inference-ethereum SPEC.md §1.1). Upstream source is Apache-2.0;
