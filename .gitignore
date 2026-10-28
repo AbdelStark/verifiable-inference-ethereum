@@ -1,6 +1,7 @@
 # Rust build artifacts
 /target/
 /sp1/target/
+/bench/stwo-cairo/target/
 **/*.rs.bk
 
 # Foundry build artifacts & caches
