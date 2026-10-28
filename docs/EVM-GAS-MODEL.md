@@ -1,6 +1,6 @@
 # TinyLlama-1.1B SASH Sizing and EVM Gas Model
 
-M1 has measured the grid path and the dev-mode settlement (§4). Every other gas figure here is an estimate until a milestone measures it: M3 the SP1 verifier and the aggregated settlement. §6 measures the SP1 unit costs of SASH's verifier primitives, and §7 the 23 TinyLlama segments in the SP1 executor.
+M1 has measured the grid path and the dev-mode settlement (§4). Every other gas figure here is an estimate until a milestone measures it: M3 the SP1 verifier and the aggregated settlement. §6 measures the SP1 unit costs of SASH's verifier primitives, §7 the 23 TinyLlama segments in the SP1 executor, and §8 the GPU proving of two of them.
 
 ## 1. TinyLlama-1.1B SASH proof sizes
 
@@ -267,11 +267,94 @@ The two agree within 0.13 points: the bare compression's 2,139 cycles include a 
 
 | | `B0L0` | `B0L10` | `head` | All 23 |
 |---|---:|---:|---:|---:|
-| PGU / 1e12-PGU cap (#38's figure, unverified; #48 confirms it) | 0.19% | 0.18% | 0.58% | 4.47% (23 requests) |
+| PGU / 1e12-PGU cap (#38's figure, unverified: sp1-sdk 6.10.0 sets the 1e12-cycle limit below) | 0.19% | 0.18% | 0.58% | 4.47% (23 requests) |
 | Cycles / sp1-sdk's 1e12-cycle `MAINNET_DEFAULT_CYCLE_LIMIT` | 0.21% | 0.19% | 0.62% | — |
 | PGU / sp1-sdk's 1e9-PGU `DEFAULT_GAS_LIMIT` | 193.72% | 175.09% | 583.28% | — |
-| GPU-hours at 2M PGU/s per GPU (unverified; #48 measures it) | 0.269 | 0.243 | 0.810 | 6.205 |
+| GPU-hours at 2M PGU/s per GPU (unverified; §8 measures the rate) | 0.269 | 0.243 | 0.810 | 6.205 |
 
 - sp1-sdk 6.10.0's limits (`network/mod.rs`) apply to a request that skips simulation and sets none (`get_execution_limits` in `network/prover.rs`). Every segment's PGU exceeds the 1e9 `DEFAULT_GAS_LIMIT`, so such a request must set its gas limit.
-- The GPU rate derives from Succinct's Hypercube figure (an Ethereum block of about 400M PGU proved in under 12 s on 16 RTX 5090s).
+- The GPU rate derives from Succinct's Hypercube figure (an Ethereum block of about 400M PGU proved in under 12 s on 16 RTX 5090s). §8 replaces it with measured proofs of `B0L10` and `head`.
 - #38 estimated the 23 segments at 3.75–4.92e10 cycles (3.45–4.51e10 PGU) from #41's synthetic runs. The measured 4.79e10 cycles (4.47e10 PGU) is near the top of that range. `head`, estimated at 3.32–5.73e9 cycles, measures 6.21e9, half of `CYCLE_LIMIT`.
+
+## 8. Proving two TinyLlama segments on a GPU (measured) and the M3 go/no-go
+
+> **Draft.** Every `[GPU: …]` field waits for the rented-GPU run; every other figure is computed from §1, §7 and `docs/STARK-NATIVE-ROUTE.md`. Each figure is labelled measured or estimated.
+
+`B0L10` (a typical segment) and `head` (the largest) proved to SP1 compressed proofs, the mode M3's aggregator consumes, on one rented NVIDIA GPU. This replaces §7's unverified 2M PGU/s per GPU.
+
+- **SP1:** sp1-sdk `6.10.0` with its `cuda` feature (`ProverClient::builder().cuda()`), which starts SP1's prebuilt `sp1-gpu-server` `v6.10.0` (release asset `sp1_gpu_server_v6.10.0_x86_64.tar.gz`, sha256 `20ee4b96fa6e5a2ce8a9da523ee42b75c698658ae1d4366e57b52bdd642f1bdb` on 2026-10-28; it links `libcudart.so.12`). Options are the defaults; the server sizes shards from the card's memory (`sp1-gpu/crates/prover_components/src/builder.rs:35-52`).
+- **Program:** the committed segment guest, #43's Docker build (ELF sha256 `d8e6280f…6b52e28`, vkey `0x0025dac0…3eea2e2`, §7).
+- **Host:** Hugging Face Jobs flavor `rtx-pro-6000`, listed as 1× NVIDIA RTX PRO 6000 (96 GB), 23 vCPU, 256 GB RAM, $0.045833 per minute. `[GPU: GPU model and VRAM, driver and CUDA version (nvidia-smi -q), CPU (lscpu), RAM (free -g), date, job id]`.
+- **Command,** on a Linux x86_64 host with an NVIDIA GPU of compute capability 8.0 or more, at least 24 GB of VRAM and a driver for CUDA 12.8, after `make sp1-vendor`:
+
+  ```bash
+  cd sp1 && cargo build --release --locked -p sp1-host --bin sp1-host
+  target/release/sp1-host prove --elf <segment-guest> --bundle ../runs/tinyllama --tag B0L10 --out <dir>/B0L10.proof.bin
+  ```
+
+  `sp1-host prove` refuses an ELF without the sha256 in `sp1/segment-guest.elf.sha256` and an `--out` other than `<tag>.proof.bin` under the checkout's `runs/` or outside the checkout. It runs the executor on the input first, then builds the CUDA client (which downloads `sp1-gpu-server` into `~/.sp1/bin` on first use and starts it; timed apart, so neither the download nor the start counts as setup or proving), sets the key up and checks the vkey against `sp1/segment-guest.vkey`, proves in compressed mode, verifies the proof, compares its public values with the executor's byte for byte and its `fixedHash` with `sp1/pins/tinyllama.fixed.sha256`, then writes the proof. It prints each step's time, the proof's size and sha256, and `VmHWM` of `sp1-gpu-server`, the process that proves. GPU memory is sampled every second with `nvidia-smi --query-gpu=memory.used`. The bundles were checked against `sp1/pins/tinyllama.sha256` on the host first, and the bundles and proofs were deleted from it afterwards.
+
+### 8.1 Measured
+
+| | `B0L10` | `head` |
+|---|---:|---:|
+| Cycles; PGU (§7, reproduced by `prove`'s executor run) | 1,879,848,647; 1,750,885,173 | 6,214,970,466; 5,832,830,141 |
+| Stdin bytes | 12,689,128 | 35,640,318 |
+| Executor peak RSS, native executor (child process) | `[GPU]` | `[GPU]` |
+| Client build: server start (s) | `[GPU]` | `[GPU]` |
+| Setup (s) | `[GPU]` | `[GPU]` |
+| Prove, compressed (s) | `[GPU]` | `[GPU]` |
+| Verify (s) | `[GPU]` | `[GPU]` |
+| Compressed proof size (B) | `[GPU]` | `[GPU]` |
+| Peak GPU memory used (MiB, 1 s samples) | `[GPU]` | `[GPU]` |
+| `sp1-gpu-server` `VmHWM` | `[GPU]` | `[GPU]` |
+| Proving rate (PGU/s) | `[GPU]` | `[GPU]` |
+| Cost of the proof: prove time × $0.045833/min | `[GPU]` | `[GPU]` |
+| Public values equal the executor's; `fixedHash` equals its pin | `[GPU]` | `[GPU]` |
+
+Setup is a one-time cost per server and ELF; it is listed apart from proving and left out of the per-inference cost.
+
+### 8.2 Extrapolation to the 23 segments (estimate)
+
+Proving time scales with PGU at each segment's measured rate: all 23 segments take Σ PGU × (prove time / PGU). Σ PGU is 44,679,308,212 (§7), 25.518 × `B0L10`'s and 7.660 × `head`'s, so:
+
+| | At `B0L10`'s rate | At `head`'s rate |
+|---|---:|---:|
+| 23 segments on 1 GPU (s): 25.518 × `B0L10`'s prove time; 7.660 × `head`'s | `[GPU]` | `[GPU]` |
+| $ per inference: that time × $0.045833/min | `[GPU]` | `[GPU]` |
+| Wall time on 23 GPUs in parallel: the slowest segment, `head` (3.331 × `B0L10`'s PGU) | `[GPU]` | `[GPU]` (measured) |
+
+The two columns bound the range if the rates differ. PGU counts the work that SP1's prover network bills; the GPU's time per PGU may still vary with a segment's mix of chips, which the two segments sample.
+
+**Aggregator (estimate; M3 measures it).** One guest verifies the 23 compressed proofs with `verify_sp1_proof` and commits the 32-byte `publicDigest`, as SP1's aggregation example does (sp1 `v6.10.0` `examples/aggregation`). Its RISC-V work is small: 23 × 226 bytes of public values, the vkey checks and a few sha256 hashes, well under one shard. Each `verify_sp1_proof` is a deferred proof, checked by the recursion program at the cost of one node of a compress tree. A segment's own compressed proof already verifies all of its core shards recursively, `[GPU: shard count of B0L10 from the server log]` of them for `B0L10`, more than 23, so the aggregator should take less than one `B0L10` proof: under `[GPU: B0L10's prove time]` s.
+
+**BN254 wrap (estimate; M3 measures it).** One per inference and independent of the segments: SP1's shrink and wrap recursion, then gnark's Groth16 or PLONK prover over BN254 (`ProofMode::Groth16` / `Plonk`, which `sp1-gpu-server` also serves). Not measured here. Its on-chain cost is §5's: ~270k gas (Groth16) or ~300k (PLONK).
+
+### 8.3 Against the S-two route and SASH's own proving
+
+Both routes priced per inference on Hugging Face Jobs, the unit costs scaled by §1's counts and §3's 5,133,478 BLAKE2s compressions:
+
+| Per inference | SP1 GPU (§8.2) | S-two Cairo (`docs/STARK-NATIVE-ROUTE.md`, EPYC on `cpu-performance` at $0.031667/min) | SASH proving the run itself (#34) |
+|---|---|---|---|
+| Status | 2 segments measured, 21 extrapolated by PGU | Estimated: unit costs measured, no SASH verifier built | Measured |
+| What it covers | The whole segment guest: decoding, `verify_composed` and the guest's rules | BLAKE2s, QM31 mul-adds, felt ingestion and the fixed cost; the rest only through the calibration scaling | Proving the 23 segments on CPU |
+| Time | `[GPU]` s on 1 GPU; `[GPU]` s on 23 GPUs | 5,289–5,319 s modelled, 8,447 s scaled, on one 32-vCPU machine | about 31 min, build and verify included |
+| Cost | `[GPU]` | $2.79–2.81 modelled, $4.46 scaled | about $0.31 |
+| `head` | `[GPU]` s, `[GPU]` | 612–614 s modelled, 976 s scaled ($0.32–0.52); needs ~437 GiB, so likely split | — |
+| Security | SASH's ~100 conjectured bits inside; outer proof SP1's, then BN254 (`SECURITY.md`) | stwo-cairo's default: 96 bits, 70 queries, 26 PoW bits | ~100 conjectured bits |
+
+- **No Cairo SASH verifier exists.** The S-two side leaves out the verifier glue: AIR evaluation of SASH's 20k–68k-column constraints, the mixed-degree Merkle walk, GKR, the channel and FRI folding, except through the calibration scaling. It is a lower bound with a rough correction, not a run.
+- **The security parameters differ** (`docs/STARK-NATIVE-ROUTE.md`, "Security parameters differ"): matching SASH's 100 bits on the S-two side changes its query count or PoW.
+- **Machines differ:** one GPU at $0.045833/min against one 32-vCPU CPU machine at $0.031667/min.
+
+### 8.4 Go/no-go criteria (proposed thresholds; the user decides)
+
+| | Criterion | Figure | Proposed threshold | Status |
+|---|---|---|---|---|
+| F1 | Every segment's §7 figures within half of SP1's limits | `head`, the largest: 5.83e9 PGU, 0.58% of the network's 1e12-PGU request cap (#38's figure, unverified; sp1-sdk 6.10.0 sets a 1e12-cycle `MAINNET_DEFAULT_CYCLE_LIMIT`, of which `head`'s cycles are 0.62%); 35,640,318 stdin bytes, 0.21% of the 16 GiB input region (`SP1_ZKVM_INPUT_REGION_SIZE` default `1 << 34`, sp1 `crates/zkvm/entrypoint/build.rs`); peak RSS against the native executor's 24 GiB `DEFAULT_MEMORY_LIMIT`: `[GPU]` for the native child (the §7 figure, 8,247,820,288 B, is macOS's portable executor, 32.0%) | ≤ 50% of each limit | `[GPU]` (PGU and input pass) |
+| F2 | `B0L10` and `head` prove without running out of memory | `[GPU]` | Both prove and verify | `[GPU]` |
+| C1 | $ per inference | `[GPU]` | ≤ $5, the order of the S-two route's scaled estimate ($4.46) | `[GPU]` |
+| C2 | Wall time per inference, 23 segments in parallel, aggregator and wrap included | `head`'s prove time `[GPU]` + aggregator (< `B0L10`'s prove time, estimate) + wrap (M3) | ≤ 1 h, about twice SASH's own 31 min | `[GPU]` |
+| C3 | §7's measured cycles against the ~1e10 estimate made before #45 | 4.79e10, 4.79× | ≤ 10× | Passes |
+
+**Recommendation:** `[GPU: GO or NO-GO, with its reasons]`. Proposed rule: GO if F1 and F2 pass and C1 and C2 meet the thresholds the user sets.

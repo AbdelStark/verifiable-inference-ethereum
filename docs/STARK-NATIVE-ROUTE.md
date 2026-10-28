@@ -51,7 +51,7 @@ The EIP facts below are verified; the sizes and gas multiples are estimates from
 
 | Route | Exists today | Works with today's SASH proofs | L1 cost | Trust | Verdict |
 |---|---|---|---|---|---|
-| **SP1 wrap** (current plan): SP1 runs SASH's verifier per segment, aggregates, BN254 Groth16 or PLONK | Verifier contracts yes; guest and aggregator no | Yes | ~270k (Groth16) to ~300k (PLONK) verify; settlement ~474k with Groth16, ~504k with PLONK (estimates, `docs/EVM-GAS-MODEL.md` §5) | BN254, setup ceremony, SP1 circuits | Current M3 plan; proving cost unmeasured |
+| **SP1 wrap** (current plan): SP1 runs SASH's verifier per segment, aggregates, BN254 Groth16 or PLONK | Verifier contracts yes; guest and aggregator no | Yes | ~270k (Groth16) to ~300k (PLONK) verify; settlement ~474k with Groth16, ~504k with PLONK (estimates, `docs/EVM-GAS-MODEL.md` §5) | BN254, setup ceremony, SP1 circuits | Current M3 plan; proving cost in `docs/EVM-GAS-MODEL.md` §8 |
 | **Raw Solidity verifier** | No | No: block and tx limits | Billions of gas | Hash-based | Dead |
 | **Cairo/circuit verifier for today's format**, S-two proof, SHARP fact | SHARP, S-two and Atlantic yes; the SASH verifier no; SHARP acceptance of a task this size untested | Yes, no re-proving | Our settlement + a fact lookup; SHARP root shared | Transparent; SHARP verifier (2/4 multisig, 8-day delay) and its unreproduced allowlist of recursive verifier programs | Most credible STARK-native route; many months |
 | **Port SASH to stwo 2.4** (lifted trees, 4 trees, no GKR), StarkWare recursion, SHARP or its future L1 circuit verifier | Off-chain half yes; L1 circuit verifier no | No: re-prove TinyLlama | Unknown | Transparent | Strategic end state; depends on StarkWare and SASH upstream |
@@ -68,7 +68,7 @@ The EIP facts below are verified; the sizes and gas multiples are estimates from
 
 ## S-two unit costs (M2)
 
-M2's comparison with S-two is a bounded microbenchmark: what S-two's Cairo AIR charges for the three operations that dominate verifying a SASH segment. No Cairo SASH verifier is built. [Beside #38's SP1 unit costs](#beside-38s-sp1-unit-costs) puts #38's SP1 unit costs and #45's measured segments next to these; #48 makes the comparison and the go/no-go.
+M2's comparison with S-two is a bounded microbenchmark: what S-two's Cairo AIR charges for the three operations that dominate verifying a SASH segment. No Cairo SASH verifier is built. [Beside #38's SP1 unit costs](#beside-38s-sp1-unit-costs) puts #38's SP1 unit costs and #45's measured segments next to these; `docs/EVM-GAS-MODEL.md` §8 prices both routes per inference and holds the go/no-go criteria.
 
 ### Setup
 
@@ -315,7 +315,7 @@ stwo-cairo's default proves at 96 bits with 70 queries and `pow_bits 26`. SASH's
 
 ### Beside #38's SP1 unit costs
 
-#38's unit costs are in `docs/EVM-GAS-MODEL.md` §6, and #45's measured segments in §7. The two routes count in different units: RISC-V cycles and PGU in SP1's executor, against Cairo steps, trace cells and `run_and_prove` seconds here. The docs have no measured SP1 proving rate, so cycles are not converted into seconds. §7's GPU-hours rest on an unverified 2M PGU/s per GPU. #48 compares the routes and records the go/no-go.
+#38's unit costs are in `docs/EVM-GAS-MODEL.md` §6, and #45's measured segments in §7. The two routes count in different units: RISC-V cycles and PGU in SP1's executor, against Cairo steps, trace cells and `run_and_prove` seconds here. `docs/EVM-GAS-MODEL.md` §8 converts them into GPU seconds and dollars from compressed proofs of `B0L10` and `head`, compares the routes per inference and holds the go/no-go criteria.
 
 | Per op | SP1 v6.10 (§6.1, §6.2): cycles; PGU | S-two Cairo (fits above): steps; padded cells; time |
 |---|---|---|
@@ -339,7 +339,7 @@ S-two's figures cover OODS constraint evaluation, FRI, the channel and GKR only 
 
 ## Implications for the roadmap
 
-- **M2:** measure SP1 cycles and proving cost on one segment early. Compare them with S-two's unit costs for BLAKE2s, QM31 mul-adds and M31 ingestion ([S-two unit costs](#s-two-unit-costs-m2)) before committing to M3. M2 builds no prototype SASH verifier in Cairo or S-two.
+- **M2:** SP1's proving cost, its comparison with S-two and the go/no-go criteria for M3 are in `docs/EVM-GAS-MODEL.md` §8. M2 builds no prototype SASH verifier in Cairo or S-two.
 - **M3:** prefer PLONK over Groth16 for the setup, unless the gas difference matters.
 - **SHARP route:**
   - bind to SHARP's own contracts, not to Atlantic's upgradeable Satellite diamond proxy, whose `isCairoFactValid(fact_hash, is_mocked)` also serves facts registered without on-chain verification. Two choices:
