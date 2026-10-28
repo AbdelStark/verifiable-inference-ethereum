@@ -17,6 +17,7 @@ publish = false
 
 [workspace.dependencies]
 sash-evm-primitives = { path = "../crates/sash-evm-primitives" }
+sash-segment-check = { path = "sash-segment-check" }
 sp1-build = "=6.10.0"
 sp1-sdk = { version = "=6.10.0", features = ["blocking"] }
 sp1-zkvm = "=6.10.0"

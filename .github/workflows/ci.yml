@@ -82,6 +82,9 @@ jobs:
   sp1:
     name: SP1 guest workspace
     runs-on: ubuntu-24.04
+    # The segment guest's executor suite runs on the sash job's synthetic corpus.
+    needs: sash
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install Rust toolchain from rust-toolchain.toml
@@ -121,9 +124,25 @@ jobs:
         working-directory: sp1
         run: cargo fmt -- --check
       # Tests before clippy: they build the guest ELF, which sp1-build skips under clippy but `include_elf!` needs.
-      - name: Executor tests (token-hash guest, SPEC.md §1.1 rule 1) and the segment check's unit tests
+      - name: The segment check's unit tests (the executor suite needs the corpus, below)
         working-directory: sp1
         run: cargo test --locked --workspace
+      - name: Download the sash job's synthetic corpus
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: sash-synthetic-corpus
+          path: ${{ runner.temp }}/sash-synthetic-corpus
+      - name: Check the corpus against sp1/testdata/synthetic.sha256
+        run: |
+          mv "$RUNNER_TEMP/sash-synthetic-corpus/synthetic" sp1/testdata/synthetic
+          (cd sp1/testdata/synthetic && sha256sum --strict -c ../synthetic.sha256)
+      # Release: a debug executor is too slow for ~1.5e9-cycle runs. One thread: the native executor keeps guest
+      # memory in /dev/shm (~5 GB per run), and two concurrent runs overflow the runner's /dev/shm (SIGBUS).
+      - name: Segment guest in the executor on every corpus bundle and bundle mutation (SPEC.md §2.1 G1-G7)
+        working-directory: sp1
+        env:
+          SASH_SYNTHETIC_CORPUS: ${{ github.workspace }}/sp1/testdata/synthetic
+        run: cargo test --release --locked -p sp1-host --test segment_guest -- --ignored --test-threads=1
       - name: stwo-bench in the profiling executor (cycle-tracker regions)
         working-directory: sp1
         run: cargo test --locked -p sp1-host --features profiling
@@ -132,11 +151,16 @@ jobs:
         run: |
           cargo clippy --locked --workspace --all-targets -- -D warnings
           cargo clippy --locked -p sp1-host --all-targets --features profiling -- -D warnings
-      - name: Reproducible guest builds in the pinned SP1 Docker image
-        run: |
-          (cd sp1/segment-guest && cargo prove build --docker --tag v6.10.0 --locked --workspace-directory ../..)
-          (cd sp1/stwo-bench && cargo prove build --docker --tag v6.10.0 --locked --workspace-directory ../..)
-          shasum -a 256 sp1/target/elf-compilation/docker/riscv64im-succinct-zkvm-elf/release/segment-guest sp1/target/elf-compilation/docker/riscv64im-succinct-zkvm-elf/release/stwo-bench
+      - name: Reproducible guest builds in the SP1 image pinned by digest; ELF sha256 and vkey against the committed ones
+        run: sp1/scripts/docker-guests.sh
+      - name: Upload the Docker-built segment guest ELF
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: segment-guest-elf
+          path: sp1/target/elf-compilation/docker/riscv64im-succinct-zkvm-elf/release/segment-guest
+          retention-days: 30
+          if-no-files-found: warn
 
   sash:
     name: Upstream SASH prover & synthetic corpus

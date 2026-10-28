@@ -1,7 +1,7 @@
 //! The segment guest's public values (`SPEC.md` §1.1): the 226 bytes it commits with
-//! `commit_slice`, shared by the guest, its host and the aggregator.
-
-use crate::grid::SegmentClaim;
+//! `commit_slice`, shared by the guest, its host and the aggregator. The guest links this module,
+//! so it owns its fields and never reaches `grid.rs`: a change to `grid.rs`'s `SegmentClaim` leaves
+//! the guest's ELF and vkey unchanged.
 
 /// Length of the encoded segment public values.
 pub const SEGMENT_PUBLIC_VALUES_LEN: usize = 226;
@@ -12,8 +12,13 @@ pub const SEGMENT_CLAIM_LEN: usize = 130;
 /// One accepted segment's public values. Every hash and root is 32 raw bytes.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SegmentPublicValues {
-    /// `segmentIndex`, `preRoot`, `modelRoot`, `residualInRoot`, `residualOutRoot`: bytes `0..130`.
-    pub claim: SegmentClaim,
+    // `segmentIndex`, `preRoot`, `modelRoot`, `residualInRoot`, `residualOutRoot`: bytes `0..130`,
+    // the §1.3 segment claim.
+    pub segment_index: u16,
+    pub pre_root: [u8; 32],
+    pub model_root: [u8; 32],
+    pub residual_in_root: [u8; 32],
+    pub residual_out_root: [u8; 32],
     /// `sha256` of the parsed `Fixed` statement with `tok_in` and `tok_out` cleared.
     pub fixed_hash: [u8; 32],
     /// `tokenHash(tok_in)` on the segment with the embedding gadget, else zero.
@@ -29,14 +34,13 @@ pub enum DecodeError {
 
 impl SegmentPublicValues {
     pub fn encode(&self) -> [u8; SEGMENT_PUBLIC_VALUES_LEN] {
-        let c = &self.claim;
         let mut out = [0u8; SEGMENT_PUBLIC_VALUES_LEN];
-        out[0..2].copy_from_slice(&c.segment_index.to_be_bytes());
+        out[0..2].copy_from_slice(&self.segment_index.to_be_bytes());
         for (i, field) in [
-            &c.pre_root,
-            &c.model_root,
-            &c.residual_in_root,
-            &c.residual_out_root,
+            &self.pre_root,
+            &self.model_root,
+            &self.residual_in_root,
+            &self.residual_out_root,
             &self.fixed_hash,
             &self.tok_in_hash,
             &self.tok_out_hash,
@@ -59,13 +63,11 @@ impl SegmentPublicValues {
                 .expect("a 32-byte slice")
         };
         Ok(Self {
-            claim: SegmentClaim {
-                segment_index: u16::from_be_bytes([bytes[0], bytes[1]]),
-                pre_root: word(0),
-                model_root: word(1),
-                residual_in_root: word(2),
-                residual_out_root: word(3),
-            },
+            segment_index: u16::from_be_bytes([bytes[0], bytes[1]]),
+            pre_root: word(0),
+            model_root: word(1),
+            residual_in_root: word(2),
+            residual_out_root: word(3),
             fixed_hash: word(4),
             tok_in_hash: word(5),
             tok_out_hash: word(6),
@@ -78,8 +80,28 @@ mod tests {
     use sha2::{Digest, Sha256};
 
     use super::*;
-    use crate::grid::compute_token_hash;
+    use crate::grid::SegmentClaim;
     use crate::tinyllama_fixture::*;
+    use crate::token::compute_token_hash;
+
+    /// Public values carrying `claim`, with the three hashes after it.
+    fn with_claim(
+        claim: &SegmentClaim,
+        fixed_hash: [u8; 32],
+        tok_in_hash: [u8; 32],
+        tok_out_hash: [u8; 32],
+    ) -> SegmentPublicValues {
+        SegmentPublicValues {
+            segment_index: claim.segment_index,
+            pre_root: claim.pre_root,
+            model_root: claim.model_root,
+            residual_in_root: claim.residual_in_root,
+            residual_out_root: claim.residual_out_root,
+            fixed_hash,
+            tok_in_hash,
+            tok_out_hash,
+        }
+    }
 
     /// No `fixedHash` is in the fixture yet; a stand-in that differs from every other field.
     fn stand_in_fixed_hash(tag: &str) -> [u8; 32] {
@@ -87,30 +109,30 @@ mod tests {
     }
 
     fn b0l0() -> SegmentPublicValues {
-        SegmentPublicValues {
-            claim: tinyllama_segments()[0].clone(),
-            fixed_hash: stand_in_fixed_hash("B0L0"),
-            tok_in_hash: compute_token_hash(&TINYLLAMA_TOK_IN),
-            tok_out_hash: [0; 32],
-        }
+        with_claim(
+            &tinyllama_segments()[0],
+            stand_in_fixed_hash("B0L0"),
+            compute_token_hash(&TINYLLAMA_TOK_IN),
+            [0; 32],
+        )
     }
 
     fn head() -> SegmentPublicValues {
-        SegmentPublicValues {
-            claim: tinyllama_segments()[22].clone(),
-            fixed_hash: stand_in_fixed_hash("head"),
-            tok_in_hash: [0; 32],
-            tok_out_hash: compute_token_hash(&TINYLLAMA_TOK_OUT),
-        }
+        with_claim(
+            &tinyllama_segments()[22],
+            stand_in_fixed_hash("head"),
+            [0; 32],
+            compute_token_hash(&TINYLLAMA_TOK_OUT),
+        )
     }
 
     /// The offsets of `SPEC.md` §1.1's table, field by field.
     fn assert_layout(v: &SegmentPublicValues, bytes: &[u8; SEGMENT_PUBLIC_VALUES_LEN]) {
-        assert_eq!(bytes[0..2], v.claim.segment_index.to_be_bytes());
-        assert_eq!(bytes[2..34], v.claim.pre_root);
-        assert_eq!(bytes[34..66], v.claim.model_root);
-        assert_eq!(bytes[66..98], v.claim.residual_in_root);
-        assert_eq!(bytes[98..130], v.claim.residual_out_root);
+        assert_eq!(bytes[0..2], v.segment_index.to_be_bytes());
+        assert_eq!(bytes[2..34], v.pre_root);
+        assert_eq!(bytes[34..66], v.model_root);
+        assert_eq!(bytes[66..98], v.residual_in_root);
+        assert_eq!(bytes[98..130], v.residual_out_root);
         assert_eq!(bytes[130..162], v.fixed_hash);
         assert_eq!(bytes[162..194], v.tok_in_hash);
         assert_eq!(bytes[194..226], v.tok_out_hash);
@@ -148,12 +170,7 @@ mod tests {
         h.update(tinyllama_model_id());
         h.update(23u32.to_be_bytes());
         for claim in tinyllama_segments() {
-            let v = SegmentPublicValues {
-                claim,
-                fixed_hash: [0xff; 32],
-                tok_in_hash: [0xff; 32],
-                tok_out_hash: [0xff; 32],
-            };
+            let v = with_claim(&claim, [0xff; 32], [0xff; 32], [0xff; 32]);
             h.update(&v.encode()[..SEGMENT_CLAIM_LEN]);
         }
         h.update(compute_token_hash(&TINYLLAMA_TOK_IN));

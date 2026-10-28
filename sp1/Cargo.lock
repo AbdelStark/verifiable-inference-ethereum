@@ -3488,7 +3488,7 @@ dependencies = [
 name = "segment-guest"
 version = "0.1.0"
 dependencies = [
- "sash-evm-primitives",
+ "sash-segment-check",
  "sp1-zkvm",
 ]
 
@@ -4277,15 +4277,19 @@ name = "sp1-host"
 version = "0.1.0"
 dependencies = [
  "bincode",
+ "clap",
  "hex",
+ "libc",
  "postcard",
  "sash-evm-primitives",
+ "sash-segment-check",
  "serde_json",
  "sha2",
  "sp1-build",
  "sp1-sdk",
  "stwo",
  "tokio",
+ "zk-prover",
 ]
 
 [[package]]

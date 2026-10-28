@@ -1,4 +1,4 @@
-.PHONY: help check rust-check vectors forge-test anvil-demo sp1-vendor sp1-check sp1-docker sash-synthetic bundles-check clean
+.PHONY: help check rust-check vectors forge-test anvil-demo sp1-vendor sp1-check sp1-docker sash-synthetic sp1-guest-suite bundles-check clean
 
 help:
 	@echo "Targets:"
@@ -9,9 +9,11 @@ help:
 	@echo "  make anvil-demo  - Mine the dev-mode TinyLlama-1.1B 23-segment settlement (DeployDevAnvil.s.sol) on a local Osaka anvil node, check the receipts and print their gas"
 	@echo "  make sp1-vendor  - Build sp1/vendor/sash: SASH eb95bfa from its sha256-pinned tarball plus sp1/patches"
 	@echo "  make sp1-check   - Vendor SASH, check nitroo's Stwo and SASH's zk-prover library without the prover feature on stable, then cargo fmt --check, the segment check's unit tests, the executor tests and clippy -D warnings in sp1/ (needs SP1 v6.10.0 and protoc)"
-	@echo "  make sp1-docker  - Build the segment guest and stwo-bench reproducibly in the pinned SP1 v6.10.0 Docker image and print their ELF sha256"
+	@echo "  make sp1-docker  - Build the segment guest and stwo-bench reproducibly in the SP1 v6.10.0 Docker image pinned by digest, print their ELF sha256 and the segment guest's vkey, and compare both with sp1/segment-guest.elf.sha256 and sp1/segment-guest.vkey"
 	@echo "  make sash-synthetic"
 	@echo "                  - Linux + CUDA 12.9 toolkit only: build upstream SASH's prover, check its pinned digests, regenerate the synthetic corpus and its oracle records, and run the segment check's bundle and differential tests on it"
+	@echo "  make sp1-guest-suite"
+	@echo "                  - Check the synthetic corpus in SASH_SYNTHETIC_CORPUS (default sp1/testdata/synthetic) against sp1/testdata/synthetic.sha256 and run the segment guest in the SP1 executor on every bundle and bundle mutation"
 	@echo "  make bundles-check"
 	@echo "                  - Check the 69 TinyLlama proof bundle files in BUNDLES (default runs/tinyllama) against sp1/pins/tinyllama.sha256"
 	@echo "  make clean       - Clean build outputs"
@@ -52,15 +54,21 @@ check: rust-check
 		echo "NOTE: the reproducible guest build needs an x86_64 host with cargo-prove and the $(SP1_IMAGE) image; it runs in CI."; \
 	fi
 	@if [ "$$(uname -s)" = Linux ] && command -v nvcc >/dev/null 2>&1 && [ -e /usr/local/cuda/lib64/libcudart.so ]; then \
-		$(MAKE) sash-synthetic; \
+		$(MAKE) sash-synthetic || exit 1; \
+		if command -v cargo-prove >/dev/null 2>&1; then \
+			$(MAKE) sp1-guest-suite; \
+		else \
+			echo "NOTE: 'cargo-prove' not found in PATH; the segment guest's executor suite runs in CI."; \
+		fi; \
 	else \
-		echo "NOTE: the synthetic SASH corpus needs Linux with the CUDA 12.9 toolkit (no GPU); it runs in CI."; \
+		echo "NOTE: the synthetic SASH corpus, and the segment guest's executor suite on it, need Linux with the CUDA 12.9 toolkit (no GPU); they run in CI."; \
 	fi
 
 anvil-demo:
 	contracts/script/anvil-settle.sh
 
-SP1_IMAGE := ghcr.io/succinctlabs/sp1:v6.10.0
+# The SP1 v6.10.0 image, by the digest sp1/scripts/docker-guests.sh pins.
+SP1_IMAGE := $(shell sed -n 's/^export SP1_DOCKER_IMAGE=//p' sp1/scripts/docker-guests.sh)
 
 sp1-vendor:
 	sp1/scripts/vendor-sash.sh
@@ -81,12 +89,18 @@ sp1-check: sp1-vendor
 	cd sp1 && cargo clippy --locked -p sp1-host --all-targets --features profiling -- -D warnings
 
 sp1-docker: sp1-vendor
-	cd sp1/segment-guest && cargo prove build --docker --tag v6.10.0 --locked --workspace-directory ../..
-	cd sp1/stwo-bench && cargo prove build --docker --tag v6.10.0 --locked --workspace-directory ../..
-	shasum -a 256 sp1/target/elf-compilation/docker/riscv64im-succinct-zkvm-elf/release/segment-guest sp1/target/elf-compilation/docker/riscv64im-succinct-zkvm-elf/release/stwo-bench
+	sp1/scripts/docker-guests.sh
 
 sash-synthetic:
 	sp1/scripts/sash-synthetic.sh
+
+# The segment guest's executor suite (sp1-host/tests/segment_guest.rs), as the sp1 CI job runs it.
+# Release: a debug executor is too slow for ~1.5e9-cycle runs. Two threads: each run peaks at ~5 GB.
+SASH_SYNTHETIC_CORPUS ?= $(CURDIR)/sp1/testdata/synthetic
+
+sp1-guest-suite: sp1-vendor
+	cd "$(SASH_SYNTHETIC_CORPUS)" && shasum -a 256 --strict --quiet -c "$(CURDIR)/sp1/testdata/synthetic.sha256"
+	cd sp1 && SASH_SYNTHETIC_CORPUS="$(SASH_SYNTHETIC_CORPUS)" cargo test --release --locked -p sp1-host --test segment_guest -- --ignored --test-threads=1
 
 BUNDLES ?= runs/tinyllama
 
