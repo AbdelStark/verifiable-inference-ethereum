@@ -112,6 +112,11 @@ jobs:
         run: |
           cargo +1.99.1 check --locked --no-default-features --features std -p stwo
           cargo +1.99.1 check --locked --no-default-features --features std -p stwo-constraint-framework
+      - name: Check SASH's zk-prover library (verify_composed) without the prover feature on stable
+        working-directory: sp1/vendor/sash
+        env:
+          CARGO_TARGET_DIR: ${{ github.workspace }}/sp1/target/nitroo-check
+        run: cargo +1.99.1 check --locked -p zk-prover --no-default-features --lib
       - name: Format check
         working-directory: sp1
         run: cargo fmt -- --check

@@ -8,7 +8,7 @@ help:
 	@echo "  make forge-test  - Check Solidity format, build against foundry.lock, lint, run the Foundry suite with gas report, and check the gas snapshots against the index"
 	@echo "  make anvil-demo  - Mine the dev-mode TinyLlama-1.1B 23-segment settlement (DeployDevAnvil.s.sol) on a local Osaka anvil node, check the receipts and print their gas"
 	@echo "  make sp1-vendor  - Build sp1/vendor/sash: SASH eb95bfa from its sha256-pinned tarball plus sp1/patches"
-	@echo "  make sp1-check   - Vendor SASH, check nitroo's Stwo without the prover feature on stable, then cargo fmt --check, the executor tests and clippy -D warnings in sp1/ (needs SP1 v6.10.0 and protoc)"
+	@echo "  make sp1-check   - Vendor SASH, check nitroo's Stwo and SASH's zk-prover library without the prover feature on stable, then cargo fmt --check, the executor tests and clippy -D warnings in sp1/ (needs SP1 v6.10.0 and protoc)"
 	@echo "  make sp1-docker  - Build the segment guest and stwo-bench reproducibly in the pinned SP1 v6.10.0 Docker image and print their ELF sha256"
 	@echo "  make sash-synthetic"
 	@echo "                  - Linux + CUDA 12.9 toolkit only: build upstream SASH's prover, check its pinned digests, and regenerate the synthetic corpus and its oracle records"
@@ -73,6 +73,7 @@ NITROO_CHECK = cd sp1/vendor/sash/nitroo && CARGO_TARGET_DIR="$(CURDIR)/sp1/targ
 sp1-check: sp1-vendor
 	$(NITROO_CHECK) -p stwo
 	$(NITROO_CHECK) -p stwo-constraint-framework
+	cd sp1/vendor/sash && CARGO_TARGET_DIR="$(CURDIR)/sp1/target/nitroo-check" cargo +1.99.1 check --locked -p zk-prover --no-default-features --lib
 	cd sp1 && cargo fmt -- --check
 	cd sp1 && cargo test --locked --workspace
 	cd sp1 && cargo test --locked -p sp1-host --features profiling

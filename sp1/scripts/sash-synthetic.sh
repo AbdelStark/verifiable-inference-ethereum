@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Builds upstream SASH's prover (default features: SIMD backend, prover on) from the vendored tree,
-# checks its pinned synthetic digests, and generates the synthetic bundle corpus with the upstream
+# runs upstream's test suite (its pinned synthetic digests included), and generates the synthetic bundle corpus with the upstream
 # oracle's verdict for each bundle. Linux only: the prover links the CUDA runtime (no GPU needed).
 #
 # Records (committed): sp1/testdata/synthetic.sha256 and sp1/testdata/synthetic.oracle.json.
@@ -28,8 +28,8 @@ done
 scripts/vendor-sash.sh
 export CARGO_TARGET_DIR="$PWD/target/sash"
 
-echo "== build zk-prover (SIMD) and check upstream's pinned synthetic digests"
-(cd vendor/sash && cargo build --release --locked && cargo test --release --locked --test synthetic_digest)
+echo "== build zk-prover (SIMD) and run upstream's whole test suite, as its CI does (pinned synthetic digests included)"
+(cd vendor/sash && cargo build --release --locked && cargo test --release --locked)
 echo "== build sash-oracle"
 (cd sash-oracle && cargo build --release --locked)
 prover="$CARGO_TARGET_DIR/release/zk-prover"
