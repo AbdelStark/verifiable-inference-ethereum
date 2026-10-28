@@ -3,7 +3,7 @@
 //! whose mutations this suite shares. Positives exit 0 with the native `check_segment`'s public
 //! values, byte for byte; controls exit 1 with a panic message naming the native test's `Reject`
 //! variant. The `Verdict`-level and other unit-level controls stay native-only. Run by
-//! `make sp1-guest-suite` and in the `sp1` CI job:
+//! `make sp1-guest-suite` and in the `sp1` or `sp1-cached` CI job:
 //! `SASH_SYNTHETIC_CORPUS=<dir> cargo test --release --locked -p sp1-host --test segment_guest -- --ignored`.
 
 #[path = "../../sash-segment-check/tests/common/mod.rs"]
@@ -53,20 +53,20 @@ fn rejects_with(name: &str, run: &Execution, variant: &str) {
 }
 
 #[test]
-#[ignore = "needs the synthetic corpus in SASH_SYNTHETIC_CORPUS (sp1 CI job)"]
+#[ignore = "needs the synthetic corpus in SASH_SYNTHETIC_CORPUS (sp1 or sp1-cached CI job)"]
 fn sound_aligned_accepts() {
     accepts_as_native("sound_aligned", &Bundle::load("sound_aligned"));
 }
 
 #[test]
-#[ignore = "needs the synthetic corpus in SASH_SYNTHETIC_CORPUS (sp1 CI job)"]
+#[ignore = "needs the synthetic corpus in SASH_SYNTHETIC_CORPUS (sp1 or sp1-cached CI job)"]
 fn aligned_gkr5_accepts() {
     accepts_as_native("aligned_gkr5", &Bundle::load("aligned_gkr5"));
 }
 
 /// The corpus bundles with an unbound edge (`SPEC.md` §2.1 G5).
 #[test]
-#[ignore = "needs the synthetic corpus in SASH_SYNTHETIC_CORPUS (sp1 CI job)"]
+#[ignore = "needs the synthetic corpus in SASH_SYNTHETIC_CORPUS (sp1 or sp1-cached CI job)"]
 fn unbound_bundles_reject() {
     for tag in [
         "sound_gkrfive",
@@ -91,43 +91,43 @@ fn mutations_reject_with(variant: &str) {
 }
 
 #[test]
-#[ignore = "needs the synthetic corpus in SASH_SYNTHETIC_CORPUS (sp1 CI job)"]
+#[ignore = "needs the synthetic corpus in SASH_SYNTHETIC_CORPUS (sp1 or sp1-cached CI job)"]
 fn mutations_malformed() {
     mutations_reject_with("Malformed");
 }
 
 #[test]
-#[ignore = "needs the synthetic corpus in SASH_SYNTHETIC_CORPUS (sp1 CI job)"]
+#[ignore = "needs the synthetic corpus in SASH_SYNTHETIC_CORPUS (sp1 or sp1-cached CI job)"]
 fn mutations_token_id_out_of_field() {
     mutations_reject_with("TokenIdOutOfField");
 }
 
 #[test]
-#[ignore = "needs the synthetic corpus in SASH_SYNTHETIC_CORPUS (sp1 CI job)"]
+#[ignore = "needs the synthetic corpus in SASH_SYNTHETIC_CORPUS (sp1 or sp1-cached CI job)"]
 fn mutations_security_params() {
     mutations_reject_with("SecurityParams");
 }
 
 #[test]
-#[ignore = "needs the synthetic corpus in SASH_SYNTHETIC_CORPUS (sp1 CI job)"]
+#[ignore = "needs the synthetic corpus in SASH_SYNTHETIC_CORPUS (sp1 or sp1-cached CI job)"]
 fn mutations_missing_layer() {
     mutations_reject_with("MissingLayer");
 }
 
 #[test]
-#[ignore = "needs the synthetic corpus in SASH_SYNTHETIC_CORPUS (sp1 CI job)"]
+#[ignore = "needs the synthetic corpus in SASH_SYNTHETIC_CORPUS (sp1 or sp1-cached CI job)"]
 fn mutations_unbound_edge() {
     mutations_reject_with("UnboundEdge");
 }
 
 #[test]
-#[ignore = "needs the synthetic corpus in SASH_SYNTHETIC_CORPUS (sp1 CI job)"]
+#[ignore = "needs the synthetic corpus in SASH_SYNTHETIC_CORPUS (sp1 or sp1-cached CI job)"]
 fn mutations_unsound_dequant() {
     mutations_reject_with("UnsoundDequant");
 }
 
 #[test]
-#[ignore = "needs the synthetic corpus in SASH_SYNTHETIC_CORPUS (sp1 CI job)"]
+#[ignore = "needs the synthetic corpus in SASH_SYNTHETIC_CORPUS (sp1 or sp1-cached CI job)"]
 fn mutations_not_accepted() {
     mutations_reject_with("NotAccepted");
 }
@@ -135,7 +135,7 @@ fn mutations_not_accepted() {
 /// A `proof` buffer that does not decode as `bincode` rejects at rule 6, in the guest's own decode
 /// rather than halting in `io::read`.
 #[test]
-#[ignore = "needs the synthetic corpus in SASH_SYNTHETIC_CORPUS (sp1 CI job)"]
+#[ignore = "needs the synthetic corpus in SASH_SYNTHETIC_CORPUS (sp1 or sp1-cached CI job)"]
 fn undecodable_proof_is_not_accepted() {
     let b = Bundle::load("sound_aligned");
     let mut proof = b.proof_bincode();
@@ -158,7 +158,7 @@ fn undecodable_proof_is_not_accepted() {
 /// `layer` 1 to 2 on `sound_aligned` verifies, with the native public values: the new
 /// `segmentIndex` and `fixedHash`, the rest unchanged.
 #[test]
-#[ignore = "needs the synthetic corpus in SASH_SYNTHETIC_CORPUS (sp1 CI job)"]
+#[ignore = "needs the synthetic corpus in SASH_SYNTHETIC_CORPUS (sp1 or sp1-cached CI job)"]
 fn layer_1_to_2_accepts_with_another_index_and_fixed_hash() {
     let m = MUTATIONS.iter().find(|m| m.name == "layer_1_to_2").unwrap();
     assert_eq!(m.expect, "accept");

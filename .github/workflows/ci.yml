@@ -1,14 +1,78 @@
 name: CI
 
+# Pushes to main and the weekly schedule run every job, and the sash job in full: they never restore
+# the synthetic corpus cache, and they save it for PRs. A PR runs sash and the SP1 jobs only when it
+# changes what they build or run (the changes job); otherwise they report "skipped", which satisfies
+# a required check. On a PR, the changes job looks up sp1/scripts/corpus-key.sh's key, a hash of every
+# file the corpus and the built oracle come from, in the cache (entries saved on main, or by an earlier
+# run of the same PR). On a hit, sash checks the restored corpus without rebuilding upstream SASH, and
+# sp1-cached runs the executor suite on it without waiting for sash; on a miss, sash runs in full and
+# sp1 takes its artifact.
 on:
   push:
     branches: [main]
   pull_request:
+  schedule:
+    # Mondays 05:17 UTC: drift the corpus key cannot see (runner image, NVIDIA's apt repository).
+    - cron: "17 5 * * 1"
 
 permissions:
   contents: read
 
+env:
+  # What the corpus cache holds: the corpus and the oracle that checks it (it links the CUDA runtime).
+  # Restore, lookup and save must name the same paths.
+  CORPUS_CACHE_PATHS: |
+    sp1/testdata/synthetic
+    sp1/target/sash/release/sash-oracle
+
 jobs:
+  changes:
+    name: Paths that gate the SASH and SP1 jobs, and the corpus cache lookup
+    runs-on: ubuntu-24.04
+    outputs:
+      heavy: ${{ steps.gate.outputs.heavy }}
+      key: ${{ steps.key.outputs.key }}
+      hit: ${{ steps.lookup.outputs.cache-hit == 'true' }}
+    steps:
+      # Depth 2: a PR checks out its merge commit, whose first parent is the base branch.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
+      - name: Does the change reach sp1/ or what it builds from?
+        id: gate
+        env:
+          EVENT: ${{ github.event_name }}
+        run: |
+          if [[ "$EVENT" != pull_request ]]; then
+            heavy=true
+          else
+            # --no-renames: a file moved out of a gated path lists its old path too.
+            changed="$(git diff --no-renames --name-only HEAD^1 HEAD)"
+            echo "$changed"
+            # sp1/ inherits the root Cargo.toml's workspace fields through sash-evm-primitives, and its toolchain.
+            if grep -qE '^(sp1/|crates/sash-evm-primitives/|Cargo\.toml$|rust-toolchain\.toml$|Makefile$|\.github/workflows/ci\.yml$)' <<<"$changed"; then
+              heavy=true
+            else
+              heavy=false
+            fi
+          fi
+          echo "heavy=$heavy" | tee -a "$GITHUB_OUTPUT"
+      - name: Corpus cache key (a hash of every file the corpus and the oracle are built from)
+        id: key
+        if: steps.gate.outputs.heavy == 'true'
+        run: echo "key=sash-corpus-$(sp1/scripts/corpus-key.sh)" | tee -a "$GITHUB_OUTPUT"
+      # PRs only: pushes to main and the scheduled run always regenerate the corpus. A hit sends the
+      # executor suite to sp1-cached, which doesn't wait for the sash job.
+      - name: Is there a saved corpus for this key? (PRs only)
+        id: lookup
+        if: steps.gate.outputs.heavy == 'true' && github.event_name == 'pull_request'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.CORPUS_CACHE_PATHS }}
+          key: ${{ steps.key.outputs.key }}
+          lookup-only: true
+
   rust:
     name: Rust primitives & vector sync
     runs-on: ubuntu-24.04
@@ -79,11 +143,11 @@ jobs:
         working-directory: contracts
         run: script/anvil-settle.sh
 
-  sp1:
-    name: SP1 guest workspace
+  sp1-workspace:
+    name: SP1 workspace & reproducible guest builds
+    needs: changes
+    if: needs.changes.outputs.heavy == 'true'
     runs-on: ubuntu-24.04
-    # The segment guest's executor suite runs on the sash job's synthetic corpus.
-    needs: sash
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -102,9 +166,11 @@ jobs:
         run: |
           "$HOME/.sp1/bin/cargo-prove" prove --version
           rustc +succinct --version
+      # One cache for the three SP1 jobs, saved by this one: it builds the debug and the release sp1-host.
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: sp1 -> target
+          shared-key: sp1
       # Before any cargo command in sp1/: its path dependencies on SASH don't exist until it runs.
       - name: Vendor SASH eb95bfa (sha256-pinned tarball plus sp1/patches)
         run: sp1/scripts/vendor-sash.sh
@@ -125,25 +191,9 @@ jobs:
         working-directory: sp1
         run: cargo fmt -- --check
       # Tests before clippy: they build the guest ELF, which sp1-build skips under clippy but `include_elf!` needs.
-      - name: The segment check's unit tests (the executor suite needs the corpus, below)
+      - name: The segment check's unit tests (the executor suite, which needs the corpus, runs in sp1 or sp1-cached)
         working-directory: sp1
         run: cargo test --locked --workspace
-      - name: Download the sash job's synthetic corpus
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          name: sash-synthetic-corpus
-          path: ${{ runner.temp }}/sash-synthetic-corpus
-      - name: Check the corpus against sp1/testdata/synthetic.sha256
-        run: |
-          mv "$RUNNER_TEMP/sash-synthetic-corpus/synthetic" sp1/testdata/synthetic
-          (cd sp1/testdata/synthetic && sha256sum --strict -c ../synthetic.sha256)
-      # Release: a debug executor is too slow for ~1.5e9-cycle runs. One thread: the native executor keeps guest
-      # memory in /dev/shm (~5 GB per run), and two concurrent runs overflow the runner's /dev/shm (SIGBUS).
-      - name: Segment guest in the executor on every corpus bundle and bundle mutation (SPEC.md §2.1 G1-G7)
-        working-directory: sp1
-        env:
-          SASH_SYNTHETIC_CORPUS: ${{ github.workspace }}/sp1/testdata/synthetic
-        run: cargo test --release --locked -p sp1-host --test segment_guest -- --ignored --test-threads=1
       - name: stwo-bench in the profiling executor (cycle-tracker regions) and the BLAKE2s compression counter
         working-directory: sp1
         run: cargo test --locked -p sp1-host --features profiling,count-ops
@@ -163,8 +213,79 @@ jobs:
           retention-days: 30
           if-no-files-found: warn
 
+  # The segment guest's executor suite on the corpus, in one of two jobs with the same steps: sp1-cached
+  # on a corpus cache hit (restores it, without waiting for the sash job), sp1 otherwise (takes the
+  # sash job's artifact). The other one reports "skipped".
+  sp1-cached:
+    name: SP1 segment guest executor suite on the cached synthetic corpus
+    needs: changes
+    if: needs.changes.outputs.heavy == 'true' && needs.changes.outputs.hit == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps: &sp1-suite
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install Rust toolchain from rust-toolchain.toml
+        run: rustup toolchain install
+      - name: Install protoc (sp1-sdk build dependency)
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+      - name: Install SP1 v6.10.0
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          curl -sSfL -o "$RUNNER_TEMP/sp1up" https://raw.githubusercontent.com/succinctlabs/sp1/v6.10.0/sp1up/sp1up
+          bash "$RUNNER_TEMP/sp1up" --version v6.10.0
+          echo "$HOME/.sp1/bin" >> "$GITHUB_PATH"
+      - name: Print toolchain versions
+        run: |
+          "$HOME/.sp1/bin/cargo-prove" prove --version
+          rustc +succinct --version
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: sp1 -> target
+          shared-key: sp1
+          save-if: false
+      - name: Vendor SASH eb95bfa (sha256-pinned tarball plus sp1/patches)
+        run: sp1/scripts/vendor-sash.sh
+      # Fails rather than falls back if the entry the changes job found has since been evicted.
+      - name: Restore the synthetic corpus from the cache
+        if: needs.changes.outputs.hit == 'true'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.CORPUS_CACHE_PATHS }}
+          key: ${{ needs.changes.outputs.key }}
+          fail-on-cache-miss: true
+      - name: Download the sash job's synthetic corpus
+        if: needs.changes.outputs.hit != 'true'
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: sash-synthetic-corpus
+          path: ${{ runner.temp }}/sash-synthetic-corpus
+      - name: Move the downloaded corpus into sp1/testdata/synthetic
+        if: needs.changes.outputs.hit != 'true'
+        run: mv "$RUNNER_TEMP/sash-synthetic-corpus/synthetic" sp1/testdata/synthetic
+      - name: Check the corpus against sp1/testdata/synthetic.sha256
+        working-directory: sp1/testdata/synthetic
+        run: sha256sum --strict -c ../synthetic.sha256
+      # Release: a debug executor is too slow for ~1.5e9-cycle runs. One thread: the native executor keeps guest
+      # memory in /dev/shm (~5 GB per run), and two concurrent runs overflow the runner's /dev/shm (SIGBUS).
+      - name: Segment guest in the executor on every corpus bundle and bundle mutation (SPEC.md §2.1 G1-G7)
+        working-directory: sp1
+        env:
+          SASH_SYNTHETIC_CORPUS: ${{ github.workspace }}/sp1/testdata/synthetic
+        run: cargo test --release --locked -p sp1-host --test segment_guest -- --ignored --test-threads=1
+
+  sp1:
+    name: SP1 segment guest executor suite on the sash job's synthetic corpus
+    needs: [changes, sash]
+    if: needs.changes.outputs.heavy == 'true' && needs.changes.outputs.hit != 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps: *sp1-suite
+
   sash:
     name: Upstream SASH prover & synthetic corpus
+    needs: changes
+    if: needs.changes.outputs.heavy == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     env:
@@ -180,6 +301,15 @@ jobs:
       CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # PRs only: pushes to main and the scheduled run always regenerate the corpus. Its own restore, not
+      # the changes job's lookup, picks the path below, so an entry evicted meanwhile means a full run.
+      - name: Restore the corpus and the oracle (PRs only)
+        id: corpus
+        if: github.event_name == 'pull_request'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.CORPUS_CACHE_PATHS }}
+          key: ${{ needs.changes.outputs.key }}
       - name: CUDA 12.9 toolkit (no GPU)
         run: |
           curl -fsSLO https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/cuda-keyring_1.1-1_all.deb
@@ -198,7 +328,7 @@ jobs:
           sp1/scripts/vendor-sash.sh
           cd sp1/vendor/sash && rustup toolchain install --profile minimal
       - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
-      # Only the downloaded crates: sccache covers the compiling. Never the corpus or the oracle binary.
+      # Only the downloaded crates: sccache covers the compiling.
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
@@ -209,7 +339,19 @@ jobs:
       - name: Disk before
         run: df -h /
       - name: Build SASH, check its pinned digests, regenerate the synthetic corpus, check the records, and run the segment check's bundle and differential tests
+        if: steps.corpus.outputs.cache-hit != 'true'
         run: sp1/scripts/sash-synthetic.sh
+      # A hit skips only what needs the prover build: upstream's test suite and the corpus generation.
+      - name: On a cache hit, without rebuilding, check the restored corpus with the restored oracle against the records, and run the segment check's bundle and differential tests
+        if: steps.corpus.outputs.cache-hit == 'true'
+        run: sp1/scripts/sash-corpus-check.sh
+      # On every event that regenerated the corpus: main's entry serves every PR, a PR's own its later runs.
+      - name: Save the corpus and the oracle
+        if: steps.corpus.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.CORPUS_CACHE_PATHS }}
+          key: ${{ needs.changes.outputs.key }}
       - name: Disk after
         if: always()
         run: df -h / && sccache --show-stats

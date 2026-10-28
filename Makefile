@@ -97,8 +97,9 @@ sp1-docker: sp1-vendor
 sash-synthetic:
 	sp1/scripts/sash-synthetic.sh
 
-# The segment guest's executor suite (sp1-host/tests/segment_guest.rs), as the sp1 CI job runs it.
-# Release: a debug executor is too slow for ~1.5e9-cycle runs. Two threads: each run peaks at ~5 GB.
+# The segment guest's executor suite (sp1-host/tests/segment_guest.rs), as the sp1 and sp1-cached CI
+# jobs run it. Release: a debug executor is too slow for ~1.5e9-cycle runs. One thread: the native
+# executor keeps guest memory in /dev/shm (~5 GB per run), and two concurrent runs overflow it (SIGBUS).
 SASH_SYNTHETIC_CORPUS ?= $(CURDIR)/sp1/testdata/synthetic
 
 sp1-guest-suite: sp1-vendor
