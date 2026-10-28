@@ -2,4 +2,5 @@
 //! mirroring the Solidity verifier bit for bit.
 
 pub mod grid;
+pub mod segment;
 pub mod tinyllama_fixture;

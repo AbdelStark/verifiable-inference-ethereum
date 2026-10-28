@@ -121,7 +121,7 @@ jobs:
         working-directory: sp1
         run: cargo fmt -- --check
       # Tests before clippy: they build the guest ELF, which sp1-build skips under clippy but `include_elf!` needs.
-      - name: Executor tests (token-hash guest, SPEC.md §1.1 rule 1)
+      - name: Executor tests (token-hash guest, SPEC.md §1.1 rule 1) and the segment check's unit tests
         working-directory: sp1
         run: cargo test --locked --workspace
       - name: stwo-bench in the profiling executor (cycle-tracker regions)
@@ -167,8 +167,9 @@ jobs:
           echo /usr/local/cuda/lib64 | sudo tee /etc/ld.so.conf.d/cuda.conf
           sudo ldconfig
           echo /usr/local/cuda/bin >> "$GITHUB_PATH"
-      - name: Vendor SASH and install its Rust toolchain (from its rust-toolchain.toml)
+      - name: Vendor SASH and install its Rust toolchain and the repository's (from their rust-toolchain.toml)
         run: |
+          rustup toolchain install
           sp1/scripts/vendor-sash.sh
           cd sp1/vendor/sash && rustup toolchain install --profile minimal
       - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
@@ -178,11 +179,11 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-          key: sash-cargo-registry-${{ hashFiles('sp1/sash-oracle/Cargo.lock', 'sp1/patches/*.patch') }}
+          key: sash-cargo-registry-${{ hashFiles('sp1/sash-oracle/Cargo.lock', 'sp1/Cargo.lock', 'sp1/patches/*.patch') }}
           restore-keys: sash-cargo-registry-
       - name: Disk before
         run: df -h /
-      - name: Build SASH, check its pinned digests, regenerate the synthetic corpus and check the records
+      - name: Build SASH, check its pinned digests, regenerate the synthetic corpus, check the records, and run the segment check's bundle and differential tests
         run: sp1/scripts/sash-synthetic.sh
       - name: Disk after
         if: always()
