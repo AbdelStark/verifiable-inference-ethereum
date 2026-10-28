@@ -68,7 +68,7 @@ The EIP facts below are verified; the sizes and gas multiples are estimates from
 
 ## S-two unit costs (M2)
 
-M2's comparison with S-two is a bounded microbenchmark: what S-two's Cairo AIR charges for the three operations that dominate verifying a SASH segment. No Cairo SASH verifier is built. #48 compares these figures with #38's SP1 figures.
+M2's comparison with S-two is a bounded microbenchmark: what S-two's Cairo AIR charges for the three operations that dominate verifying a SASH segment. No Cairo SASH verifier is built. [Beside #38's SP1 unit costs](#beside-38s-sp1-unit-costs) puts #38's SP1 figures next to these; #48 makes the comparison and the go/no-go.
 
 ### Setup
 
@@ -281,11 +281,11 @@ Steps and trace cells don't depend on the machine; the times use the EPYC's fits
 
 | Workload | BLAKE2s | QM31 mul-adds | Ingested felts | Steps | Trace cells | Time, fit: BLAKE2s / QM31 / ingestion / fixed (s), EPYC | Time, modelled ops (s), EPYC | Time, scaled by the calibration (s), EPYC | M3 Max: modelled ops; scaled (s) |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| Per inference (23 proofs) | 4,641,448 | 53,837,100 | 72,194,394 | 1,722,983,681 | 1.99 × 10^11 unpadded | 1,003 / 696 / 3,344 / 171 | 5,185–5,213 (~87 min) | 8,279 (~138 min) | 4,499–4,990; 8,960 |
-| `head`, the largest segment | 525,665 | 7,063,600 | 8,533,469 | 208,937,170 | 3.31 × 10^10 padded (2.30 × 10^10 unpadded) | 114 / 91 / 395 / 7 | 605–608 | 965 | 524–830; 1,043 |
+| Per inference (23 proofs) | 4,641,448 | 53,837,100 | 72,194,394 | 1,722,983,681 | 1.99 × 10^11 unpadded | 1,003 / 696 / 3,344 / 171 | 5,185–5,213 (~87 min) | 8,279 (~138 min) | 4,499–4,969; 8,960 |
+| `head`, the largest segment | 525,665 | 7,063,600 | 8,533,469 | 208,937,170 | 3.31 × 10^10 padded (2.30 × 10^10 unpadded) | 114 / 91 / 395 / 7 | 605–608 | 965 | 524–579; 1,043 |
 
 - **The modelled-ops time is the fit and the marginal slopes between the two largest N.** On the EPYC they agree within 1%. The fits imply 331k steps/s per inference and 344k for `head`, below the calibration's 396k.
-- **Time per trace cell doesn't carry over between op mixes.** Multiplying the cells by the 12.6 ns per padded cell of the EPYC's largest proof gives 2,504 s per inference and 417 s for `head`. That proof is BLAKE2s at 2^18, and per marginal cell ingestion costs 25 ns on the EPYC, against 11–13 ns for BLAKE2s and QM31. On the M3 Max the largest proof was the calibration, at 25.1 ns per cell, which put that cross-check at the top of its range (4,990 s per inference, 830 s for `head`). The per-inference cells are unpadded because the model doesn't have each segment's op counts.
+- **Time per trace cell doesn't carry over between op mixes.** Multiplying the cells by the 12.6 ns per padded cell of the EPYC's largest proof gives 2,504 s per inference and 417 s for `head`. That proof is BLAKE2s at 2^18, and per marginal cell ingestion costs 25 ns on the EPYC, against 11–13 ns for BLAKE2s and QM31. On the M3 Max the largest proof was the calibration, at 25.1 ns per cell, which gives 4,990 s per inference and 830 s for `head`, above its fit and marginal times. The per-inference cells are unpadded because the model doesn't have each segment's op counts.
 - **The scaled column** multiplies the fit-based time by the calibration's measured / modelled time: 1.59 on the EPYC, 1.99 on the M3 Max. It stands in for the work the three ops leave out.
 - **Ingestion dominates,** at 64% of the EPYC's fit-based time per inference, against 19% for BLAKE2s, 13% for QM31 and 3% for the fixed costs. On the M3 Max the split is 47%, 36% and 14%. About half of the EPYC's ingestion cost is `run_and_prove` reading the JSON argument file, so a prover that loads its arguments faster would cut it.
 
@@ -312,6 +312,30 @@ Checks for `head`:
 ### Security parameters differ
 
 stwo-cairo's default proves at 96 bits with 70 queries and `pow_bits 26`. SASH's segment proofs use 100 queries and 0 PoW bits, for 100 bits (`prover/src/util.rs:14-16`). Matching SASH's level in the recursion proof would change the query count or the PoW. The default code comment says the query count barely affects proving time.
+
+### Beside #38's SP1 unit costs
+
+#38's figures are in `docs/EVM-GAS-MODEL.md` §6. The two routes count in different units: RISC-V cycles and PGU in SP1's executor, against Cairo steps, trace cells and `run_and_prove` seconds here. The docs have no measured SP1 proving rate, so cycles are not converted into seconds. §6.3's GPU-hours rest on an unverified 2M PGU/s per GPU. #48 compares the routes and records the go/no-go.
+
+| Per op | SP1 v6.10 (§6.1, §6.2): cycles; PGU | S-two Cairo (fits above): steps; padded cells; time |
+|---|---|---|
+| BLAKE2s compression | 2,139; 2,117 bare. Inside `hash_node`: 2,242 cycles per block, plus 12 per M31 `update` | 14; 18,932; 216 µs (EPYC), 353 µs (M3 Max) |
+| QM31 fused mul-add | 318; 280 (`qm31_mul_add`) | 8; 1,004; 12.9 µs (EPYC), 11.7 µs (M3 Max) |
+| DEEP-quotient step | 148; 127 per (column, sample) step of `accumulate_row_quotients` | Not measured: the extrapolation charges one QM31 mul-add per step |
+| Proof input | Decoding the proof buffer: 9.58; 9.47 per byte with `bincode` (29.63; 25.37 with JSON) | Ingesting one M31 felt from the arguments: 17; 1,835; 46.3 µs (EPYC), 29.3 µs (M3 Max) |
+
+- **Machines.** SP1's cycles and PGU come from its executor on the M3 Max and don't depend on the machine. S-two's steps and cells don't either; its times are the EPYC's and the M3 Max's.
+- **Status.** Both routes measured their unit costs. Both per-inference figures below are extrapolations: estimates, not runs.
+
+| Per inference | SP1 (§6.3), `bincode` proof | S-two (extrapolation above) |
+|---|---|---|
+| What the measured parts cover | BLAKE2s leaves and internal nodes, DEEP quotients, decoding | BLAKE2s compressions, QM31 mul-adds, ingestion, fixed cost per proof |
+| All 23 segments, measured parts | 2.32e10 cycles (2.17e10 PGU) | 1.72e9 steps, 1.99e11 unpadded cells; 5,185–5,213 s (EPYC), 4,499–4,969 s (M3 Max) |
+| All 23 segments, with the unmeasured work estimated | 3.75–4.92e10 cycles (3.45–4.51e10 PGU), from #41's synthetic SASH runs | 8,279 s (EPYC), 8,960 s (M3 Max), scaled by the stwo-cairo verifier calibration, which checks a Cairo AIR proof, not a SASH one |
+| `head`, measured parts | 2.70e9 cycles (2.52e9 PGU) | 2.09e8 steps, 3.31e10 padded cells; 605–608 s (EPYC) |
+| `head`, with the unmeasured work estimated | 3.32–5.73e9 cycles (3.07–5.24e9 PGU) | 965 s (EPYC); no margin left on the memory-address bound and ~429 GiB of peak RSS, so it likely needs splitting |
+
+Neither covers OODS constraint evaluation, FRI, the channel or GKR except through its scaling. Both use the same 53,837,100 DEEP-quotient steps (QM31 mul-adds here). For BLAKE2s, S-two takes §3's 4,641,448 compressions, while SP1's model adds the per-node costs and partial blocks.
 
 ## Implications for the roadmap
 

@@ -12,7 +12,8 @@ macOS (`/usr/bin/time -l`) and Linux (GNU `/usr/bin/time -v`).
     python3 -I bench/stwo-cairo/run.py            # everything, then the report
     python3 -I bench/stwo-cairo/run.py --report   # only re-render the report from results
 
-Needs scarb 2.18.0 and rustup (stwo-cairo's rust-toolchain.toml selects nightly-2026-01-15).
+Needs scarb 2.18.0, rustup (stwo-cairo's rust-toolchain.toml selects nightly-2026-01-15) and,
+on Linux, GNU time at /usr/bin/time (Debian/Ubuntu package `time`).
 Writes the clone, proofs and logs under runs/ (gitignored) unless --stwo-cairo/--out say
 otherwise.
 """
@@ -277,11 +278,14 @@ def prove(bins, program, args, proof, log, max_gib, settle_s):
 
         def watchdog():  # macOS compresses and swaps rather than failing an allocation
             while p.poll() is None:
-                kid = child_pid(p.pid)
-                if kid and footprint_bytes(kid) > max_gib * 2**30:
-                    killed.append(True)
-                    os.kill(int(kid), 9)
-                    return
+                try:  # the prover may exit between these reads
+                    kid = child_pid(p.pid)
+                    if kid and footprint_bytes(kid) > max_gib * 2**30:
+                        os.kill(int(kid), 9)
+                        killed.append(True)
+                        return
+                except (FileNotFoundError, ProcessLookupError):
+                    pass
                 time.sleep(0.5)
         threading.Thread(target=watchdog, daemon=True).start()
         p.wait()
