@@ -1,0 +1,154 @@
+Count BLAKE2s compressions behind a `count-ops` feature.
+
+Part of the verifier-only build of SASH eb95bfa that the SP1 segment guest runs
+(verifiable-inference-ethereum SPEC.md §1.1). Upstream source is Apache-2.0;
+this patch modifies it (Apache-2.0 §4(b)).
+
+SP1 has no BLAKE2s precompile, so no syscall count gives the verifier's BLAKE2s
+share. All of SASH's BLAKE2s goes through `hash_node` (blake2_merkle.rs) and
+`Blake2sHasherGeneric` (blake2_hash.rs, which the channel and `mix_root` use).
+A native host measurement build turns the feature on to count them; the guest
+never does, and with the feature off the build is unchanged.
+
+- nitroo/crates/stwo/Cargo.toml: a `count-ops` feature, off by default.
+- nitroo/crates/stwo/src/core/vcs/count_ops.rs (new): a counting wrapper around
+  `blake2::Blake2s256` that adds `max(1, ceil(n / 64))` compressions per hash
+  at finalize, `n` the bytes absorbed, to one counter per site (`hash_node`,
+  channel). Never per `update` call: `hash_node` calls it once per 4-byte M31.
+- nitroo/crates/stwo/src/core/vcs/blake2_merkle.rs, blake2_hash.rs: the
+  `use blake2::{Blake2s256, Digest};` line becomes, on the same line, a
+  `#[cfg(not(feature = "count-ops"))]` / `#[cfg(feature = "count-ops")]` pair
+  importing `Blake2s256` from blake2 or from count_ops. No other line moves:
+  the panic sites of blake2_hash.rs embed their line in the guest ELF.
+- nitroo/crates/stwo/src/core/vcs/mod.rs: one line appended, declaring
+  count_ops under the feature.
+
+--- a/nitroo/crates/stwo/Cargo.toml
++++ b/nitroo/crates/stwo/Cargo.toml
+@@ -24,6 +24,8 @@
+ prover = ["std", "tracing/attributes"]
+ parallel = ["rayon", "indexmap/rayon"]
+ slow-tests = []
++# Counts BLAKE2s compressions (core/vcs/count_ops.rs); host measurement builds only.
++count-ops = []
+ tracing = []
+ # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+ 
+--- a/nitroo/crates/stwo/src/core/vcs/blake2_hash.rs
++++ b/nitroo/crates/stwo/src/core/vcs/blake2_hash.rs
+@@ -1,6 +1,6 @@
+ use core::fmt;
+ 
+-use blake2::{Blake2s256, Digest};
++#[cfg(not(feature = "count-ops"))] use blake2::{Blake2s256, Digest}; #[cfg(feature = "count-ops")] use super::count_ops::{Digest, HasherBlake2s256 as Blake2s256};
+ use bytemuck::{Pod, Zeroable};
+ use serde::{Deserialize, Serialize};
+ use std_shims::Vec;
+--- a/nitroo/crates/stwo/src/core/vcs/blake2_merkle.rs
++++ b/nitroo/crates/stwo/src/core/vcs/blake2_merkle.rs
+@@ -1,4 +1,4 @@
+-use blake2::{Blake2s256, Digest};
++#[cfg(not(feature = "count-ops"))] use blake2::{Blake2s256, Digest}; #[cfg(feature = "count-ops")] use super::count_ops::{Digest, HashNodeBlake2s256 as Blake2s256};
+ use serde::{Deserialize, Serialize};
+ 
+ use super::blake2_hash::{reduce_to_m31, Blake2sHash, Blake2sHasherGeneric};
+--- a/nitroo/crates/stwo/src/core/vcs/count_ops.rs
++++ b/nitroo/crates/stwo/src/core/vcs/count_ops.rs
+@@ -0,0 +1,90 @@
++//! BLAKE2s compression counter, behind the `count-ops` feature. Only a native host measurement
++//! build enables it; a guest never does.
++//!
++//! With the feature on, `blake2_merkle.rs` (`hash_node`) and `blake2_hash.rs`
++//! (`Blake2sHasherGeneric`: the channel and `mix_root`) take their `Blake2s256` from here: a wrapper
++//! around `blake2::Blake2s256` that hashes the same bytes and, at finalize, adds the compressions
++//! that hash ran, `max(1, ceil(n / 64))` for `n` bytes absorbed, to its site's counter. It counts per
++//! hash, never per `update` call: `hash_node` calls `update` once per 4-byte M31.
++
++use core::sync::atomic::{AtomicU64, Ordering};
++
++pub use blake2::Digest;
++use blake2::digest::{
++    FixedOutput, FixedOutputReset, HashMarker, Output, OutputSizeUser, Reset, Update,
++};
++
++/// `hash_node`'s compressions: Merkle leaves and internal nodes.
++pub static HASH_NODE: AtomicU64 = AtomicU64::new(0);
++/// `Blake2sHasherGeneric`'s compressions: the channel's mixes and draws, and `mix_root`.
++pub static CHANNEL: AtomicU64 = AtomicU64::new(0);
++
++/// The counting `Blake2s256` of `blake2_merkle.rs`.
++pub type HashNodeBlake2s256 = CountingBlake2s256<0>;
++/// The counting `Blake2s256` of `blake2_hash.rs`.
++pub type HasherBlake2s256 = CountingBlake2s256<1>;
++
++/// The counters `(hash_node, channel)`.
++pub fn counts() -> (u64, u64) {
++    (HASH_NODE.load(Ordering::Relaxed), CHANNEL.load(Ordering::Relaxed))
++}
++
++/// Sets both counters to zero.
++pub fn reset_counts() {
++    HASH_NODE.store(0, Ordering::Relaxed);
++    CHANNEL.store(0, Ordering::Relaxed);
++}
++
++/// The compressions BLAKE2s runs on `n` bytes: one per 64-byte block, the last one possibly partial,
++/// and one for the empty input.
++pub fn compressions(n: u64) -> u64 {
++    n.div_ceil(64).max(1)
++}
++
++#[derive(Clone, Debug, Default)]
++pub struct CountingBlake2s256<const SITE: usize> {
++    inner: blake2::Blake2s256,
++    absorbed: u64,
++}
++
++impl<const SITE: usize> CountingBlake2s256<SITE> {
++    fn count(&self) {
++        let counter = if SITE == 0 { &HASH_NODE } else { &CHANNEL };
++        counter.fetch_add(compressions(self.absorbed), Ordering::Relaxed);
++    }
++}
++
++impl<const SITE: usize> HashMarker for CountingBlake2s256<SITE> {}
++
++impl<const SITE: usize> OutputSizeUser for CountingBlake2s256<SITE> {
++    type OutputSize = <blake2::Blake2s256 as OutputSizeUser>::OutputSize;
++}
++
++impl<const SITE: usize> Update for CountingBlake2s256<SITE> {
++    fn update(&mut self, data: &[u8]) {
++        self.absorbed += data.len() as u64;
++        Update::update(&mut self.inner, data);
++    }
++}
++
++impl<const SITE: usize> FixedOutput for CountingBlake2s256<SITE> {
++    fn finalize_into(self, out: &mut Output<Self>) {
++        self.count();
++        FixedOutput::finalize_into(self.inner, out);
++    }
++}
++
++impl<const SITE: usize> Reset for CountingBlake2s256<SITE> {
++    fn reset(&mut self) {
++        Reset::reset(&mut self.inner);
++        self.absorbed = 0;
++    }
++}
++
++impl<const SITE: usize> FixedOutputReset for CountingBlake2s256<SITE> {
++    fn finalize_into_reset(&mut self, out: &mut Output<Self>) {
++        self.count();
++        FixedOutputReset::finalize_into_reset(&mut self.inner, out);
++        self.absorbed = 0;
++    }
++}
+--- a/nitroo/crates/stwo/src/core/vcs/mod.rs
++++ b/nitroo/crates/stwo/src/core/vcs/mod.rs
+@@ -12,3 +12,4 @@
+ pub mod test_utils;
+ pub mod utils;
+ pub mod verifier;
++#[cfg(feature = "count-ops")] pub mod count_ops;

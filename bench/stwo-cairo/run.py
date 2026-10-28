@@ -64,14 +64,14 @@ QUERIES = 100  # SASH's segment proofs (prover/src/util.rs:14-16)
 BLAKE_COMPONENTS = {"blake_compress_opcode": 1, "blake_round": 10, "blake_g": 80, "triple_xor_32": 8}
 QM31_COMPONENT = "qm_31_add_mul_opcode"
 
-# TinyLlama-1.1B SASH run, docs/EVM-GAS-MODEL.md §1 and §3.
+# TinyLlama-1.1B SASH run, docs/EVM-GAS-MODEL.md §1, and the BLAKE2s compressions its verifier
+# runs, Merkle hash_node plus channel, counted natively (§3, §7).
 TINYLLAMA = {
     "all 23 segments": {"segments": 23, "leaf_m31": 65_967_346, "oods": 519_784,
-                        "columns": 501_197, "hashes": 518_489},
+                        "columns": 501_235, "hashes": 518_489, "blake2s": 5_133_478},
     "head (largest)": {"segments": 1, "leaf_m31": 8_099_813, "oods": 69_560,
-                       "columns": 68_484, "hashes": 19_427},
+                       "columns": 68_484, "hashes": 19_427, "blake2s": 557_316},
 }
-TINYLLAMA_COMPRESSIONS = 4_641_448  # docs/EVM-GAS-MODEL.md §3
 
 # The executable's Standalone entrypoint passes only the builtins the program uses, but
 # run_and_prove at this commit reads all 11 public-segment pointers (the adapter's
@@ -686,7 +686,7 @@ class Model:
 
 def tinyllama_ops(t):
     return {
-        "blake2s": t["leaf_m31"] / 16 + t["hashes"],
+        "blake2s": t["blake2s"],
         # One step per query position and (column, sample) pair; every two-sample column also
         # gets a periodicity sample, and no column has more than two (as #38 models it).
         "qm31": QUERIES * (t["oods"] + (t["oods"] - t["columns"])),
@@ -732,8 +732,8 @@ def extrapolate(fits, cols, fixed_cells, cal, rows, w):
 
     w("### Extrapolation to TinyLlama (estimate)")
     w("")
-    w("Op counts: BLAKE2s compressions = leaf M31s / 16 + internal hashes, which reproduces the "
-      f"§3 total of {fmt(TINYLLAMA_COMPRESSIONS)}; QM31 mul-adds = {QUERIES} query positions × "
+    w("Op counts: BLAKE2s compressions as SASH's verifier runs them, counted natively "
+      f"(`docs/EVM-GAS-MODEL.md` §3); QM31 mul-adds = {QUERIES} query positions × "
       "(OODS values + two-sample columns), with two-sample columns = OODS values − columns; "
       "ingested felts = leaf M31s + 4 × OODS values + 8 × internal hashes. Costs add linearly; "
       "each segment is one proof, so it pays once the largest of the three fixed costs.")

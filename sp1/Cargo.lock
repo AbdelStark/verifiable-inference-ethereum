@@ -4854,6 +4854,7 @@ dependencies = [
  "serde_json",
  "sp1-zkvm",
  "stwo",
+ "zk-prover",
 ]
 
 [[package]]

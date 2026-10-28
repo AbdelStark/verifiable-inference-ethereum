@@ -1,5 +1,9 @@
 //! Host side of the SP1 guests: the segment guest's input encoding and executor run (`SPEC.md`
-//! §1.1), and stwo-bench's.
+//! §1.1), and stwo-bench's; the TinyLlama controls and proof sizes (`docs/EVM-GAS-MODEL.md`).
+
+pub mod controls;
+pub mod sizes;
+pub mod trace;
 
 use std::fs;
 use std::io;
@@ -18,10 +22,46 @@ pub const SEGMENT_GUEST_ELF: Elf = include_elf!("segment-guest");
 /// feature, run `N` times in its own cycle-tracker region (`STWO_BENCH_OPS`).
 pub const STWO_BENCH_ELF: Elf = include_elf!("stwo-bench");
 
-/// Bound on every guest run in the executor. `docs/EVM-GAS-MODEL.md` §6.3 estimates the largest
-/// TinyLlama segment, `head`, at 3.319e9–5.730e9 cycles with its proof as `bincode`; this is twice
-/// the top of that range, rounded up. SP1 v6.10.0 checks it once per gas chunk, so it is coarse.
+/// Bound on every guest run in the executor. #38 estimated the largest TinyLlama segment, `head`,
+/// at 3.319e9–5.730e9 cycles with its proof as `bincode`; this is twice the top of that range,
+/// rounded up. `head` measures 6.215e9 (`docs/EVM-GAS-MODEL.md` §7). SP1 v6.10.0 checks it once
+/// per gas chunk, so it is coarse.
 pub const CYCLE_LIMIT: u64 = 12_000_000_000;
+
+/// Whether an executor error is SP1's `ExceededCycleLimit` (`exceeded cycle limit of N`): sp1-sdk
+/// 6.10.0's blocking `run` flattens every executor error to its message. Hitting the limit is never
+/// a rejection.
+pub fn is_cycle_limit(error: &str) -> bool {
+    error.contains("exceeded cycle limit")
+}
+
+/// Cycles of one BLAKE2s compression in the SP1 executor: stwo-bench's bare `blake2s_compress`
+/// (`docs/EVM-GAS-MODEL.md` §6.1). SP1 has no BLAKE2s precompile.
+pub const BLAKE2S_COMPRESSION_CYCLES: u64 = 2_139;
+
+/// The TinyLlama run's segment tags in segment order (`SPEC.md` §1.4): `B0L0..B0L21`, then `head`.
+pub fn tinyllama_tags() -> Vec<String> {
+    (0..22)
+        .map(|l| format!("B0L{l}"))
+        .chain(["head".to_string()])
+        .collect()
+}
+
+/// `sp1/pins/tinyllama.fixed.sha256`: one `<tag> <fixedHash hex>` line per segment, `#` comments.
+pub fn read_fixed_pins(path: &Path) -> io::Result<Vec<(String, [u8; 32])>> {
+    let text = fs::read_to_string(path)
+        .map_err(|e| io::Error::new(e.kind(), format!("{}: {e}", path.display())))?;
+    text.lines()
+        .filter(|line| !line.starts_with('#') && !line.trim().is_empty())
+        .map(|line| {
+            let bad = || io::Error::other(format!("{}: bad pin line {line:?}", path.display()));
+            let (tag, hex) = line.split_once(' ').ok_or_else(bad)?;
+            let mut hash = [0; 32];
+            hex::decode_to_slice(hex, &mut hash).map_err(|_| bad())?;
+            Ok((tag.to_string(), hash))
+        })
+        .collect()
+}
 
 /// The segment guest's three input buffers (`SPEC.md` §1.1 "Guest input").
 pub struct SegmentInput {
@@ -157,6 +197,20 @@ pub const STWO_BENCH_OPS: [&str; 16] = [
     "decode_bincode",
     "decode_postcard",
 ];
+
+/// stwo-bench's `decode_segment` operation: the segment guest's three buffers decoded once, as
+/// `check_segment` does, in the regions `decode_fixed_claims` and `decode_proof`.
+pub const STWO_BENCH_DECODE_SEGMENT: u32 = 16;
+
+/// stwo-bench's stdin for `decode_segment`: `op` and `n = 1`, then the segment's three buffers.
+pub fn decode_segment_stdin(input: &SegmentInput) -> SP1Stdin {
+    let mut stdin = SP1Stdin::new();
+    stdin.write_vec([STWO_BENCH_DECODE_SEGMENT.to_le_bytes(), 1u32.to_le_bytes()].concat());
+    for buf in [&input.fixed, &input.claims, &input.proof] {
+        stdin.write_vec(buf.clone());
+    }
+    stdin
+}
 
 /// stwo-bench's stdin: `op` and `n`, then `proof` for the `decode_*` operations only.
 pub fn stwo_bench_stdin(op: usize, n: u32, proof: &[u8]) -> SP1Stdin {

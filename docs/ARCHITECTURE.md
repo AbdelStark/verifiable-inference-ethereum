@@ -7,7 +7,7 @@
 | GPU Prover Host (SASH zk-inference-prover @ eb95bfa)                    |
 |   Model: TinyLlama-1.1B-Chat-v1.0 (fe8a4ea, profile y-attnout-w12)      |
 |   Outputs 23 segment bundles: B0L0 .. B0L21 + head (761 MB JSON in the  |
-|   unpublished run; M2 reproduces it)                                    |
+|   unpublished run; all 23 verify in the M2 guest, EVM-GAS-MODEL.md §7)  |
 +------------------------------------+------------------------------------+
                                      |
                                      v
