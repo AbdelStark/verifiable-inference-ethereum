@@ -2,8 +2,9 @@
 //! of §2.1): every corpus bundle and every bundle mutation of `sash-segment-check`'s native tests,
 //! whose mutations this suite shares. Positives exit 0 with the native `check_segment`'s public
 //! values, byte for byte; controls exit 1 with a panic message naming the native test's `Reject`
-//! variant. The `Verdict`-level and other unit-level controls stay native-only. Run in the `sp1` CI
-//! job: `SASH_SYNTHETIC_CORPUS=<dir> cargo test --locked -p sp1-host --test segment_guest -- --ignored`.
+//! variant. The `Verdict`-level and other unit-level controls stay native-only. Run by
+//! `make sp1-guest-suite` and in the `sp1` CI job:
+//! `SASH_SYNTHETIC_CORPUS=<dir> cargo test --release --locked -p sp1-host --test segment_guest -- --ignored`.
 
 #[path = "../../sash-segment-check/tests/common/mod.rs"]
 mod common;
@@ -144,7 +145,14 @@ fn undecodable_proof_is_not_accepted() {
         claims: b.claims,
         proof,
     };
-    rejects_with("proof_truncated", &run_buffers(input), "NotAccepted");
+    let run = run_buffers(input);
+    rejects_with("proof_truncated", &run, "NotAccepted");
+    // The guest's `{reject:?}` line, before its panic: the native test's decode error.
+    assert!(
+        run.stderr.contains("error: Some(\"unparseable proof"),
+        "proof_truncated: stderr: {}",
+        run.stderr
+    );
 }
 
 /// `layer` 1 to 2 on `sound_aligned` verifies, with the native public values: the new

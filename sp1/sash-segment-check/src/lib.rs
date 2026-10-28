@@ -14,7 +14,6 @@
 
 use std::fmt;
 
-use sash_evm_primitives::grid::SegmentClaim;
 pub use sash_evm_primitives::segment::SegmentPublicValues;
 use sash_evm_primitives::token::compute_token_hash;
 use serde_json::Value;
@@ -270,16 +269,14 @@ fn public_values(
 ) -> SegmentPublicValues {
     let side = |role| verdict.side_root(Axis::Layer, role, None).map(root);
     SegmentPublicValues {
-        claim: SegmentClaim {
-            segment_index,
-            // Equal to proof commitments 0 and 1 once accepted (`root_ok`, `model_root_ok`).
-            pre_root: root(&fixed.pre_root),
-            model_root: root(&fixed.model_root),
-            residual_in_root: side("in")
-                .expect("a segment with every edge bound commits its residual-stream in side"),
-            // The head commits no out side.
-            residual_out_root: side("out").unwrap_or([0; 32]),
-        },
+        segment_index,
+        // Equal to proof commitments 0 and 1 once accepted (`root_ok`, `model_root_ok`).
+        pre_root: root(&fixed.pre_root),
+        model_root: root(&fixed.model_root),
+        residual_in_root: side("in")
+            .expect("a segment with every edge bound commits its residual-stream in side"),
+        // The head commits no out side.
+        residual_out_root: side("out").unwrap_or([0; 32]),
         fixed_hash: fixed_hash(fixed),
         tok_in_hash: match plan.emb {
             Some(_) => compute_token_hash(&fixed.tok_in),

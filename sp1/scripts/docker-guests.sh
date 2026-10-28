@@ -28,7 +28,7 @@ done
 (cd "$elf_dir" && shasum -a 256 segment-guest stwo-bench)
 
 elf_sha256="$(cd "$elf_dir" && shasum -a 256 segment-guest)"
-vkey="$(cd sp1 && cargo run --release --locked --quiet -p sp1-host -- vkey --elf "$root/$elf_dir/segment-guest")"
+vkey="$(cd sp1 && cargo run --release --locked --quiet -p sp1-host --bin sp1-host -- vkey --elf "$root/$elf_dir/segment-guest")"
 echo "segment-guest.elf.sha256: $elf_sha256"
 echo "segment-guest.vkey:"
 echo "$vkey"
