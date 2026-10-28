@@ -10,6 +10,12 @@
 /contracts/broadcast/
 /contracts/lcov.info
 
+# Vendored upstream source (sp1/scripts/vendor-sash.sh) and the synthetic corpus it proves
+/sp1/vendor/
+/sp1/testdata/synthetic/
+/sp1/testdata/*.fresh
+/sp1/sash-oracle/target/
+
 # Local proof bundles, weights & scratch runs
 /runs/
 /artifacts/

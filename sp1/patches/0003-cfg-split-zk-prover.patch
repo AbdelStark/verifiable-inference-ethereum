@@ -1,0 +1,2517 @@
+Cfg-split zk-prover under a default-on `prover` feature, so verify_composed builds without it.
+
+Part of the verifier-only build of SASH eb95bfa that the SP1 segment guest runs
+(verifiable-inference-ethereum SPEC.md §1.1). Upstream source is Apache-2.0;
+this patch modifies it (Apache-2.0 §4(b)).
+
+zk-prover turned on stwo's and constraint-framework's `prover` and `parallel`
+features unconditionally; stwo's `prover` needs `array_chunks`, which Rust 1.90
+removed, so the crate could not build for SP1 v6.10.0's succinct-1.96.0. With
+default features the build is upstream's, item for item. Without `prover`
+(`cargo check -p zk-prover --no-default-features --lib`) it is the verifier
+build: the types, relations, `Plan`, `build_components_linked`, `Verdict`,
+`verify_composed`, the binding code and what they call in `gkrlink`,
+`gkr_key_tile::verify` and `boundary`.
+
+- prover/Cargo.toml: a default-on `prover` feature turns on stwo/prover,
+  stwo/parallel, stwo-constraint-framework/prover and /parallel, and the now
+  optional rayon and tracing-subscriber; the stwo crates otherwise come in with
+  `default-features = false, features = ["std"]`. `cuda = ["prover"]`, and the
+  `zk-prover` binary has `required-features = ["prover"]`. Cargo.lock is
+  unchanged.
+- prover/build.rs returns before embedding ZK_SOURCE_COMMIT/DIRTY (which runs
+  `git -C <crate>/..`) when CARGO_FEATURE_PROVER is unset.
+- prover/src/lib.rs gates the prover-only modules (cli, chunks, cudagen,
+  cudakernels, dev*, device, device_witness, exprprobe, gencudakernels,
+  logup_run, plogup, precache, scalars, shaperoot, spans, witread) and the two
+  device re-exports; gadgets/*/mod.rs gate their `device` and `run` modules
+  and the `Gadget` impls.
+- Every other hunk adds `#[cfg(feature = "prover")]` to a prover-side item
+  (witness loading and synthesis, trace and interaction builders, every
+  `cuda_eval_blob` override, every rayon use, util.rs's host introspection:
+  add_phase, mark_timeline, modes_json, nvidia_smi, gpu_name, env_json,
+  unsound_skips, provenance_json, emit; gkr_key_tile's cmd, tamper and its
+  gkr_prover/mle imports; compose's generate, prove_layer, prove_gen,
+  prove_gen_to, Gen, prewarm_blobs, fp_rows, provers), or splits a `use` list
+  to attach one. Function bodies on the verify path are unchanged.
+- compose.rs, verify_composed: `t0` and the `Verdict.verify_secs` field and
+  its two initialisers are prover-only (std has no clock on the zkVM target).
+  `shape_root_check`, `shape_root_from_params` and their `catch_unwind` are
+  prover-only; without `prover`, verify_composed binds
+  `(None, None, 0.0, None)`, what upstream's shape_root_check returns when no
+  calibration is set. Placing the attribute on the two struct-literal fields
+  moves each `verify_secs:` initialiser onto its own line.
+
+--- a/prover/Cargo.toml
++++ b/prover/Cargo.toml
+@@ -9,20 +9,31 @@
+ # feature the same code runs on SimdBackend and is the reference build that
+ # every digest comparison is made against. The stwo dependency is the vendored
+ # fork either way, so the two builds differ only in the backend.
+-cuda = []
++cuda = ["prover"]
++# The prover, its parallel backends and the CLI. Off, the library is the
++# verifier build: verify_composed and what it calls, for the SP1 guest.
++prover = [
++    "stwo/prover",
++    "stwo/parallel",
++    "stwo-constraint-framework/prover",
++    "stwo-constraint-framework/parallel",
++    "dep:rayon",
++    "dep:tracing-subscriber",
++]
++default = ["prover"]
+ 
+ [dependencies]
+-stwo = { path = "../nitroo/crates/stwo", features = ["prover", "parallel"] }
+-stwo-constraint-framework = { path = "../nitroo/crates/constraint-framework", features = ["prover", "parallel"] }
++stwo = { path = "../nitroo/crates/stwo", default-features = false, features = ["std"] }
++stwo-constraint-framework = { path = "../nitroo/crates/constraint-framework", default-features = false, features = ["std"] }
+ itertools = "0.12"
+ num-traits = "0.2"
+ rand = { version = "0.9", features = ["small_rng"] }
+-rayon = "1.10"
++rayon = { version = "1.10", optional = true }
+ serde = { version = "1", features = ["derive"] }
+ serde_json = "1"
+ sha2 = "0.10"
+ tracing = "0.1"
+-tracing-subscriber = { version = "0.3", features = ["registry", "std"] }
++tracing-subscriber = { version = "0.3", features = ["registry", "std"], optional = true }
+ 
+ 
+ [lib]
+@@ -34,3 +45,4 @@
+ [[bin]]
+ name = "zk-prover"
+ path = "src/main.rs"
++required-features = ["prover"]
+--- a/prover/build.rs
++++ b/prover/build.rs
+@@ -18,6 +18,10 @@
+ }
+ 
+ fn main() {
++    // The verifier build embeds no provenance.
++    if std::env::var_os("CARGO_FEATURE_PROVER").is_none() {
++        return;
++    }
+     let root: PathBuf = Path::new(&std::env::var("CARGO_MANIFEST_DIR").unwrap()).join("..");
+     let file = root.join(".source-commit");
+     println!("cargo:rerun-if-env-changed=ZK_SOURCE_COMMIT");
+--- a/prover/src/bf16.rs
++++ b/prover/src/bf16.rs
+@@ -25,6 +25,7 @@
+ //! round-half-away-from-zero would.  Both are built here so the ladder can price
+ //! the difference.
+ 
++#[cfg(feature = "prover")]
+ use rayon::prelude::*;
+ 
+ /// bf16 bits -> f32 (exact: bf16 is the f32 prefix).
+@@ -371,6 +372,7 @@
+ /// so the rows are the same values in the same order however many threads
+ /// build them -- and at the sequence's table sizes (2^23..2^27 rows, stream J's
+ /// tight sizing) this was two thirds of the cost of loading a layer.
++#[cfg(feature = "prover")]
+ pub fn exp_int_table(rows: usize, nmax: u32, frac: f64) -> Vec<u32> {
+     (0..rows)
+         .into_par_iter()
+--- a/prover/src/boundary.rs
++++ b/prover/src/boundary.rs
+@@ -47,11 +47,15 @@
+ use stwo::core::fields::m31::M31;
+ // stream AA: `Column::at`/`set`, for the one-cell tamper on a K/V side's
+ // already-built columns
++#[cfg(feature = "prover")]
+ use stwo::prover::backend::Column;
+ 
++#[cfg(feature = "prover")]
+ use crate::common::{Eval, eval_of};
+ use crate::compose::{Fixed, ResidualStreamPlan};
+-use crate::gadgets::residual_stream::{ResidualStreamComponent, BindingKind};
++use crate::gadgets::residual_stream::BindingKind;
++#[cfg(feature = "prover")]
++use crate::gadgets::residual_stream::ResidualStreamComponent;
+ 
+ /// The multiplier that folds a value's `(sm, ef)` pair into one cell.
+ ///
+@@ -141,6 +145,7 @@
+ /// `tamper` flips one cell, by flat index over `(row, slot)`. It exists for the
+ /// probe that has to show the binding bites: a boundary column that disagrees with
+ /// the component must take its own chunk's proof down.
++#[cfg(feature = "prover")]
+ pub fn cols(component: &ResidualStreamComponent, side: &Side, tamper: Option<usize>) -> Vec<Eval> {
+     let vals = component.binding_vals(side.bound.kind);
+     let w = component.binding_width(side.bound.kind);
+@@ -769,6 +774,7 @@
+ 
+ /// Prove one chunk with the boundary on, serialize it to `out_dir`, and verify it
+ /// from those bytes.  Everything the probes need is in the returned `Chunk`.
++#[cfg(feature = "prover")]
+ fn prove_one(tag: &str, name: &str, dir: &str, out_dir: &str, args: &[String],
+              tamper: &crate::compose::ProverTamper) -> Chunk {
+     let a = at(args, dir);
+@@ -822,6 +828,7 @@
+ /// check may catch it.  The one probe that must take its own chunk down is the
+ /// boundary column tampered *alone*, because that is the equality constraint's
+ /// job.
++#[cfg(feature = "prover")]
+ pub fn cmd(args: &[String]) {
+     let a_dir = crate::cli::arg_str(args, "--a").expect("boundary needs --a <witness dir>");
+     let b_dir = crate::cli::arg_str(args, "--b").expect("boundary needs --b <witness dir>");
+@@ -947,6 +954,7 @@
+ /// The two ends of the chain are not links and are not checked here -- the first
+ /// chunk's input and the last chunk's output are unchecked inputs under the v1
+ /// ground rule, so a sequence of `n` chunks has `n - 1` links.
++#[cfg(feature = "prover")]
+ pub fn chain_cmd(args: &[String]) {
+     let dir = crate::cli::arg_str(args, "--dir").expect("boundary-chain needs --dir <serialized dir>");
+     let tags = crate::cli::arg_str(args, "--tags")
+@@ -1057,6 +1065,7 @@
+ /// The tags a `compose-chunks` plan names, in file order: the `--ser-tag` of
+ /// every non-comment line, or `chunk<i>` where a line has none (which is what
+ /// the loop itself calls such a chunk).
++#[cfg(feature = "prover")]
+ pub fn plan_tags(path: &str) -> Vec<String> {
+     let text = std::fs::read_to_string(path).unwrap_or_else(|e| panic!("{path}: {e}"));
+     text.lines()
+@@ -1154,6 +1163,7 @@
+ /// vectors are published in the statements and pinned there by
+ /// `verify_composed` (`Fixed::tok_in`, `Fixed::tok_out`), so this comparison is
+ /// between two proved values and not between two declarations.
++#[cfg(feature = "prover")]
+ pub fn grid_cmd(args: &[String]) {
+     let dir = crate::cli::arg_str(args, "--dir").expect("boundary-grid needs --dir <serialized dir>");
+     let allow_gaps = crate::cli::flag(args, "--allow-gaps");
+@@ -2065,6 +2075,7 @@
+ /// equality constraint bites: a boundary column that disagrees with the component
+ /// must take its **own chunk's** proof down, which is the statement that the
+ /// root is bound to the proof and not merely appended to it.
++#[cfg(feature = "prover")]
+ pub fn kv_cols(mut cols: Vec<Eval>, tamper: Option<usize>) -> Vec<Eval> {
+     if let Some(t) = tamper {
+         assert!(!cols.is_empty(), "a K/V side with no columns cannot be tampered");
+--- a/prover/src/common.rs
++++ b/prover/src/common.rs
+@@ -31,18 +31,28 @@
+ use stwo::core::utils::bit_reverse_coset_to_circle_domain_order;
+ use stwo::core::vcs::blake2_merkle::Blake2sM31MerkleChannel;
+ use stwo::core::verifier::verify;
++#[cfg(feature = "prover")]
+ use stwo::prover::backend::simd::SimdBackend;
++#[cfg(feature = "prover")]
+ use rayon::prelude::*;
++#[cfg(feature = "prover")]
+ use stwo::prover::backend::simd::column::BaseColumn;
++#[cfg(feature = "prover")]
+ use stwo::prover::backend::simd::m31::{LOG_N_LANES, N_LANES, PackedM31};
++#[cfg(feature = "prover")]
+ use stwo::prover::poly::BitReversedOrder;
++#[cfg(feature = "prover")]
+ use stwo::prover::poly::circle::{CircleEvaluation, PolyOps as _};
++#[cfg(feature = "prover")]
+ use stwo::prover::poly::twiddles::TwiddleTree;
++#[cfg(feature = "prover")]
+ use stwo::prover::{CommitmentSchemeProver, ComponentProver, prove};
+ 
++#[cfg(feature = "prover")]
+ use crate::spans;
+ use crate::util::{LOG_BLOWUP, peak_rss_bytes, pcs_config, rss_bytes};
+ 
++#[cfg(feature = "prover")]
+ pub type Eval = CircleEvaluation<SimdBackend, M31, BitReversedOrder>;
+ pub type Proof = StarkProof<<Blake2sM31MerkleChannel as stwo::core::channel::MerkleChannel>::H>;
+ 
+@@ -97,6 +107,7 @@
+     });
+ }
+ 
++#[cfg(feature = "prover")]
+ pub fn eval_of(log_size: u32, mut vals: Vec<M31>) -> Eval {
+     assert_eq!(vals.len(), 1 << log_size);
+     // B7a milestone 4 (18.3): the shuffle and the repack as one parallel
+@@ -161,8 +172,10 @@
+ /// SimdBackend, which is the reference build every digest comparison is made
+ /// against.
+ #[cfg(feature = "cuda")]
++#[cfg(feature = "prover")]
+ pub type PcsB = stwo::prover::backend::cuda::CudaBackend;
+ #[cfg(not(feature = "cuda"))]
++#[cfg(feature = "prover")]
+ pub type PcsB = SimdBackend;
+ 
+ /// Stream PP (E11): the physical commitment tree indices this crate speaks.
+@@ -174,6 +187,7 @@
+ pub const BASE_TREE: usize = 2;
+ pub const INTER_TREE: usize = 3;
+ 
++#[cfg(feature = "prover")]
+ pub struct Session<'a> {
+     pub config: PcsConfig,
+     pub channel: Blake2sM31Channel,
+@@ -185,12 +199,14 @@
+     started: Instant,
+ }
+ 
++#[cfg(feature = "prover")]
+ pub fn twiddles(max_log: u32) -> TwiddleTree<PcsB> {
+     PcsB::precompute_twiddles(
+         CanonicCoset::new(max_log + 1 + LOG_BLOWUP).circle_domain().half_coset,
+     )
+ }
+ 
++#[cfg(feature = "prover")]
+ impl<'a> Session<'a> {
+     pub fn new(tw: &'a TwiddleTree<PcsB>) -> Self {
+         let config = pcs_config();
+@@ -531,6 +547,7 @@
+     }
+ }
+ 
++#[cfg(feature = "prover")]
+ pub struct Proven {
+     pub prove_secs: f64,
+     pub verify_secs: f64,
+@@ -547,6 +564,7 @@
+     pub pre_ok: bool,
+ }
+ 
++#[cfg(feature = "prover")]
+ impl Proven {
+     /// Everything a chunk pays for again: stream PP moved the preprocessed
+     /// trace into two trees, so the fresh trees start at `BASE_TREE`.
+--- a/prover/src/compose.rs
++++ b/prover/src/compose.rs
+@@ -27,6 +27,7 @@
+ //! There is no prover-side struct comparison anywhere on the accept path.
+ 
+ use num_traits::{One, Zero};
++#[cfg(feature = "prover")]
+ use rayon::prelude::*;
+ use serde::{Deserialize, Serialize};
+ use serde_json::{Value, json};
+@@ -38,6 +39,7 @@
+ use stwo::core::pcs::{CommitmentSchemeVerifier, TreeVec};
+ use stwo::core::verifier::verify;
+ use stwo::core::vcs::blake2_merkle::Blake2sM31MerkleChannel;
++#[cfg(feature = "prover")]
+ use stwo::prover::ComponentProver;
+ use stwo_constraint_framework::preprocessed_columns::PreProcessedColumnId;
+ use stwo_constraint_framework::{FrameworkComponent, FrameworkEval, TraceLocationAllocator};
+@@ -46,22 +48,30 @@
+     ChanEval, ExpRel, ExpTableEval, KeyEval, Offsets, Powers, RowEval, key_tile_id,
+     msk_id, CHAN_SEL, DIAGONAL_BLOCK_SEL, KEY_SEL, ROW_SEL, TBL_EXP_X, TBL_EXP_Y,
+ };
+-use crate::gadgets::attention::trace::{self as attn_trace, Cfg, Committed, Layouts};
++use crate::gadgets::attention::trace::{self as attn_trace, Cfg, Layouts};
++#[cfg(feature = "prover")]
++use crate::gadgets::attention::trace::Committed;
+ use crate::relations::{
+     FRAC_COLS, FracRel, MUL_COLS, MulRel, NORM_COLS, NormRel, PairRel, RangeRel, TableEval,
+-    TableKind, id, powers, table_col, tbl_range,
++    TableKind, id, powers, tbl_range,
+ };
++#[cfg(feature = "prover")]
++use crate::relations::table_col;
+ use crate::gadgets::attention::witness::Variant as AttnVariant;
+ use crate::bf16::Round;
+-use crate::common::{Eval, Proof, RawStats, Session, eval_of, m31_u32, twiddles};
++use crate::common::{Proof, RawStats, m31_u32};
++#[cfg(feature = "prover")]
++use crate::common::{Eval, Session, eval_of, twiddles};
+ use crate::util::pcs_config;
+ use crate::gadgets::dequant::{
+     DEQ_SEL, DequantEval, QNZ_COLS, Spec, Variant as DeqVariant, YSide, chan_col, deq_sel,
+     range_widths,
+ };
++use crate::layer::{AoLayout, FREIVALDS_GROUPS, FreivaldsLayout, Layer, MatLayout, Tables};
++#[cfg(feature = "prover")]
+ use crate::layer::{
+-    AoLayout, FREIVALDS_GROUPS, FreivaldsLayout, Layer, MatLayout, Tables, ao_interaction,
+-    ao_component, freivalds_interaction, freivalds_component, mat_interaction, mat_component,
++    ao_interaction, ao_component, freivalds_interaction, freivalds_component, mat_interaction,
++    mat_component,
+ };
+ use crate::gadgets::residual_stream::{self, Binding, BindingKind, GKind, GTableEval, Kind, Prog,
+                   ResidualStreamEval, ResidualStreamRels, ResidualStreamTables, TieSpec, Tiling,
+@@ -3052,6 +3062,7 @@
+     /// `InfoEvaluator`, whose `ArithmeticCounter` is an `Rc<RefCell<..>>`
+     /// (`constraint-framework/src/info.rs:166`), so a component is `!Sync` and
+     /// cannot cross a thread boundary. The evaluators themselves are plain data.
++    #[cfg(feature = "prover")]
+     pub fn prewarm_blobs(&self) {
+         use rayon::prelude::*;
+         struct Tasks<'a>(Vec<Box<dyn Fn() + Send + Sync + 'a>>);
+@@ -3075,6 +3086,7 @@
+     /// the same evals -- this chunk's real claims and challenges included --
+     /// so it answers "what will this chunk ask the store for", not "what
+     /// should it ask for".
++    #[cfg(feature = "prover")]
+     pub fn fp_rows(&self) -> Vec<Value> {
+         let mut v = vec![];
+         for i in 0..self.chans.len() {
+@@ -3220,6 +3232,7 @@
+         c.0
+     }
+ 
++    #[cfg(feature = "prover")]
+     pub fn provers(&self) -> Vec<&dyn ComponentProver<crate::common::PcsB>> {
+         struct Take<'a>(Vec<&'a dyn ComponentProver<crate::common::PcsB>>);
+         impl<'a> Visit<'a> for Take<'a> {
+@@ -3260,6 +3273,7 @@
+ /// what share of the interaction cells a scoped GKR over `key_tiles` alone would
+ /// cover — is this table, and it also gives `family_cells` the `tables` field
+ /// it was missing.
++#[cfg(feature = "prover")]
+ fn inter_mark(
+     what: &str,
+     all: &[crate::device::AnyCol<'static>],
+@@ -4212,6 +4226,7 @@
+     pub ao_mag: Option<usize>,
+ }
+ 
++#[cfg(feature = "prover")]
+ pub fn prove_layer(layer: &Layer, params: &Params, tamper: &ProverTamper) -> Composed {
+     // B7a milestone 4 (19.6): 4a counts bytes host to device across the whole
+     // wall, and the witness generation's uploads happen before `Session::new` exists.
+@@ -4223,6 +4238,7 @@
+ /// B7b (README 26): everything `generate` built, owned, so a chunk's
+ /// generation can be handed from the thread that made it to the one that
+ /// proves it.
++#[cfg(feature = "prover")]
+ pub struct Gen {
+     pub plan: Plan,
+     pub tables: Tables,
+@@ -4272,6 +4288,7 @@
+ /// Everything in it but the root is a function of `Fixed.params` alone
+ /// (`Plan::pre_split`), so a cached run reports the same document as a derived
+ /// one and `cached` is the one field that says which it was.
++#[cfg(feature = "prover")]
+ fn emit_shape_root(plan: &Plan, layer: &Layer, pre_root: &str, cached: bool,
+                    trace_secs: f64, commit_shape_secs: f64) {
+     let shape_sizes = plan.shape_sizes();
+@@ -4297,6 +4314,7 @@
+ /// B7b (README 26): the first half of `prove_layer` -- every witness generation, every
+ /// table, every column born where it will be committed -- up to the
+ /// transcript.
++#[cfg(feature = "prover")]
+ pub fn generate(layer: &Layer, params: &Params, tamper: &ProverTamper, pre_key: Option<u64>)
+                 -> Gen {
+     let phase_t = std::time::Instant::now();
+@@ -5414,6 +5432,7 @@
+ 
+ /// B7b (README 26): the second half -- the session, the three commits, the
+ /// interaction, the components and the proof.
++#[cfg(feature = "prover")]
+ pub fn prove_gen(layer: &Layer, params: &Params, g: Gen) -> Composed {
+     match prove_gen_to(layer, params, g, false) {
+         Proved::Composed(c) => *c,
+@@ -5424,6 +5443,7 @@
+ /// `prove_gen`, and -- with `shape_root_only` -- the derivation that stops at
+ /// tree 0's root.  One builder for both, so there is no second implementation
+ /// of the shape tree for the verifier's root to be derived by.
++#[cfg(feature = "prover")]
+ pub fn prove_gen_to(layer: &Layer, params: &Params, g: Gen, shape_root_only: bool) -> Proved {
+     let Gen { plan, tables, key_tile_committed, key_tile_dev, key_tile_pre, aor, mat_components, freivalds_components,
+               residual_stream_components, residual_stream_tcols, residual_stream_mcols,
+@@ -7152,6 +7172,7 @@
+ /// key in a process -- a grid's segments at one `(layer, shape)` share one
+ /// derivation between them.  Returns the root, whether this call paid for it,
+ /// and what it paid.
++#[cfg(feature = "prover")]
+ pub fn shape_root_from_params(params: &Params, calib: &crate::shaperoot::Calibration)
+                               -> (String, bool, f64) {
+     let t0 = std::time::Instant::now();
+@@ -7179,6 +7200,7 @@
+ ///
+ /// Returns the derived root, whether it is the statement's, what the derivation
+ /// cost, and the message a mismatch is refused with.
++#[cfg(feature = "prover")]
+ fn shape_root_check(fixed: &Fixed)
+                     -> (Option<String>, Option<bool>, f64, Option<String>) {
+     let Some((f, doc)) = crate::shaperoot::verify_calibration() else {
+@@ -7343,6 +7365,7 @@
+     /// hard-coded index.
+     pub boundary_sides: Vec<crate::boundary::SideRoot>,
+     pub error: Option<String>,
++    #[cfg(feature = "prover")]
+     pub verify_secs: f64,
+ }
+ 
+@@ -7390,7 +7413,9 @@
+                nn_q_ok: vec![false], nn_open: false,
+                stream_in: None, stream_out: None,
+                boundary_roots: vec![], boundary_sides: vec![],
+-               error: Some(msg.to_string()), verify_secs: 0.0 }
++               error: Some(msg.to_string()),
++               #[cfg(feature = "prover")]
++               verify_secs: 0.0 }
+     }
+ }
+ 
+@@ -7399,6 +7424,7 @@
+ /// multiplier from its own challenges, and runs stwo's verify -- no prover
+ /// struct crosses this boundary.
+ pub fn verify_composed(fixed_bytes: &[u8], claims_bytes: &[u8], proof_bytes: &[u8]) -> Verdict {
++    #[cfg(feature = "prover")]
+     let t0 = std::time::Instant::now();
+     let Ok(fixed) = serde_json::from_slice::<Fixed>(fixed_bytes) else {
+         return Verdict::rejected("unparseable fixed statement");
+@@ -7935,7 +7961,10 @@
+     // publisher's commitment to weights this verifier does not hold, and what
+     // pins it is `boundary-grid --expect-model-roots` against the same
+     // manifest.
++    #[cfg(feature = "prover")]
+     let (shape_root, shape_root_ok, shape_secs, shape_why) = shape_root_check(&fixed);
++    #[cfg(not(feature = "prover"))]
++    let (shape_root, shape_root_ok, shape_secs, shape_why) = (None, None, 0.0, None);
+     let error = match (shape_why, error) {
+         (Some(w), Some(e)) => Some(format!("{w}; and stwo's verify: {e}")),
+         (Some(w), None) => Some(w),
+@@ -7948,6 +7977,7 @@
+               rq_in_ok, rq_out_ok, rq_scale_ok, rq_scale_open, ao_q_open, ao_q_ok,
+               nn_in_ok, nn_out_ok, nn_pos_ok, nn_q_ok, nn_open,
+               sizes_ok, residual_stream_ok, stream_in, stream_out, boundary_roots, boundary_sides, error,
++              #[cfg(feature = "prover")]
+               verify_secs: t0.elapsed().as_secs_f64() }
+ }
+ 
+--- a/prover/src/encoding.rs
++++ b/prover/src/encoding.rs
+@@ -19,11 +19,13 @@
+ //! The pattern language itself -- what a bf16 is, and the tables over it -- is
+ //! `crate::bf16`, which was already a module of the crate and stays one.
+ 
++#[cfg(feature = "prover")]
+ use rayon::prelude::*;
+ use stwo::core::fields::m31::{M31, P};
+ use stwo::core::fields::qm31::SecureField;
+ 
+ use crate::bf16::{self, EXP_BIAS};
++#[cfg(feature = "prover")]
+ use crate::common::{Eval, eval_of};
+ 
+ pub fn m31_of(v: i64) -> M31 {
+@@ -83,6 +85,7 @@
+ /// Each of the four is an independent pass with its own bit-reversal, so they go in
+ /// parallel: 13 accumulators x 4 columns is the second-largest block of our own
+ /// interaction work after the inner sums.
++#[cfg(feature = "prover")]
+ pub fn secure_cols(log_size: u32, vals: &[SecureField]) -> Vec<Eval> {
+     (0..4)
+         .into_par_iter()
+@@ -92,6 +95,7 @@
+ 
+ /// The name the component builders outside the attention trace call
+ /// `secure_cols` by.  One function under two names, as it was.
++#[cfg(feature = "prover")]
+ pub fn secure_cols_pub(log_size: u32, vals: &[SecureField]) -> Vec<Eval> {
+     secure_cols(log_size, vals)
+ }
+--- a/prover/src/gadgets/argmax/mod.rs
++++ b/prover/src/gadgets/argmax/mod.rs
+@@ -59,16 +59,23 @@
+ use stwo::core::air::Component;
+ use stwo::core::fields::m31::M31;
+ use stwo::core::fields::qm31::SecureField;
++#[cfg(feature = "prover")]
+ use stwo::prover::ComponentProver;
+ use stwo_constraint_framework::{
+     EvalAtRow, FrameworkComponent, FrameworkEval, INTERACTION_TRACE_IDX, ORIGINAL_TRACE_IDX,
+     Relation, RelationEntry, TraceLocationAllocator,
+ };
+ 
+-use crate::common::{Eval, Proven, Session, Sums, eval_of, m31_u32, twiddles};
+-use crate::encoding::{m31_of, secure_cols_pub};
++use crate::common::{Sums, m31_u32};
++#[cfg(feature = "prover")]
++use crate::common::{Eval, Proven, Session, eval_of, twiddles};
++use crate::encoding::m31_of;
++#[cfg(feature = "prover")]
++use crate::encoding::secure_cols_pub;
+ use crate::layout::MatLayout;
+-use crate::relations::{RangeRel, RangeTableEval, id, table_col, tbl_range};
++use crate::relations::{RangeRel, RangeTableEval, id, tbl_range};
++#[cfg(feature = "prover")]
++use crate::relations::table_col;
+ 
+ /// The order key's width: a bf16 sign-flipped pattern is 16 bits.
+ pub const KEY_BITS: u32 = 16;
+@@ -129,6 +136,7 @@
+     /// constraint kernel (`gpu/m2b/cudagen.rs`); `None` when this
+     /// component's fingerprint has no kernel, which is the fork's
+     /// scalar CPU route.
++    #[cfg(feature = "prover")]
+     fn cuda_eval_blob(&self) -> Option<Vec<u8>> {
+         crate::cudagen::blob_for(self)
+     }
+@@ -460,6 +468,7 @@
+ 
+ // ------------------------------------------------------------------- the run ---
+ 
++#[cfg(feature = "prover")]
+ pub struct Outcome {
+     pub proven: Proven,
+     pub sums: Sums,
+@@ -469,6 +478,7 @@
+     pub lax: bool,
+ }
+ 
++#[cfg(feature = "prover")]
+ impl Outcome {
+     pub fn accepts(&self) -> bool {
+         self.proven.stark_ok && self.sums.cancels() && self.off_table == 0
+@@ -506,6 +516,7 @@
+ ///
+ /// The layout is *given*, not chosen: a binding to the head's dequant is
+ /// positionwise, so both components have to walk the same `(token, chunk)` rows.
++#[cfg(feature = "prover")]
+ pub struct AComponent {
+     pub lay: MatLayout,
+     pub pre: Vec<Eval>,
+@@ -521,6 +532,7 @@
+     pub b0: usize,
+ }
+ 
++#[cfg(feature = "prover")]
+ impl AComponent {
+     /// Stream KK: the emitted token of every position, in position order.  The
+     /// rows walk the tokens descending, so this reads them back off the
+@@ -536,6 +548,7 @@
+     }
+ }
+ 
++#[cfg(feature = "prover")]
+ pub fn component(w: &AWitness, lax: bool, lay: MatLayout, m_rk: &mut [u32],
+               bad: Option<Tamper>) -> AComponent {
+     let pr = lay.per_row;
+@@ -632,6 +645,7 @@
+ 
+ /// The component's LogUp columns and its use sum, in the order the AIR adds the
+ /// lookups.  Split out of `run` so the composed path builds the same fractions.
++#[cfg(feature = "prover")]
+ pub fn logup(r: &AComponent, lax: bool, rk: &RangeRel) -> (Vec<Eval>, SecureField) {
+     let one = stwo::prover::backend::simd::qm31::PackedQM31::broadcast(SecureField::one());
+     let (n, f) = crate::plogup::paired(r.lay.per_row, |i, vr| {
+@@ -647,6 +661,7 @@
+ /// Stream E: the binding's accumulator column, and the value it closes on.  The
+ /// weights are the mirror of the head dequant's output side, and an inert row
+ /// contributes nothing on either side.
++#[cfg(feature = "prover")]
+ pub fn binding_col(r: &AComponent, tokens: usize, t: &ArgmaxBinding) -> (Vec<Eval>, SecureField, SecureField) {
+     let rows = 1usize << r.lay.log_rows;
+     let mut u = vec![SecureField::zero(); rows];
+@@ -687,6 +702,7 @@
+     (cols, u[rows - 1], g[rows - 1])
+ }
+ 
++#[cfg(feature = "prover")]
+ pub fn run(w: &AWitness, lax: bool, per_row_target: usize, bad: Option<Tamper>)
+            -> (Outcome, MatLayout) {
+     // the vocabulary is not a power of two at either real model, so this is the
+@@ -769,6 +785,7 @@
+     pub per_row: usize,
+ }
+ 
++#[cfg(feature = "prover")]
+ impl crate::gadgets::Gadget for Argmax {
+     type Witness = AWitness;
+     type Cfg = Cfg;
+--- a/prover/src/gadgets/attention/air.rs
++++ b/prover/src/gadgets/attention/air.rs
+@@ -358,6 +358,7 @@
+ impl FrameworkEval for ChanEval {
+     /// milestone 2b: the flat parameter block for the generated
+     /// constraint kernel (`gpu/m2b/cudagen.rs`).
++    #[cfg(feature = "prover")]
+     fn cuda_eval_blob(&self) -> Option<Vec<u8>> {
+         crate::cudagen::blob_for(self)
+     }
+@@ -524,6 +525,7 @@
+ impl FrameworkEval for KeyEval {
+     /// milestone 2b: the flat parameter block for the generated
+     /// constraint kernel (`gpu/m2b/cudagen.rs`).
++    #[cfg(feature = "prover")]
+     fn cuda_eval_blob(&self) -> Option<Vec<u8>> {
+         crate::cudagen::blob_for(self)
+     }
+@@ -773,6 +775,7 @@
+ impl FrameworkEval for OutEval {
+     /// milestone 2b: the flat parameter block for the generated
+     /// constraint kernel (`gpu/m2b/cudagen.rs`).
++    #[cfg(feature = "prover")]
+     fn cuda_eval_blob(&self) -> Option<Vec<u8>> {
+         crate::cudagen::blob_for(self)
+     }
+@@ -840,6 +843,7 @@
+ impl FrameworkEval for RowEval {
+     /// milestone 2b: the flat parameter block for the generated
+     /// constraint kernel (`gpu/m2b/cudagen.rs`).
++    #[cfg(feature = "prover")]
+     fn cuda_eval_blob(&self) -> Option<Vec<u8>> {
+         crate::cudagen::blob_for(self)
+     }
+@@ -928,6 +932,7 @@
+ impl FrameworkEval for ExpTableEval {
+     /// milestone 2b: the flat parameter block for the generated
+     /// constraint kernel (`gpu/m2b/cudagen.rs`).
++    #[cfg(feature = "prover")]
+     fn cuda_eval_blob(&self) -> Option<Vec<u8>> {
+         crate::cudagen::blob_for(self)
+     }
+--- a/prover/src/gadgets/attention/mod.rs
++++ b/prover/src/gadgets/attention/mod.rs
+@@ -14,8 +14,10 @@
+ //! * `device` -- the same columns born on the card
+ 
+ pub mod air;
++#[cfg(feature = "prover")]
+ pub mod device;
+ pub mod layout;
++#[cfg(feature = "prover")]
+ pub mod run;
+ pub mod trace;
+ pub mod witness;
+@@ -23,6 +25,7 @@
+ /// The attention block: the three components over one grid.
+ pub struct Attention;
+ 
++#[cfg(feature = "prover")]
+ impl crate::gadgets::Gadget for Attention {
+     type Witness = witness::Attn;
+     type Cfg = trace::Cfg;
+--- a/prover/src/gadgets/attention/trace.rs
++++ b/prover/src/gadgets/attention/trace.rs
+@@ -23,18 +23,26 @@
+ //! and the carry pass over them is O(rows) and stays serial.
+ 
+ use num_traits::{One, Zero};
++#[cfg(feature = "prover")]
+ use rayon::prelude::*;
+ use stwo::core::fields::m31::M31;
+ use stwo::core::fields::qm31::SecureField;
++#[cfg(feature = "prover")]
+ use stwo::prover::backend::simd::qm31::PackedQM31;
+ use stwo_constraint_framework::Relation;
+ 
+ use crate::gadgets::attention::air::{ExpRel, Powers};
+-use crate::common::{Eval, eval_of, m31_u32};
+-use crate::encoding::{m31_of, secure_cols};
++use crate::common::m31_u32;
++#[cfg(feature = "prover")]
++use crate::common::{Eval, eval_of};
++use crate::encoding::m31_of;
++#[cfg(feature = "prover")]
++use crate::encoding::secure_cols;
+ use crate::gadgets::attention::layout::{Cells, LayoutChan, LayoutKey, LayoutOut, Shape};
+ use crate::gadgets::attention::witness::{Attn, Variant};
+-use crate::relations::{RangeRel, table_col};
++use crate::relations::RangeRel;
++#[cfg(feature = "prover")]
++use crate::relations::table_col;
+ 
+ /// One lookup, as the AIR adds it: which relation, and which columns carry it.
+ #[derive(Clone)]
+@@ -53,6 +61,7 @@
+ /// Build one component's LogUp columns, pairing consecutive lookups exactly as
+ /// `finalize_logup_in_pairs` does -- via the parallel builder (B6 section 7's
+ /// named remainder; bit-identical to `LogupTraceGenerator`).
++#[cfg(feature = "prover")]
+ pub fn logup_cols(
+     log_rows: u32,
+     looks: &[Look],
+@@ -74,6 +83,7 @@
+ /// without ever pairing them into columns, and the two backends have to be reading
+ /// one definition. Nothing about the committed path changes: `logup_cols` calls
+ /// it through `paired` exactly where the closure used to be called.
++#[cfg(feature = "prover")]
+ pub fn look_frac(l: &Look, vec_row: usize, cols: &[Eval], pre: &[Eval], exp: &ExpRel,
+                  ranges: &[RangeRel]) -> (PackedQM31, PackedQM31) {
+     let one = PackedQM31::broadcast(SecureField::one());
+@@ -157,6 +167,7 @@
+     w
+ }
+ 
++#[cfg(feature = "prover")]
+ pub struct Committed {
+     pub pre: Vec<Eval>,
+     pub base: Vec<Eval>,
+@@ -169,6 +180,7 @@
+ /// The per-key-tile selector columns (tree 0), without the shared tables: the
+ /// composed proof commits several key tiles' selectors alongside one master table
+ /// set, so tables are split into `pre_tables`.
++#[cfg(feature = "prover")]
+ pub fn commit_pre(a: &Attn, l: &Layouts, with_out: bool, with_rows: bool)
+                   -> Vec<Eval> {
+     let sh = a.shape;
+@@ -284,6 +296,7 @@
+ }
+ 
+ /// The shared tables (tree 0): the exp table and one range table per width.
++#[cfg(feature = "prover")]
+ pub fn pre_tables(a: &Attn, widths: &[u32]) -> Vec<Eval> {
+     let tbl_rows = 1usize << a.log_table;
+     let mut pre = vec![];
+@@ -311,6 +324,7 @@
+ 
+ /// The witness columns (tree 1), bumping lookup multiplicities into vectors the
+ /// caller owns -- shared across every component of a composed proof.
++#[cfg(feature = "prover")]
+ pub fn commit_base(a: &Attn, l: &Layouts, cfg: &Cfg, widths: &[u32],
+                    mult_exp: &mut [u32], mult_r: &mut [Vec<u32>], off_table: &mut usize,
+                    with_out: bool, with_rows: bool) -> (Vec<Eval>, Vec<usize>) {
+@@ -521,6 +535,7 @@
+ /// `interaction_phase` reads `com.base`), the component offsets, and the device
+ /// columns when there are any.
+ #[allow(clippy::too_many_arguments)]
++#[cfg(feature = "prover")]
+ pub fn commit_base_any(a: &Attn, l: &Layouts, cfg: &Cfg, widths: &[u32],
+                        mult_exp: &mut [u32], mult_r: &mut [Vec<u32>],
+                        off_table: &mut usize, with_out: bool, with_rows: bool)
+@@ -640,6 +655,7 @@
+ }
+ 
+ /// One multiplicity column per table, in table order.
++#[cfg(feature = "prover")]
+ pub fn mult_cols(a: &Attn, widths: &[u32], mult_exp: &[u32], mult_r: &[Vec<u32>]) -> Vec<Eval> {
+     let mut cols = vec![eval_of(a.log_table, mult_exp.iter().map(|m| m31_u32(*m)).collect())];
+     for (t, w) in widths.iter().enumerate() {
+@@ -649,6 +665,7 @@
+ }
+ 
+ /// Everything committed before the challenges are drawn (the standalone path).
++#[cfg(feature = "prover")]
+ pub fn commit_phase(a: &Attn, l: &Layouts, cfg: &Cfg) -> Committed {
+     let widths = range_widths(a, cfg);
+     let mut mult_exp = vec![0u32; 1usize << a.log_table];
+@@ -662,6 +679,7 @@
+     Committed { pre, base, at, off_table }
+ }
+ 
++#[cfg(feature = "prover")]
+ pub struct Interaction {
+     /// B7a milestone 4 (section 3 row 1): the accumulator columns are always
+     /// the host's; a LogUp column is wherever its component's columns were.
+@@ -697,6 +715,7 @@
+ /// LogUp columns, in component order.  `widths` orders `ranges`; the composed
+ /// proof passes its global width list, the standalone path `range_widths`.
+ #[allow(clippy::too_many_arguments)]
++#[cfg(feature = "prover")]
+ pub fn interaction_phase(a: &Attn, l: &Layouts, cfg: &Cfg, pow: &Powers, exp: &ExpRel,
+                          ranges: &[RangeRel], com: &Committed, widths: &[u32],
+                          with_out: bool, with_rows: bool,
+@@ -1246,6 +1265,7 @@
+ }
+ 
+ /// The tables' own LogUp sides, one column per table, in table order.
++#[cfg(feature = "prover")]
+ pub fn table_sides(a: &Attn, widths: &[u32], exp: &ExpRel, ranges: &[RangeRel],
+                    pre_exp: [&Eval; 2], pre_ranges: &[&Eval], mults: &[&Eval])
+                    -> (Vec<Eval>, Vec<SecureField>) {
+--- a/prover/src/gadgets/attention/witness.rs
++++ b/prover/src/gadgets/attention/witness.rs
+@@ -27,15 +27,18 @@
+ 
+ use rand::rngs::SmallRng;
+ use rand::{Rng, SeedableRng};
++#[cfg(feature = "prover")]
+ use rayon::prelude::*;
+ 
+ use crate::bf16;
+ use crate::gadgets::attention::layout::Shape;
+ use crate::layer::Layer;
++#[cfg(feature = "prover")]
+ use crate::witread::{self, Site};
+ 
+ /// A raw column, read and widened.  `site` says which decode the widening is,
+ /// so that the two widths this is called at are visible apart.
++#[cfg(feature = "prover")]
+ fn read<T: Copy + Send>(path: &str, width: usize, site: Site,
+                         conv: impl Fn(&[u8]) -> T + Send + Sync) -> Result<Vec<T>, String> {
+     let raw = witread::read_file(path)?;
+@@ -59,6 +62,7 @@
+     pub num32: Option<Vec<i32>>,
+ }
+ 
++#[cfg(feature = "prover")]
+ impl Half {
+     /// The three files of one half, read and widened once.  `tag` is the
+     /// suffix the diagonal block's copies carry (`kkc.i16` against `kk.i16`).
+@@ -104,6 +108,7 @@
+     pub cor: Option<Half>,
+ }
+ 
++#[cfg(feature = "prover")]
+ impl LayerRaw {
+     /// Read what the key tiles this layer will build actually want.  A dump with no
+     /// diagonal block has no second half and no `mm.i32`; a single key tile asked for on
+@@ -152,9 +157,11 @@
+ /// arrays -- one derived, one copied -- and still fires when the two disagree.
+ /// One entry is the right size: a layer's six key tiles ask for the same table in a
+ /// row, and the chunk after them wants a different one.
++#[cfg(feature = "prover")]
+ static TABLE_MEMO: std::sync::Mutex<Option<((usize, u32, u64), Vec<u32>)>> =
+     std::sync::Mutex::new(None);
+ 
++#[cfg(feature = "prover")]
+ fn table_of(rows: usize, nmax: u32, frac: f64) -> Vec<u32> {
+     let key = (rows, nmax, frac.to_bits());
+     let mut memo = TABLE_MEMO.lock().unwrap_or_else(|e| e.into_inner());
+@@ -385,6 +392,7 @@
+     }
+ }
+ 
++#[cfg(feature = "prover")]
+ impl Attn {
+     #[allow(clippy::too_many_arguments)]
+     pub fn synthetic(sh: Shape, variant: Variant, q_bits: u32, k_bits: u32, nmax: u32,
+@@ -1033,6 +1041,7 @@
+     }
+ }
+ 
++#[cfg(feature = "prover")]
+ impl Attn {
+     /// Stream LL (E11), the model-only load: a key tile at this shape carrying the
+     /// model's exp table and its per-instance scales, and **no witness**.
+@@ -1122,6 +1131,7 @@
+ // and write nothing but `key_tiles` (and the attnout witness rebuilt from them),
+ // which is why they are the attention gadget's and not `layer.rs`'s. They stay
+ // methods, and stay here, so that no call site and no body changes.
++#[cfg(feature = "prover")]
+ impl Layer {
+     /// Stream J: size the layer's master exp table by the largest key the key tiles
+     /// actually look up, instead of by the manifest's `d_bits + spread`.
+--- a/prover/src/gadgets/attn_out/air.rs
++++ b/prover/src/gadgets/attn_out/air.rs
+@@ -79,6 +79,7 @@
+ impl FrameworkEval for AttnOutEval {
+     /// milestone 2b: the flat parameter block for the generated
+     /// constraint kernel (`gpu/m2b/cudagen.rs`).
++    #[cfg(feature = "prover")]
+     fn cuda_eval_blob(&self) -> Option<Vec<u8>> {
+         crate::cudagen::blob_for(self)
+     }
+--- a/prover/src/gadgets/attn_out/claims.rs
++++ b/prover/src/gadgets/attn_out/claims.rs
+@@ -1,15 +1,18 @@
+ //! What the attnout component publishes, and its LogUp columns.
+ 
+ use num_traits::{One, Zero};
++#[cfg(feature = "prover")]
+ use rayon::prelude::*;
+ use stwo::core::fields::FieldExpOps;
+ use stwo::core::fields::m31::M31;
+ use stwo::core::fields::qm31::SecureField;
+ 
+ use crate::encoding::m31_of;
++#[cfg(feature = "prover")]
+ use crate::gadgets::attn_out::trace::AoComponent;
+ use crate::gadgets::attn_out::witness::AttnOut;
+ 
++#[cfg(feature = "prover")]
+ pub struct AoInteraction {
+     pub cols: Vec<crate::device::AnyCol<'static>>,
+     pub claimed_out: SecureField,
+@@ -21,6 +24,7 @@
+ }
+ 
+ #[allow(clippy::too_many_arguments)]
++#[cfg(feature = "prover")]
+ pub fn ao_interaction(ao: &AttnOut, r: &AoComponent, rr: SecureField, s_ch: SecureField,
+                       rv: SecureField, c_ctx: usize, rels: &crate::compose::Rels,
+                       air: &crate::gadgets::attn_out::air::AttnOutEval, gkr: bool) -> AoInteraction {
+--- a/prover/src/gadgets/attn_out/mod.rs
++++ b/prover/src/gadgets/attn_out/mod.rs
+@@ -28,6 +28,7 @@
+ 
+ pub mod air;
+ pub mod claims;
++#[cfg(feature = "prover")]
+ pub mod device;
+ pub mod layout;
+ pub mod trace;
+--- a/prover/src/gadgets/attn_out/trace.rs
++++ b/prover/src/gadgets/attn_out/trace.rs
+@@ -3,13 +3,17 @@
+ use num_traits::{One, Zero};
+ use stwo::core::fields::m31::M31;
+ 
+-use crate::common::{Eval, eval_of, m31_u32};
++use crate::common::m31_u32;
++#[cfg(feature = "prover")]
++use crate::common::{Eval, eval_of};
++#[cfg(feature = "prover")]
+ use crate::device_witness::sub_slice;
+ use crate::encoding::m31_of;
+ use crate::gadgets::attn_out::layout::AoLayout;
+ use crate::gadgets::attn_out::witness::AttnOut;
+ use crate::layer::{Layer, Tables};
+ 
++#[cfg(feature = "prover")]
+ pub struct AoComponent {
+     pub lay: AoLayout,
+     /// as `FreivaldsComponent`'s: the mirror under `ZK_DEVICE_WITNESS_GEN_ATTENTION_FREIVALDS=1`
+@@ -37,6 +41,7 @@
+     pub denp2: bool,
+ }
+ 
++#[cfg(feature = "prover")]
+ impl AoComponent {
+     /// `2^(acc_lo_bits + acc_hi_bits - 1)`: what a committed `acc` is shifted by
+     /// so its two limbs are a range check on `|acc|`.  Zero in the magnitude
+@@ -51,6 +56,7 @@
+     }
+ }
+ 
++#[cfg(feature = "prover")]
+ impl AoComponent {
+     /// Committed cells, wherever the columns are.
+     pub fn base_cells(&self) -> usize {
+@@ -76,6 +82,7 @@
+ /// accumulator's.  `acc` stays where it was, so the `z` fold, the device
+ /// accumulator and `gkrlink`'s binding read the same column they always did.
+ #[allow(clippy::too_many_arguments)]
++#[cfg(feature = "prover")]
+ pub fn ao_component(ao: &AttnOut, per_row_target: usize, q_bits: u32, rem_bits: u32,
+                  acc_bits: (u32, u32), acc_mag: bool, denp2: bool,
+                  jv_min: i32, jo_max: i32,
+--- a/prover/src/gadgets/dequant/claims.rs
++++ b/prover/src/gadgets/dequant/claims.rs
+@@ -7,16 +7,22 @@
+ //! checks, and `ZK_GENERATED_LOGUP=2` asserts the two agree cell for cell.
+ 
+ use num_traits::{One, Zero};
++#[cfg(feature = "prover")]
+ use rayon::prelude::*;
+ use stwo::core::fields::m31::M31;
+ use stwo::core::fields::qm31::SecureField;
+ 
+-use crate::common::{eval_of, m31_u32};
++use crate::common::m31_u32;
++#[cfg(feature = "prover")]
++use crate::common::eval_of;
+ use crate::encoding::m31_of;
+ use crate::gadgets::dequant::Variant as DeqVariant;
+-use crate::gadgets::dequant::trace::{Mat, MatComponent, deq_ref, fold_out};
++use crate::gadgets::dequant::trace::{Mat, deq_ref, fold_out};
++#[cfg(feature = "prover")]
++use crate::gadgets::dequant::trace::MatComponent;
+ 
+ /// The matmul component's Freivalds claimed side and LogUp columns.
++#[cfg(feature = "prover")]
+ pub struct MatInteraction {
+     pub cols: Vec<crate::device::AnyCol<'static>>,
+     pub claimed_h: SecureField,
+@@ -57,6 +63,7 @@
+ /// `attn_trace::interaction_phase`.
+ #[allow(clippy::too_many_arguments)]
+ #[allow(clippy::too_many_arguments)]
++#[cfg(feature = "prover")]
+ pub fn mat_interaction(m: &Mat, r: &MatComponent, rv: SecureField, s_ch: SecureField,
+                        rels: &crate::compose::Rels, out: Option<&OutputClaimW>,
+                        air: &crate::gadgets::dequant::DequantEval, gkr: bool,
+@@ -307,6 +314,7 @@
+     eval
+ }
+ 
++#[cfg(feature = "prover")]
+ fn mat_logup_ir(r: &MatComponent, air: &crate::gadgets::dequant::DequantEval, on_device: bool)
+                 -> (Vec<crate::device::AnyCol<'static>>, SecureField) {
+     use stwo::prover::backend::simd::m31::PackedM31;
+@@ -374,6 +382,7 @@
+     (crate::device::host_cols(cols), sum)
+ }
+ 
++#[cfg(feature = "prover")]
+ fn mat_logup(m: &Mat, r: &MatComponent, rels: &crate::compose::Rels,
+              air: &crate::gadgets::dequant::DequantEval)
+              -> (Vec<crate::device::AnyCol<'static>>, SecureField) {
+--- a/prover/src/gadgets/dequant/mod.rs
++++ b/prover/src/gadgets/dequant/mod.rs
+@@ -62,6 +62,7 @@
+ /// reference they are checked against, `claims` what the component publishes,
+ /// `device` the same columns born on the card.
+ pub mod claims;
++#[cfg(feature = "prover")]
+ pub mod device;
+ pub mod layout;
+ pub mod trace;
+@@ -71,8 +72,11 @@
+ use stwo::core::air::Component;
+ use stwo::core::fields::m31::{M31, P};
+ use stwo::core::fields::qm31::SecureField;
++#[cfg(feature = "prover")]
+ use stwo::prover::ComponentProver;
++#[cfg(feature = "prover")]
+ use stwo::prover::backend::simd::m31::{LOG_N_LANES, PackedM31};
++#[cfg(feature = "prover")]
+ use stwo::prover::backend::simd::qm31::PackedQM31;
+ use stwo_constraint_framework::preprocessed_columns::PreProcessedColumnId;
+ use stwo_constraint_framework::{
+@@ -81,7 +85,9 @@
+ };
+ 
+ use crate::bf16::{self, EXP_BIAS, KMAX_SOUND, MulRow, NormRow, Round};
+-use crate::common::{Eval, Proven, Session, Sums, eval_of, log_rows_for, m31_u32, twiddles};
++use crate::common::{Sums, log_rows_for, m31_u32};
++#[cfg(feature = "prover")]
++use crate::common::{Eval, Proven, Session, eval_of, twiddles};
+ use crate::encoding::m31_of;
+ use crate::relations::{
+     FRAC_COLS, FracRel, MUL_COLS, MulRel, NORM_COLS, NormRel, PairRel, RangeRel, TableEval,
+@@ -558,6 +564,7 @@
+ impl FrameworkEval for DequantEval {
+     /// milestone 2b: the flat parameter block for the generated
+     /// constraint kernel (`gpu/m2b/cudagen.rs`).
++    #[cfg(feature = "prover")]
+     fn cuda_eval_blob(&self) -> Option<Vec<u8>> {
+         crate::cudagen::blob_for(self)
+     }
+@@ -1081,6 +1088,7 @@
+     Range(usize, usize),
+ }
+ 
++#[cfg(feature = "prover")]
+ pub struct Outcome {
+     pub proven: Proven,
+     pub sums: Sums,
+@@ -1101,6 +1109,7 @@
+     pub n_columns: [usize; 3],
+ }
+ 
++#[cfg(feature = "prover")]
+ impl Outcome {
+     pub fn accepts(&self) -> bool {
+         self.proven.stark_ok && self.sums.cancels() && self.off_table == 0
+@@ -1138,6 +1147,7 @@
+     }
+ }
+ 
++#[cfg(feature = "prover")]
+ pub fn run(w: &Witness, sp: &Spec, tamper: Option<Tamper>) -> Outcome {
+     // `Spec::sound()` was reported, not asserted, so `--kmax 25` would run unsound
+     // (B6 review).  Refuse instead.
+@@ -1827,6 +1837,7 @@
+ /// The quantized matmul and the dequantization of its accumulator.
+ pub struct Dequant;
+ 
++#[cfg(feature = "prover")]
+ impl crate::gadgets::Gadget for Dequant {
+     type Witness = Witness;
+     type Cfg = Spec;
+--- a/prover/src/gadgets/dequant/trace.rs
++++ b/prover/src/gadgets/dequant/trace.rs
+@@ -12,11 +12,14 @@
+ //! the value this component proves rather than a second implementation of it.
+ 
+ use num_traits::Zero;
++#[cfg(feature = "prover")]
+ use rayon::prelude::*;
+ use stwo::core::fields::m31::M31;
+ 
+ use crate::bf16;
+-use crate::common::{Eval, eval_of, m31_u32};
++use crate::common::m31_u32;
++#[cfg(feature = "prover")]
++use crate::common::{Eval, eval_of};
+ use crate::encoding::m31_of;
+ use crate::gadgets::dequant::{Map, Spec, Variant as DeqVariant};
+ use crate::layer::Tables;
+@@ -70,6 +73,7 @@
+ 
+ /// A component's committed and preprocessed columns, and what its interaction
+ /// builder needs to remember.
++#[cfg(feature = "prover")]
+ pub struct MatComponent {
+     pub lay: MatLayout,
+     pub spec: Spec,
+@@ -86,6 +90,7 @@
+     pub dev: Option<crate::gadgets::dequant::device::DevDequantWitnessGen>,
+ }
+ 
++#[cfg(feature = "prover")]
+ impl MatComponent {
+     /// Committed cells, wherever the columns are.
+     pub fn base_cells(&self) -> usize {
+@@ -105,6 +110,7 @@
+ /// integer and whose counterparty is the key tiles' own V (`dequant::OKind::Int`).
+ /// It changes nothing but which rows the `oin`/`obd` step selectors mark, so no
+ /// preprocessed column is added and no other component moves.
++#[cfg(feature = "prover")]
+ pub fn mat_component(m: &Mat, spec: &Spec, tables: &mut Tables, output_claim: bool,
+                   ohead: Option<usize>,
+                   fold_bend: (Option<usize>, Option<usize>)) -> MatComponent {
+@@ -369,6 +375,7 @@
+ /// point of checking here rather than against a proof digest is that a
+ /// mismatch names the column and the cell.
+ #[allow(clippy::too_many_arguments)]
++#[cfg(feature = "prover")]
+ fn check_witness_gen_dev(m: &Mat, lay: &MatLayout, base: &[Eval], pre: &[Eval],
+                   ref_bad: usize, want_host: &[u16],
+                   dev: &crate::gadgets::dequant::device::DevDequantWitnessGen, tables: &Tables,
+--- a/prover/src/gadgets/embed/mod.rs
++++ b/prover/src/gadgets/embed/mod.rs
+@@ -94,8 +94,11 @@
+ use stwo::core::channel::Channel;
+ use stwo::core::fields::m31::M31;
+ use stwo::core::fields::qm31::SecureField;
++#[cfg(feature = "prover")]
+ use stwo::prover::ComponentProver;
++#[cfg(feature = "prover")]
+ use stwo::prover::backend::simd::m31::PackedM31;
++#[cfg(feature = "prover")]
+ use stwo::prover::backend::simd::qm31::PackedQM31;
+ use stwo_constraint_framework::preprocessed_columns::PreProcessedColumnId;
+ use stwo_constraint_framework::{
+@@ -103,10 +106,16 @@
+     Relation, RelationEFTraitBound, RelationEntry, TraceLocationAllocator,
+ };
+ 
+-use crate::encoding::{canon, m31_of, secure_cols_pub, split};
+-use crate::relations::{RangeRel, RangeTableEval, id, table_col, tbl_range};
++use crate::encoding::{canon, m31_of, split};
++#[cfg(feature = "prover")]
++use crate::encoding::secure_cols_pub;
++use crate::relations::{RangeRel, RangeTableEval, id, tbl_range};
++#[cfg(feature = "prover")]
++use crate::relations::table_col;
+ use crate::boundary::PACK;
+-use crate::common::{Eval, Proven, Session, Sums, eval_of, log_rows_for, m31_u32, twiddles};
++use crate::common::{Sums, log_rows_for, m31_u32};
++#[cfg(feature = "prover")]
++use crate::common::{Eval, Proven, Session, eval_of, twiddles};
+ 
+ /// The exponent's width: `ef` is a bf16 exponent field, so `[0, 256)`, and the
+ /// packing argument above needs exactly this check and no other.
+@@ -294,6 +303,7 @@
+ }
+ 
+ impl FrameworkEval for EmbedEval {
++    #[cfg(feature = "prover")]
+     fn cuda_eval_blob(&self) -> Option<Vec<u8>> {
+         crate::cudagen::blob_for(self)
+     }
+@@ -380,6 +390,7 @@
+ }
+ 
+ impl FrameworkEval for EmbTableEval {
++    #[cfg(feature = "prover")]
+     fn cuda_eval_blob(&self) -> Option<Vec<u8>> {
+         crate::cudagen::blob_for(self)
+     }
+@@ -541,6 +552,7 @@
+ /// The gadget's committed and preprocessed columns, with no transcript of its
+ /// own -- what the composed proof needs, and what `run` builds its standalone
+ /// proof out of so the two cannot drift apart.
++#[cfg(feature = "prover")]
+ pub struct EComponent {
+     pub lay: EmbLayout,
+     pub tokens: usize,
+@@ -564,6 +576,7 @@
+ }
+ 
+ /// Build both components, and bump the 8-bit range table's multiplicities.
++#[cfg(feature = "prover")]
+ pub fn component(w: &EWitness, lay: EmbLayout, m_ef: &mut [u32], bad: Option<Tamper>) -> EComponent {
+     let (pe, k) = (lay.pe, lay.k);
+     let rows = 1usize << lay.log_use;
+@@ -678,6 +691,7 @@
+               off_table }
+ }
+ 
++#[cfg(feature = "prover")]
+ impl EComponent {
+     /// Stream KK: the committed id of every position, in position order -- the
+     /// vector the statement publishes and `boundary-grid` compares against the
+@@ -702,6 +716,7 @@
+ 
+ /// The use component's LogUp columns and its use sum, in the order the AIR adds
+ /// the lookups: the embedding entry first, then one `ef` range check per slot.
++#[cfg(feature = "prover")]
+ pub fn logup(r: &EComponent, rel: &EmbRel, rel_ef: &RangeRel) -> (Vec<Eval>, SecureField) {
+     let pe = r.lay.pe;
+     let pack = PackedM31::broadcast(m31_u32(PACK as u32));
+@@ -724,6 +739,7 @@
+ }
+ 
+ /// The table side's one LogUp column and its claimed sum.
++#[cfg(feature = "prover")]
+ pub fn table_side(r: &EComponent, rel: &EmbRel) -> (Vec<Eval>, SecureField) {
+     let refs: Vec<&Eval> = r.tab_pre.iter().collect();
+     table_col(r.lay.log_tab, rel, &refs, &r.tab_mult)
+@@ -731,6 +747,7 @@
+ 
+ /// The two Horner columns and the two claims they close on: the stream binding and
+ /// the id claim, in the order the AIR reads them.
++#[cfg(feature = "prover")]
+ pub fn binding_cols(r: &EComponent, t: &ETie) -> (Vec<Eval>, SecureField, SecureField) {
+     let rows = 1usize << r.lay.log_use;
+     let (pe, k) = (r.lay.pe, r.lay.k);
+@@ -775,6 +792,7 @@
+ 
+ // ------------------------------------------------------------- the standalone --
+ 
++#[cfg(feature = "prover")]
+ pub struct Outcome {
+     pub proven: Proven,
+     pub sums: Sums,
+@@ -784,6 +802,7 @@
+     pub binding_ok: bool,
+ }
+ 
++#[cfg(feature = "prover")]
+ impl Outcome {
+     pub fn accepts(&self) -> bool {
+         self.proven.stark_ok && self.sums.cancels() && self.off_table == 0 && self.binding_ok
+@@ -820,6 +839,7 @@
+ /// run -- so the claim is recomputed from the witness's own `xin` and compared,
+ /// which is the same comparison `verify_composed` makes against
+ /// `stream_bindings[stream_in]` and is what makes `TokRow` bite in this harness too.
++#[cfg(feature = "prover")]
+ pub fn run(w: &EWitness, target: usize, bad: Option<Tamper>) -> (Outcome, EmbLayout) {
+     let lay = EmbLayout::choose(w.d, w.tokens, w.vocab, target);
+     let mut m_ef = vec![0u32; 1 << EF_BITS];
+@@ -956,6 +976,7 @@
+     pub per_row: usize,
+ }
+ 
++#[cfg(feature = "prover")]
+ impl crate::gadgets::Gadget for Embed {
+     type Witness = EWitness;
+     type Cfg = Cfg;
+--- a/prover/src/gadgets/freivalds/claims.rs
++++ b/prover/src/gadgets/freivalds/claims.rs
+@@ -1,13 +1,16 @@
+ //! What the Freivalds component publishes, and its LogUp columns.
+ 
+ use num_traits::{One, Zero};
++#[cfg(feature = "prover")]
+ use rayon::prelude::*;
+ use stwo::core::fields::qm31::SecureField;
+ 
+ use crate::encoding::m31_of;
++#[cfg(feature = "prover")]
+ use crate::gadgets::freivalds::trace::FreivaldsComponent;
+ use crate::layer::Layer;
+ 
++#[cfg(feature = "prover")]
+ pub struct FreivaldsInteraction {
+     pub cols: Vec<crate::device::AnyCol<'static>>,
+     pub claimed: Vec<SecureField>,
+@@ -17,6 +20,7 @@
+     pub qx_claim: SecureField,
+ }
+ 
++#[cfg(feature = "prover")]
+ pub fn freivalds_interaction(layer: &Layer, r: &FreivaldsComponent, rv: SecureField, s_ch: SecureField,
+                              rels: &crate::compose::Rels, range_check: bool,
+                              air: &crate::gadgets::freivalds::FreivaldsEval, gkr: bool) -> FreivaldsInteraction {
+--- a/prover/src/gadgets/freivalds/mod.rs
++++ b/prover/src/gadgets/freivalds/mod.rs
+@@ -10,8 +10,10 @@
+ //! is the Freivalds identity `acc = qX qW` (mod p), with nothing committed twice.
+ 
+ pub mod claims;
++#[cfg(feature = "prover")]
+ pub mod device;
+ pub mod layout;
++#[cfg(feature = "prover")]
+ pub mod run;
+ pub mod trace;
+ 
+@@ -98,6 +100,7 @@
+ impl FrameworkEval for FreivaldsEval {
+     /// milestone 2b: the flat parameter block for the generated
+     /// constraint kernel (`gpu/m2b/cudagen.rs`).
++    #[cfg(feature = "prover")]
+     fn cuda_eval_blob(&self) -> Option<Vec<u8>> {
+         crate::cudagen::blob_for(self)
+     }
+@@ -193,6 +196,7 @@
+     pub p_target: usize,
+ }
+ 
++#[cfg(feature = "prover")]
+ impl crate::gadgets::Gadget for Freivalds {
+     type Witness = crate::layer::Layer;
+     type Cfg = Cfg;
+--- a/prover/src/gadgets/freivalds/trace.rs
++++ b/prover/src/gadgets/freivalds/trace.rs
+@@ -3,12 +3,16 @@
+ use num_traits::Zero;
+ use stwo::core::fields::m31::M31;
+ 
+-use crate::common::{Eval, eval_of, m31_u32};
++use crate::common::m31_u32;
++#[cfg(feature = "prover")]
++use crate::common::{Eval, eval_of};
+ use crate::encoding::m31_of;
++#[cfg(feature = "prover")]
+ use crate::device_witness::sub_slice;
+ use crate::gadgets::freivalds::layout::FreivaldsLayout;
+ use crate::layer::{Layer, Tables};
+ 
++#[cfg(feature = "prover")]
+ pub struct FreivaldsComponent {
+     pub name: String,
+     pub lay: FreivaldsLayout,
+@@ -26,6 +30,7 @@
+     pub dev: Option<crate::gadgets::freivalds::device::DevFreivalds>,
+ }
+ 
++#[cfg(feature = "prover")]
+ impl FreivaldsComponent {
+     pub fn base_cells(&self) -> usize {
+         let n = match &self.dev { Some(d) => d.base.len(), None => self.base.len() };
+@@ -40,6 +45,7 @@
+ /// Build one Freivalds group's component: activations committed (offset
+ /// `2^(act_bits-1)`), weights preprocessed, range multiplicities bumped at
+ /// `act_bits` -- 8 everywhere but the widened attention output's group.
++#[cfg(feature = "prover")]
+ pub fn freivalds_component(layer: &Layer, name: &str, mat_idx: &[usize], p_target: usize,
+                         act_bits: u32, tables: &mut Tables,
+                         corrupt_qx: Option<usize>, oversize_qx: Option<usize>) -> FreivaldsComponent {
+--- a/prover/src/gadgets/requant/mod.rs
++++ b/prover/src/gadgets/requant/mod.rs
+@@ -35,8 +35,11 @@
+ use stwo::core::air::Component;
+ use stwo::core::fields::m31::M31;
+ use stwo::core::fields::qm31::SecureField;
++#[cfg(feature = "prover")]
+ use stwo::prover::ComponentProver;
++#[cfg(feature = "prover")]
+ use stwo::prover::backend::simd::m31::PackedM31;
++#[cfg(feature = "prover")]
+ use stwo::prover::backend::simd::qm31::PackedQM31;
+ use stwo_constraint_framework::preprocessed_columns::PreProcessedColumnId;
+ use stwo_constraint_framework::{
+@@ -45,7 +48,9 @@
+ };
+ 
+ use crate::bf16;
+-use crate::common::{Eval, Proven, Session, Sums, eval_of, m31_u32, twiddles};
++use crate::common::{Sums, m31_u32};
++#[cfg(feature = "prover")]
++use crate::common::{Eval, Proven, Session, eval_of, twiddles};
+ use crate::encoding::{canon, m31_of, split};
+ use crate::layout::MatLayout;
+ use crate::relations::{FracRel, MulRel, PairRel, RangeRel, TableEval, TableKind, id};
+@@ -122,6 +127,7 @@
+ impl FrameworkEval for RequantEval {
+     /// milestone 2b: the flat parameter block for the generated
+     /// constraint kernel (`gpu/m2b/cudagen.rs`).
++    #[cfg(feature = "prover")]
+     fn cuda_eval_blob(&self) -> Option<Vec<u8>> {
+         crate::cudagen::blob_for(self)
+     }
+@@ -338,6 +344,7 @@
+ }
+ 
+ impl RWitness {
++    #[cfg(feature = "prover")]
+     pub fn load(dir: &str, name: &str, n_cap: usize) -> Result<Self, String> {
+         let raw = std::fs::read(format!("{dir}/x_{name}.u16"))
+             .map_err(|e| format!("x_{name}.u16: {e}"))?;
+@@ -416,6 +423,7 @@
+ 
+ // ------------------------------------------------------------------- the run ---
+ 
++#[cfg(feature = "prover")]
+ pub struct Outcome {
+     pub proven: Proven,
+     pub sums: Sums,
+@@ -433,6 +441,7 @@
+     pub per_row: usize,
+ }
+ 
++#[cfg(feature = "prover")]
+ impl Outcome {
+     pub fn accepts(&self) -> bool {
+         self.proven.stark_ok && self.sums.cancels() && self.off_table == 0
+@@ -466,6 +475,7 @@
+     }
+ }
+ 
++#[cfg(feature = "prover")]
+ pub fn run(w: &RWitness, v: SVariant, with_max: bool, per_row_target: usize,
+            tamper: Option<Tamper>) -> Outcome {
+     let t0 = std::time::Instant::now();
+@@ -975,6 +985,7 @@
+ }
+ 
+ /// One requantize seam, as a composed component.
++#[cfg(feature = "prover")]
+ pub struct RqComponent {
+     pub tag: String,
+     pub lay: MatLayout,
+@@ -1003,6 +1014,7 @@
+     pub fired: usize,
+ }
+ 
++#[cfg(feature = "prover")]
+ impl RqComponent {
+     pub fn base_cells(&self) -> usize {
+         self.base.len() << self.lay.log_rows
+@@ -1019,6 +1031,7 @@
+ /// matmul's own component carries, which is what makes the remaining scale seam a
+ /// one-constraint job rather than a design question.
+ #[allow(clippy::too_many_arguments)]
++#[cfg(feature = "prover")]
+ pub fn rq_component(tag: &str, x: &[u16], qx: &[i32], jx: &[i64], sx: &[(u32, u32)],
+                  tokens: usize, n: usize, v: SVariant, lay: MatLayout,
+                  tables: &mut crate::layer::Tables, tamper: Option<RqTamper>) -> RqComponent {
+@@ -1242,6 +1255,7 @@
+ 
+ /// The component's two Horner columns and its LogUp columns, in the AIR's order.
+ #[allow(clippy::too_many_arguments)]
++#[cfg(feature = "prover")]
+ pub fn rq_interaction(r: &RqComponent, binding: &RqTie, qnz: &PairRel, rq3: &FracRel, rq4: &MulRel,
+                       scl2: &PairRel, scl3: &FracRel, r15: &RangeRel, rqv: &FracRel)
+                       -> (Vec<Eval>, SecureField, SecureField, SecureField, SecureField) {
+@@ -1410,6 +1424,7 @@
+     pub per_row: usize,
+ }
+ 
++#[cfg(feature = "prover")]
+ impl crate::gadgets::Gadget for Requant {
+     type Witness = RWitness;
+     type Cfg = Cfg;
+--- a/prover/src/gadgets/requant/tables.rs
++++ b/prover/src/gadgets/requant/tables.rs
+@@ -15,7 +15,9 @@
+ use stwo_constraint_framework::preprocessed_columns::PreProcessedColumnId;
+ 
+ use crate::bf16;
+-use crate::common::{Eval, eval_of, m31_u32};
++use crate::common::m31_u32;
++#[cfg(feature = "prover")]
++use crate::common::{Eval, eval_of};
+ use crate::encoding::m31_of;
+ use crate::relations::id;
+ 
+@@ -58,6 +60,7 @@
+ }
+ /// The two tables' contents, padded by repeating the last real row -- stream
+ /// II's `residual_stream_table_cols` rule, for the same reason.
++#[cfg(feature = "prover")]
+ pub fn rq_tab_cols(v: SVariant) -> Vec<Eval> {
+     let rows = rq_table(v);
+     let lr = crate::common::log_rows_for(rows.len(), 1);
+@@ -74,6 +77,7 @@
+         })
+         .collect()
+ }
++#[cfg(feature = "prover")]
+ pub fn scl_tab_cols(v: SVariant) -> Vec<Eval> {
+     let rows = scl_table(v);
+     (0..scl_tab_width(v))
+@@ -91,6 +95,7 @@
+         })
+         .collect()
+ }
++#[cfg(feature = "prover")]
+ pub fn rqv_tab_cols() -> Vec<Eval> {
+     let rows = rqv_table();
+     (0..3)
+--- a/prover/src/gadgets/residual_stream/mod.rs
++++ b/prover/src/gadgets/residual_stream/mod.rs
+@@ -95,16 +95,20 @@
+ pub mod witness;
+ 
+ /// The same columns born on the card.
++#[cfg(feature = "prover")]
+ pub mod device;
+ 
+ use num_traits::{One, Zero};
++#[cfg(feature = "prover")]
+ use rayon::prelude::*;
+ use serde_json::{Value, json};
+ use stwo::core::air::Component;
+ use stwo::core::fields::FieldExpOps;
+ use stwo::core::fields::m31::M31;
+ use stwo::core::fields::qm31::SecureField;
++#[cfg(feature = "prover")]
+ use stwo::prover::ComponentProver;
++#[cfg(feature = "prover")]
+ use stwo::prover::backend::simd::qm31::PackedQM31;
+ use stwo_constraint_framework::preprocessed_columns::PreProcessedColumnId;
+ use stwo_constraint_framework::{
+@@ -113,7 +117,9 @@
+ };
+ 
+ use crate::bf16::{self, EXP_BIAS, Round};
+-use crate::common::{Eval, Proven, Session, Sums, eval_of, log_rows_for, m31_u32, twiddles};
++use crate::common::{Sums, log_rows_for, m31_u32};
++#[cfg(feature = "prover")]
++use crate::common::{Eval, Proven, Session, eval_of, twiddles};
+ use crate::encoding::{canon, is_odd_pattern, join, m31_of, sgn_of, split, to_f64};
+ use crate::relations::{FRAC_COLS, FracRel, NORM_COLS, NormRel, id};
+ 
+@@ -696,6 +702,7 @@
+     /// constraint kernel (`gpu/m2b/cudagen.rs`); `None` when this
+     /// component's fingerprint has no kernel, which is the fork's
+     /// scalar CPU route.
++    #[cfg(feature = "prover")]
+     fn cuda_eval_blob(&self) -> Option<Vec<u8>> {
+         crate::cudagen::blob_for(self)
+     }
+@@ -935,6 +942,7 @@
+     pub odd: usize,
+ }
+ 
++#[cfg(feature = "prover")]
+ impl ResidualStreamWitness {
+     pub fn new(rows: usize, groups: Vec<Vec<u16>>, prog: &Prog, round: Round, source: String)
+                -> Self {
+@@ -1000,6 +1008,7 @@
+ 
+ /// What the program computes, in f64 with one bf16 rounding per op -- the
+ /// independent side of every `ref_mismatch` count below.
++#[cfg(feature = "prover")]
+ pub fn reference(groups: &[Vec<u16>], pre: &[u16], rows: usize, prog: &Prog, round: Round)
+                  -> Vec<Vec<u16>> {
+     let per_row: Vec<Vec<u16>> = (0..rows)
+@@ -1286,6 +1295,7 @@
+     }
+ }
+ 
++#[cfg(feature = "prover")]
+ pub struct ResidualStreamComponent {
+     pub pre: Vec<Eval>,
+     pub base: Vec<Eval>,
+@@ -1318,6 +1328,7 @@
+     pub dev: Option<device::DevResidualStream>,
+ }
+ 
++#[cfg(feature = "prover")]
+ impl ResidualStreamComponent {
+     /// Committed cells, wherever the columns are.
+     pub fn base_cells(&self) -> usize {
+@@ -1415,6 +1426,7 @@
+     (ok, n)
+ }
+ 
++#[cfg(feature = "prover")]
+ pub fn residual_stream_component(w: &ResidualStreamWitness, prog: &Prog, round: Round, tag: &str,
+                               tables: &mut ResidualStreamTables, tamper: Option<Tamper>)
+                               -> ResidualStreamComponent {
+@@ -1880,6 +1892,7 @@
+     pub val: ValRel,
+ }
+ 
++#[cfg(feature = "prover")]
+ pub struct ResidualStreamInteraction {
+     /// B11 stream M: columns of either kind. The bindings are host accumulators and
+     /// always will be; the LogUp half goes wherever `devfrac::frac_cols` sends
+@@ -1929,6 +1942,7 @@
+ ///
+ /// The weights of every binding are packed into one array, so the kernel takes one
+ /// upload rather than one per lane.
++#[cfg(feature = "prover")]
+ fn binding_specs(r: &ResidualStreamComponent, t: &Binding)
+                  -> (Vec<crate::devacc::FAccResidualStreamBinding>, Vec<SecureField>) {
+     let prog = &r.prog;
+@@ -1975,6 +1989,7 @@
+ /// `zk_residual_stream_eval` fit under the cap, but because nothing ever called the
+ /// router. The bindings stay on the host: they are a serial Horner fold over the
+ /// component's own values, which is `devacc`'s shape and not this stream's.
++#[cfg(feature = "prover")]
+ pub fn residual_stream_interaction(r: &ResidualStreamComponent, rels: &ResidualStreamRels,
+                                    binding: Option<&Binding>, air: &ResidualStreamEval,
+                                    gkr: bool) -> ResidualStreamInteraction {
+@@ -2167,6 +2182,7 @@
+ }
+ 
+ impl GKind {
++    #[cfg(feature = "prover")]
+     fn combine(&self, v: &[stwo::prover::backend::simd::m31::PackedM31]) -> PackedQM31 {
+         match self {
+             GKind::Pow(r) => r.combine(v),
+@@ -2191,6 +2207,7 @@
+     /// constraint kernel (`gpu/m2b/cudagen.rs`); `None` when this
+     /// component's fingerprint has no kernel, which is the fork's
+     /// scalar CPU route.
++    #[cfg(feature = "prover")]
+     fn cuda_eval_blob(&self) -> Option<Vec<u8>> {
+         crate::cudagen::blob_for(self)
+     }
+@@ -2223,6 +2240,7 @@
+     }
+ }
+ 
++#[cfg(feature = "prover")]
+ pub fn table_side(log_rows: u32, kind: &GKind, row: &[&Eval], mult: &Eval)
+                   -> (Vec<Eval>, SecureField) {
+     crate::plogup::build(log_rows, 1, |_, vr| {
+@@ -2256,6 +2274,7 @@
+ /// The unary tables need it for a second reason: `UnKind::NormR`'s image of
+ /// `(0, 0)` is `rsqrt(eps)`, not zero, so a zero-padded `UN` would have offered
+ /// `r = 0` for a zero sum of squares.
++#[cfg(feature = "prover")]
+ pub fn residual_stream_table_cols(t: &ResidualStreamTables) -> Vec<Eval> {
+     let pad = |n: u32| 1usize << n;
+     // the last real row, repeated -- `i.min(len - 1)`
+@@ -2309,6 +2328,7 @@
+ ///
+ /// The assertion also refuses the one way the padding rule could degenerate: an
+ /// empty table has no last real row to repeat and would be padded with zeros.
++#[cfg(feature = "prover")]
+ pub fn residual_stream_mult_cols(t: &ResidualStreamTables) -> Vec<Eval> {
+     let mut named: Vec<(&str, usize, &[u32])> = vec![
+         ("POW", t.pow.len(), &t.m_pow),
+@@ -2367,6 +2387,7 @@
+ 
+ // ----------------------------------------------------------------- the run ----
+ 
++#[cfg(feature = "prover")]
+ pub struct Outcome {
+     pub proven: Proven,
+     pub sums: Sums,
+@@ -2392,6 +2413,7 @@
+     pub trace_secs: f64,
+ }
+ 
++#[cfg(feature = "prover")]
+ impl Outcome {
+     pub fn accepts(&self) -> bool {
+         self.proven.stark_ok && self.sums.cancels() && self.off_table == 0 && self.binding_ok
+@@ -2478,6 +2500,7 @@
+ }
+ 
+ /// One component, proved on its own: the measurement and the probes both run here.
++#[cfg(feature = "prover")]
+ pub fn run(w: &ResidualStreamWitness, prog: &Prog, round: Round, kmax: u32,
+            tamper: Option<Tamper>) -> Outcome {
+     let t0 = std::time::Instant::now();
+@@ -2793,6 +2816,7 @@
+ /// mean itself and is the number the spec change has to be judged on.  With
+ /// `roots` supplied it is the *composed* two-level reduction that is compared,
+ /// which is the check that the tiling above really is `tree_sum`'s order.
++#[cfg(feature = "prover")]
+ pub fn norm_drift(dir: &str, d: usize, tokens_cap: usize, round: Round, which: &str,
+                   roots: Option<&[u16]>) -> Result<Value, String> {
+     let x = read_u16(dir, if which == "n2" { "xmid" } else { "xin" })?;
+@@ -2879,6 +2903,7 @@
+     pub kmax: u32,
+ }
+ 
++#[cfg(feature = "prover")]
+ impl crate::gadgets::Gadget for ResidualStream {
+     type Witness = ResidualStreamWitness;
+     type Cfg = Cfg;
+--- a/prover/src/gadgets/residual_stream/witness.rs
++++ b/prover/src/gadgets/residual_stream/witness.rs
+@@ -7,7 +7,9 @@
+ //! read.
+ 
+ use crate::bf16;
++#[cfg(feature = "prover")]
+ use crate::layer::{model_u16, read_u16};
++#[cfg(feature = "prover")]
+ use crate::witread::{self, Site};
+ 
+ pub struct ResidualStreamCols {
+@@ -48,6 +50,7 @@
+     pub head: bool,
+ }
+ 
++#[cfg(feature = "prover")]
+ impl ResidualStreamCols {
+     /// The seven columns `extract.py --residual-stream` writes, plus `eps` and `1/d` from
+     /// the manifest.  Absent `residual_stream` in the manifest the layer simply has none and
+--- a/prover/src/gadgets/rope/mod.rs
++++ b/prover/src/gadgets/rope/mod.rs
+@@ -39,8 +39,12 @@
+ };
+ 
+ use crate::bf16;
+-use crate::common::{Eval, eval_of, m31_u32};
+-use crate::encoding::{canon, join, m31_of, secure_cols_pub, split};
++use crate::common::m31_u32;
++#[cfg(feature = "prover")]
++use crate::common::{Eval, eval_of};
++use crate::encoding::{canon, join, m31_of, split};
++#[cfg(feature = "prover")]
++use crate::encoding::secure_cols_pub;
+ use crate::gadgets::requant::tables::{TT_POW2, TT_RANGE, rqv_at};
+ use crate::layout::MatLayout;
+ use crate::relations::{FracRel, PairRel, RangeRel, id};
+@@ -263,6 +267,7 @@
+ }
+ /// Padded by repeating the last real row, the rule every table in this repo
+ /// pads by: a repeated row admits no triple the real rows do not.
++#[cfg(feature = "prover")]
+ pub fn qdiv_tab_cols(bits: u32) -> Vec<Eval> {
+     let rows = qdiv_table(bits);
+     let lr = crate::common::log_rows_for(rows.len(), 1);
+@@ -290,6 +295,7 @@
+ pub fn qnz_col(bits: u32, k: usize) -> PreProcessedColumnId {
+     id(format!("zk_qqnz{bits}_{k}"))
+ }
++#[cfg(feature = "prover")]
+ pub fn qnz_tab_cols(bits: u32) -> Vec<Eval> {
+     let lr = qnz_log_rows(bits);
+     vec![
+@@ -365,6 +371,7 @@
+ }
+ 
+ impl FrameworkEval for QuantEval {
++    #[cfg(feature = "prover")]
+     fn cuda_eval_blob(&self) -> Option<Vec<u8>> {
+         crate::cudagen::blob_for(self)
+     }
+@@ -497,6 +504,7 @@
+     }
+ }
+ 
++#[cfg(feature = "prover")]
+ pub struct QComponent {
+     pub tag: String,
+     pub lay: MatLayout,
+@@ -531,6 +539,7 @@
+     pub fired: usize,
+ }
+ 
++#[cfg(feature = "prover")]
+ impl QComponent {
+     pub fn base_cells(&self) -> usize {
+         self.base.len() << self.lay.log_rows
+@@ -547,6 +556,7 @@
+ /// per-channel exponent (`n` of them, constant down the tokens) and `want` the
+ /// integers the key tile committed, which the component only *checks* against.
+ #[allow(clippy::too_many_arguments)]
++#[cfg(feature = "prover")]
+ pub fn q_component(tag: &str, x: &[u16], jj: &[i64], want: Option<&[i64]>, tokens: usize,
+                 n: usize, hd: usize, bits: u32, nz_bits: u32, lay: MatLayout,
+                 tables: &mut crate::layer::Tables, tamper: Option<QTamper>) -> QComponent {
+@@ -764,6 +774,7 @@
+ 
+ /// One quantize component's interaction columns: the two binding accumulators, then
+ /// the LogUp fractions in the AIR's own lookup order.
++#[cfg(feature = "prover")]
+ pub fn q_interaction(r: &QComponent, binding: &QTie, hd: usize, qnz: &PairRel, rq3: &FracRel,
+                      r15: &RangeRel, rqv: &FracRel)
+                      -> (Vec<Eval>, SecureField, SecureField, SecureField) {
+--- a/prover/src/gadgets/rope/witness.rs
++++ b/prover/src/gadgets/rope/witness.rs
+@@ -8,13 +8,17 @@
+ //! the q/k/v matmuls, the key tiles, the attnout witness -- and they stay
+ //! methods here so that no call site and no body changes.
+ 
++#[cfg(feature = "prover")]
+ use rayon::prelude::*;
+ 
+ use crate::bf16;
+ use crate::gadgets::attention::witness::Attn;
+ use crate::gadgets::dequant::Variant as DeqVariant;
+ use crate::gadgets::dequant::trace::{Mat, deq_ref, fold_out};
+-use crate::layer::{Layer, model_i32};
++use crate::layer::Layer;
++#[cfg(feature = "prover")]
++use crate::layer::model_i32;
++#[cfg(feature = "prover")]
+ use crate::witread;
+ 
+ /// Stream NN: the witness side of the rotation and the quantize.
+@@ -45,6 +49,7 @@
+     pub jv: Vec<i32>,
+ }
+ 
++#[cfg(feature = "prover")]
+ impl RopeCols {
+     /// The four files `extract.py` writes for this stream, beside `jv.i32`.
+     /// `Ok(None)` -- not an error -- when the dump carries none of them: a dump
+@@ -101,6 +106,7 @@
+     }
+ }
+ 
++#[cfg(feature = "prover")]
+ impl Layer {
+     /// Stream NN: derive the key tiles' Q, K and V from this layer's own `q`, `k`
+     /// and `v` matmuls, and rebuild the key tiles from them.
+--- a/prover/src/gkr_key_tile.rs
++++ b/prover/src/gkr_key_tile.rs
+@@ -57,17 +57,24 @@
+ 
+ use num_traits::{One, Zero};
+ use stwo::core::fields::FieldExpOps;
++#[cfg(feature = "prover")]
+ use rayon::prelude::*;
+ use stwo::core::channel::Channel;
+ use stwo::core::fields::qm31::SecureField;
++#[cfg(feature = "prover")]
+ use stwo::prover::backend::simd::SimdBackend;
++#[cfg(feature = "prover")]
+ use stwo::prover::backend::simd::column::SecureColumn;
++#[cfg(feature = "prover")]
+ use stwo::prover::backend::simd::m31::{LOG_N_LANES, N_LANES};
++#[cfg(feature = "prover")]
+ use stwo::prover::backend::simd::qm31::PackedSecureField;
++#[cfg(feature = "prover")]
+ use stwo::prover::lookups::gkr_prover::{Layer, prove_batch};
+ use stwo::core::lookups::gkr_verifier::{
+     Gate, GkrArtifact, GkrBatchProof, GkrError, partially_verify_batch,
+ };
++#[cfg(feature = "prover")]
+ use stwo::prover::lookups::mle::Mle;
+ use stwo_constraint_framework::FrameworkEval;
+ 
+@@ -186,6 +193,7 @@
+ /// -- so the fractions proved here are the same function of the same committed
+ /// columns that the committed running-sum columns are built from. Nothing is
+ /// re-derived and nothing is fed unpaired.
++#[cfg(feature = "prover")]
+ fn input_layer<F>(inst: &Inst, frac: &F) -> Layer<SimdBackend>
+ where
+     F: Fn(usize, usize) -> (PackedSecureField, PackedSecureField) + Sync,
+@@ -228,6 +236,7 @@
+ /// purely additive: it reads the same columns and writes nothing the committed
+ /// path can see.
+ #[derive(Default)]
++#[cfg(feature = "prover")]
+ pub struct Collect {
+     /// the component whose lookups are arriving; the caller sets it before each
+     /// component's interaction pass, because a diagonal block key tile reaches
+@@ -268,6 +277,7 @@
+     pub feeds: Vec<feedimpl::FeedPlan>,
+ }
+ 
++#[cfg(feature = "prover")]
+ impl Collect {
+     pub fn with_direct(want_direct: bool) -> Self {
+         Self { want_direct, ..Default::default() }
+@@ -383,10 +393,12 @@
+ /// device-built key tile has no host columns at all -- but the per-token site
+ /// passes a list that always carries its two derived high-limb blocks, so
+ /// "non-empty" is not the question; "long enough to hold the span" is.
++#[cfg(feature = "prover")]
+ fn host_span(at: &[usize], which: usize, cols: &[crate::common::Eval]) -> bool {
+     cols.len() >= at[which + 1]
+ }
+ 
++#[cfg(feature = "prover")]
+ pub fn feed_site(
+     c: &mut Collect,
+     air: Option<&crate::devfrac::KeyTileAir<'_>>,
+@@ -475,6 +487,7 @@
+ /// emits no lookups at all and its IR would be empty. One definition of the
+ /// fraction, three readers: this, `mat_logup`'s hand-written builder (the one
+ /// `ZK_GENERATED_LOGUP=2` compares against) and `gkrlink::deq_looks`.
++#[cfg(feature = "prover")]
+ pub fn deq_site(
+     c: &mut Collect,
+     reg: usize,
+@@ -504,6 +517,7 @@
+ /// IR's own numerators rather than assumed: `gkrlink::residual_stream_look_count` is what
+ /// the *verifier* derives, `ir_units` is what the fractions are, and the two
+ /// disagreeing is a stop before a proof rather than after one.
++#[cfg(feature = "prover")]
+ pub fn residual_stream_site(
+     c: &mut Collect,
+     reg: usize,
+@@ -537,6 +551,7 @@
+ }
+ 
+ /// B11 stream V, lever 4: one Freivalds group's range checks.
++#[cfg(feature = "prover")]
+ pub fn freivalds_site(
+     c: &mut Collect,
+     reg: usize,
+@@ -560,6 +575,7 @@
+ /// B11 stream V, lever 4: the attention-output component's looks -- seven per
+ /// slot since stream JJ (E11) added the exponent window and the accumulator's
+ /// two limbs to `denp`'s own range check.
++#[cfg(feature = "prover")]
+ pub fn ao_site(
+     c: &mut Collect,
+     eval: &crate::gadgets::freivalds::AttnOutEval,
+@@ -587,6 +603,7 @@
+ /// them the same is to have one copy rather than four. `deq_site` is now the
+ /// first caller and its recorded digests are what say the extraction moved
+ /// nothing.
++#[cfg(feature = "prover")]
+ pub struct FamSite<'a> {
+     pub reg: crate::gkrlink::Comp,
+     /// what a control's message calls this component
+@@ -619,6 +636,7 @@
+ /// evaluator emits no lookups at all and its IR would be empty. One definition
+ /// of the fraction, three readers: this, the family's hand-written builder (the
+ /// one `ZK_GENERATED_LOGUP=2` compares against) and `gkrlink`'s affine forms.
++#[cfg(feature = "prover")]
+ pub fn fam_site<E: FrameworkEval>(c: &mut Collect, s: FamSite<'_>, eval: &E) {
+     let (reg, log_rows) = (s.reg, s.log_rows);
+     let tag = &s.tag;
+@@ -728,6 +746,7 @@
+ /// hands back every look, so asking it per `(look, row)` -- which is the shape
+ /// `input_layer` wants -- would run it `n_looks` times over. It runs once here
+ /// and the layers index the table.
++#[cfg(feature = "prover")]
+ pub fn deq_fracs(ir: &crate::cudagen::Ir, log_rows: u32,
+                  pre: &[crate::common::Eval], base: &[crate::common::Eval])
+                  -> Vec<Vec<(PackedSecureField, PackedSecureField)>> {
+@@ -1363,6 +1382,7 @@
+ /// build exists to measure -- unless `ZK_GKR_HOST=1` pins it to the host simd
+ /// backend for an on-box comparison. The proof bytes are the same either way,
+ /// which is the port's digest gate.
++#[cfg(feature = "prover")]
+ pub fn prove_collected(channel: &mut impl Channel, c: Collect) -> Proved {
+     mix_shape(channel, &c.sites);
+     let fractions = c.insts.iter().map(|i| i.fractions()).sum();
+@@ -1573,6 +1593,7 @@
+     }
+ }
+ 
++#[cfg(feature = "prover")]
+ pub struct Proved {
+     pub proof: GkrBatchProof,
+     /// B11 stream S, lever 3: the OOD point and input-layer claims the link's
+@@ -1648,6 +1669,7 @@
+ /// This is the reference the GKR is checked against in the self-test: the plain
+ /// sum of `num / den` over every entry, by inversion, with no sumcheck
+ /// involved. It is `O(size)` and only for the test.
++#[cfg(feature = "prover")]
+ pub fn direct_sum<F>(inst: &Inst, frac: &F) -> SecureField
+ where
+     F: Fn(usize, usize) -> (PackedSecureField, PackedSecureField) + Sync,
+@@ -1695,6 +1717,7 @@
+ }
+ 
+ #[allow(dead_code)]
++#[cfg(feature = "prover")]
+ const _: () = assert!(N_LANES == 1usize << LOG_N_LANES);
+ 
+ // ------------------------------------------------------------------ the test ---
+@@ -1718,6 +1741,7 @@
+ /// 4. **A corrupted proof is rejected**, and the rejection is named.
+ /// 5. **What it cost**: instances, fractions, the input-layer build, the
+ ///    sumcheck, and the proof bytes.
++#[cfg(feature = "prover")]
+ pub fn cmd(args: &[String]) {
+     use crate::gadgets::attention::witness::{Attn, Variant};
+     use crate::gadgets::attention::layout::Shape;
+@@ -1854,6 +1878,7 @@
+ /// The first round polynomial of the first layer's sumcheck is the earliest
+ /// thing the verifier checks, so a rejection there says the sumcheck is
+ /// load-bearing rather than that some later shape check tripped.
++#[cfg(feature = "prover")]
+ fn tamper(proof: &mut GkrBatchProof) -> String {
+     if let Some(sc) = proof.sumcheck_proofs.first_mut() {
+         if let Some(poly) = sc.round_polys.first_mut() {
+--- a/prover/src/gkrlink.rs
++++ b/prover/src/gkrlink.rs
+@@ -41,6 +41,7 @@
+ use std::collections::BTreeMap;
+ 
+ use num_traits::{One, Zero};
++#[cfg(feature = "prover")]
+ use rayon::prelude::*;
+ use stwo::core::circle::{CirclePoint, Coset};
+ use stwo::core::constraints::{coset_vanishing, point_vanishing};
+@@ -53,23 +54,35 @@
+ use stwo::core::ColumnVec;
+ use stwo::core::air::Component;
+ use stwo::core::air::accumulation::PointEvaluationAccumulator;
++#[cfg(feature = "prover")]
+ use stwo::prover::{DomainEvaluationAccumulator, Trace};
++#[cfg(feature = "prover")]
+ use stwo::prover::backend::simd::SimdBackend;
++#[cfg(feature = "prover")]
+ use stwo::prover::backend::simd::column::SecureColumn;
++#[cfg(feature = "prover")]
+ use stwo::prover::backend::simd::m31::LOG_N_LANES;
++#[cfg(feature = "prover")]
+ use stwo::prover::backend::simd::prefix_sum::inclusive_prefix_sum;
++#[cfg(feature = "prover")]
+ use stwo::prover::backend::simd::qm31::PackedSecureField;
++#[cfg(feature = "prover")]
+ use stwo::prover::backend::{Col, Column};
++#[cfg(feature = "prover")]
+ use stwo::prover::lookups::gkr_prover::GkrOps;
+ use stwo::core::lookups::gkr_verifier::GkrArtifact;
+ use stwo::core::lookups::utils::eq;
++#[cfg(feature = "prover")]
+ use stwo::prover::poly::circle::CircleEvaluation;
++#[cfg(feature = "prover")]
+ use stwo::prover::secure_column::SecureColumnByCoords;
++#[cfg(feature = "prover")]
+ use stwo::prover::ComponentProver;
+ use stwo_constraint_framework::preprocessed_columns::PreProcessedColumnId;
+ use stwo_constraint_framework::{EvalAtRow, FrameworkEval, INTERACTION_TRACE_IDX};
+ 
+ use crate::gadgets::attention::witness::Variant as AttnVariant;
++#[cfg(feature = "prover")]
+ use crate::common::Eval;
+ use crate::gkr_key_tile::Inst;
+ 
+@@ -175,6 +188,7 @@
+ 
+ /// The succinct eq carry-quotients column as committed values (upstream
+ /// `gen_carry_quotient_col`).
++#[cfg(feature = "prover")]
+ fn gen_carry_quotient_col(eval_point: &MleEvalPoint) -> SecureColumnByCoords<SimdBackend> {
+     let (half0, half1) = gen_half_coset_carry_quotients(eval_point);
+ 
+@@ -1002,6 +1016,7 @@
+ /// index of an earlier instruction"). A product is affine only when one side is
+ /// a constant -- which is what makes `2 * dp - 1 - lo` and
+ /// `a_ef - etop + DMAX` affine and a genuine product of two masks not.
++#[cfg(feature = "prover")]
+ fn aff_nodes(ir: &crate::cudagen::Ir) -> Vec<Result<AffForm, String>> {
+     use crate::cudagen::Op;
+     let basis = |i: usize| SecureField::from_m31_array(std::array::from_fn(|j| {
+@@ -1091,6 +1106,7 @@
+ /// reads; everything it reads a committed base mask or a preprocessed column,
+ /// at this row and no other; and the numerator the constant one or itself
+ /// affine in those same columns (dequant's committed `nz` is the precedent).
++#[cfg(feature = "prover")]
+ pub fn aff_looks(ir: &crate::cudagen::Ir) -> Vec<Result<(AffForm, AffForm), String>> {
+     let nodes = aff_nodes(ir);
+     ir.fracs
+@@ -1108,6 +1124,7 @@
+ /// `map` names the column a `(tree, index)` pair is; it is the only
+ /// family-specific part. A look whose numerator is the literal one becomes a
+ /// unit look, which is what puts its instance in `Layer::LogUpSingles`.
++#[cfg(feature = "prover")]
+ pub fn ir_looks<F: Fn(usize, usize) -> RCol>(
+     tag: &str,
+     ir: &crate::cudagen::Ir,
+@@ -1138,6 +1155,7 @@
+ /// A family's `look_units` list, derived rather than written down: the
+ /// collector needs it to split a site into unit and non-unit instances, and
+ /// `gkr_key_tile::plan` needs the two to agree with what the fractions actually are.
++#[cfg(feature = "prover")]
+ pub fn ir_units(ir: &crate::cudagen::Ir) -> Vec<bool> {
+     let one = SecureField::one();
+     aff_looks(ir)
+@@ -1165,6 +1183,7 @@
+ }
+ 
+ /// Decide one lowered evaluator's looks, for the record.
++#[cfg(feature = "prover")]
+ pub fn affinity_of(family: &str, component: &str, ir: &crate::cudagen::Ir) -> Affinity {
+     let looks = aff_looks(ir);
+     let mut bad = vec![];
+@@ -1369,6 +1388,7 @@
+ 
+ /// The two boundary selectors of one height: `1` at the first and second
+ /// coset rows. Committed to the preprocessed tree only under the flag.
++#[cfg(feature = "prover")]
+ pub fn boundary_cols(h: u32) -> [Eval; 2] {
+     let domain = CanonicCoset::new(h).circle_domain();
+     let size = 1usize << h;
+@@ -1385,6 +1405,7 @@
+ // -- in the exact order `LinkEval::evaluate` claims its masks.
+ // ------------------------------------------------------------------------
+ 
++#[cfg(feature = "prover")]
+ fn coords_to_evals(h: u32, c: SecureColumnByCoords<SimdBackend>) -> Vec<Eval> {
+     let domain = CanonicCoset::new(h).circle_domain();
+     c.columns.into_iter().map(|col| CircleEvaluation::new(domain, col)).collect()
+@@ -1398,6 +1419,7 @@
+ /// single height can mix the two -- which costs nothing, because field addition
+ /// is exact and associative and the two partial folds add up to the same column
+ /// whichever order they are taken in.
++#[cfg(feature = "prover")]
+ pub enum Src<'a> {
+     Host(&'a Eval),
+     /// a device-resident base column, as the witness generation left it
+@@ -1409,6 +1431,7 @@
+ /// The device-resident terms are combined by one kernel launch and brought
+ /// back; the host-resident ones are added on the host. With every column on the
+ /// host this is exactly the loop `build_height_cols` used to open with.
++#[cfg(feature = "prover")]
+ pub fn fold_coeff<'a, F: Fn(Comp, &RCol) -> Src<'a>>(hl: &HeightLink, src_of: &F)
+                                                       -> SecureColumn {
+     let h = hl.h;
+@@ -1471,6 +1494,7 @@
+ /// The fold resolves referenced columns against this chunk's committed data
+ /// (the prover's ground truth); the binding constraints are what force it to agree
+ /// with the verifier's own resolution through the component spans.
++#[cfg(feature = "prover")]
+ pub fn build_height_cols(hl: &HeightLink, coeff_col: SecureColumn) -> Vec<Eval> {
+     let h = hl.h;
+     assert_eq!(coeff_col.length, 1usize << h, "the folded column is the wrong height");
+@@ -1539,6 +1563,7 @@
+ impl FrameworkEval for LinkEval {
+     /// milestone 2b: the flat parameter block for the generated
+     /// constraint kernel (`gpu/m2b/cudagen.rs`).
++    #[cfg(feature = "prover")]
+     fn cuda_eval_blob(&self) -> Option<Vec<u8>> {
+         crate::cudagen::blob_for(self)
+     }
+@@ -1666,6 +1691,7 @@
+     }
+ }
+ 
++#[cfg(feature = "prover")]
+ impl<B: stwo::prover::backend::Backend> ComponentProver<B> for LinkTie {
+     fn evaluate_constraint_quotients_on_domain(
+         &self,
+@@ -1800,6 +1826,7 @@
+ /// claim equals. The `ZK_MUT_LINK` control bends one weight and then makes its
+ /// own columns self-consistent with this total, so everything the prover can
+ /// check still holds and only the verifier's side of the link can reject.
++#[cfg(feature = "prover")]
+ pub fn eq_total(hl: &HeightLink, coeff: &SecureColumn) -> SecureField {
+     let n_vec = 1usize << (hl.h - LOG_N_LANES);
+     let eq_mle = SimdBackend::gen_eq_evals(&hl.point, SecureField::one());
+@@ -1814,6 +1841,7 @@
+ /// and name the first violated relation. A development probe for the composed
+ /// run -- the constraints here are the same expressions `LinkEval` hands the
+ /// framework, walked in coset order over the committed values.
++#[cfg(feature = "prover")]
+ pub fn check_height_cols(hl: &HeightLink, cols: &[Eval]) {
+     if std::env::var("ZK_LINK_CHECK").map(|v| v != "1").unwrap_or(true) {
+         return;
+@@ -1889,6 +1917,7 @@
+ 
+ /// One height's sixteen committed columns, built wherever the prover can build
+ /// them, ready for the interaction tree.
++#[cfg(feature = "prover")]
+ pub fn height_cols<'a, F: Fn(Comp, &RCol) -> Src<'a>>(
+     hl: &HeightLink,
+     src_of: &F,
+@@ -1911,6 +1940,7 @@
+ /// The eq-weighted total of one height's folded coefficient column, taken
+ /// wherever the fold ran. This is what `ZK_MUT_LINK` re-derives its claim from,
+ /// so it has to exist on both paths or the control would only be armed on one.
++#[cfg(feature = "prover")]
+ pub fn fold_total<'a, F: Fn(Comp, &RCol) -> Src<'a>>(
+     hl: &HeightLink,
+     src_of: &F,
+--- a/prover/src/layer.rs
++++ b/prover/src/layer.rs
+@@ -15,12 +15,14 @@
+ 
+ use rand::rngs::SmallRng;
+ use rand::{Rng, SeedableRng};
++#[cfg(feature = "prover")]
+ use rayon::prelude::*;
+ 
+ use crate::gadgets::attention::witness::{Attn, LayerRaw as AttnRaw, Src, Variant};
+ use crate::bf16;
+ use crate::gadgets::dequant::{Spec, Variant as DeqVariant};
+ use crate::gadgets::attention::layout::Shape;
++#[cfg(feature = "prover")]
+ use crate::witread::{self, Site};
+ 
+ // The dequant gadget's own names, under the spellings the rest of the crate
+@@ -29,27 +31,33 @@
+ // `layer.rs`, the `dev_*` files and `gadgets/` and nothing else in `prover/src`,
+ // so the code moves and the paths it is reached by stay until a lane that owns
+ // those callers updates them.
+-pub use crate::gadgets::dequant::claims::{MatInteraction, OutputClaimW, deq_logup_eval,
+-                                          mat_interaction};
++pub use crate::gadgets::dequant::claims::{OutputClaimW, deq_logup_eval};
++#[cfg(feature = "prover")]
++pub use crate::gadgets::dequant::claims::{MatInteraction, mat_interaction};
+ pub use crate::gadgets::dequant::layout::{MAT_NAMES, MAT_VARIANTS, MAT_VARIANTS_CHAIN,
+                                           mat_variants};
+-pub use crate::gadgets::dequant::trace::{Mat, MatComponent, deq_ref, deq_ref_a, fold_out,
+-                                         fold_out_a, mat_component};
++pub use crate::gadgets::dequant::trace::{Mat, deq_ref, deq_ref_a, fold_out, fold_out_a};
++#[cfg(feature = "prover")]
++pub use crate::gadgets::dequant::trace::{MatComponent, mat_component};
+ pub use crate::layout::{MIN_MAT_LOG_ROWS, MatLayout};
+ 
+ // The attnout gadget's names, likewise: `compose.rs`, `cli.rs`, `devacc.rs`,
+ // `gkrlink.rs`, `gkr_key_tile.rs` and `witread.rs` say `crate::layer::X` for
+ // every one of them.
++#[cfg(feature = "prover")]
+ pub use crate::gadgets::attn_out::claims::{AoInteraction, ao_interaction};
+ pub use crate::gadgets::attn_out::layout::AoLayout;
++#[cfg(feature = "prover")]
+ pub use crate::gadgets::attn_out::trace::{AoComponent, ao_component};
+ pub use crate::gadgets::attn_out::witness::AttnOut;
+ 
+ // The Freivalds check's names, likewise: `compose.rs`, `cli.rs`, `cudagen.rs`,
+ // `devacc.rs`, `devpre.rs`, `gkrlink.rs` and `gkr_key_tile.rs` say
+ // `crate::layer::X` for these.
++#[cfg(feature = "prover")]
+ pub use crate::gadgets::freivalds::claims::{FreivaldsInteraction, freivalds_interaction};
+ pub use crate::gadgets::freivalds::layout::{FREIVALDS_GROUPS, FreivaldsLayout};
++#[cfg(feature = "prover")]
+ pub use crate::gadgets::freivalds::trace::{FreivaldsComponent, freivalds_component};
+ 
+ // `RopeCols` is `gadgets::rope`'s since #197; `cli.rs` and `compose.rs` name it
+@@ -241,6 +249,7 @@
+ // parallel collect keeps the order, so these are the same arrays the serial
+ // versions built -- and on a sequence chunk they were 0.8 s of the 17 s the
+ // layer took to build.
++#[cfg(feature = "prover")]
+ pub(crate) fn read_u16(path: &str) -> Result<Vec<u16>, String> {
+     let raw = witread::read_file(path)?;
+     let _s = witread::scope(Site::DecodeU16);
+@@ -267,24 +276,28 @@
+ ///
+ /// This is `Layer::from_params` (the brief's open item 1) in the form the box
+ /// half could reach: the files are not *opened*, though the manifest still is.
++#[cfg(feature = "prover")]
+ fn model_values(man: &serde_json::Value, name: &str) -> Option<usize> {
+     if !crate::compose::SHAPE_ONLY.load(std::sync::atomic::Ordering::Relaxed) {
+         return None;
+     }
+     man["files"][name]["values"].as_u64().map(|v| v as usize)
+ }
++#[cfg(feature = "prover")]
+ fn model_i8(dir: &str, man: &serde_json::Value, name: &str) -> Result<Vec<i32>, String> {
+     match model_values(man, name) {
+         Some(n) => Ok(vec![0i32; n]),
+         None => read_i8(&format!("{dir}/{name}")),
+     }
+ }
++#[cfg(feature = "prover")]
+ pub(crate) fn model_i32(dir: &str, man: &serde_json::Value, name: &str) -> Result<Vec<i64>, String> {
+     match model_values(man, name) {
+         Some(n) => Ok(vec![0i64; n]),
+         None => read_i32(&format!("{dir}/{name}")),
+     }
+ }
++#[cfg(feature = "prover")]
+ fn model_i32_narrow(dir: &str, man: &serde_json::Value, name: &str)
+                     -> Result<Vec<i32>, String> {
+     match model_values(man, name) {
+@@ -292,6 +305,7 @@
+         None => read_i32_narrow(&format!("{dir}/{name}")),
+     }
+ }
++#[cfg(feature = "prover")]
+ pub(crate) fn model_u16(dir: &str, man: &serde_json::Value, name: &str) -> Result<Vec<u16>, String> {
+     match model_values(man, name) {
+         Some(n) => Ok(vec![0u16; n]),
+@@ -299,6 +313,7 @@
+     }
+ }
+ 
++#[cfg(feature = "prover")]
+ fn read_i32(path: &str) -> Result<Vec<i64>, String> {
+     let raw = witread::read_file(path)?;
+     let _s = witread::scope(Site::DecodeI32);
+@@ -306,12 +321,14 @@
+         .map(|b| i32::from_le_bytes([b[0], b[1], b[2], b[3]]) as i64)
+         .collect())
+ }
++#[cfg(feature = "prover")]
+ fn read_i8(path: &str) -> Result<Vec<i32>, String> {
+     let raw = witread::read_file(path)?;
+     let _s = witread::scope(Site::DecodeI8);
+     Ok(raw.par_iter().map(|b| *b as i8 as i32).collect())
+ }
+ /// Stream Z: the widened attention output commits `qx_o` at int16 storage.
++#[cfg(feature = "prover")]
+ fn read_i16(path: &str) -> Result<Vec<i32>, String> {
+     let raw = witread::read_file(path)?;
+     let _s = witread::scope(Site::DecodeI8);
+@@ -322,12 +339,14 @@
+ /// The same file as `i32`.  `read_i32` widens every value to `i64` and the
+ /// columns that want `i32` then narrow it back, so this is a second pass over
+ /// an array that was just built, which is what `decode/recast` counts.
++#[cfg(feature = "prover")]
+ fn read_i32_narrow(path: &str) -> Result<Vec<i32>, String> {
+     let v = read_i32(path)?;
+     let _s = witread::scope(Site::DecodeRecast);
+     Ok(v.par_iter().map(|x| *x as i32).collect())
+ }
+ 
++#[cfg(feature = "prover")]
+ impl Layer {
+     pub fn load(dir: &str, cfg: &Src, key_tile_sizes: &[usize], variant: Variant,
+                 round: bf16::Round) -> Result<Self, String> {
+@@ -1475,6 +1494,7 @@
+     }
+ }
+ 
++#[cfg(feature = "prover")]
+ impl Layer {
+     /// Stream II: give a synthetic layer the wiring family's own columns, sized
+     /// off the matmuls it already has -- `d` is the q/k/v group's input width
+--- a/prover/src/lib.rs
++++ b/prover/src/lib.rs
+@@ -13,42 +13,64 @@
+ 
+ pub mod bf16;
+ pub mod boundary;
++#[cfg(feature = "prover")]
+ pub mod chunks;
++#[cfg(feature = "prover")]
+ pub mod cli;
+ pub mod common;
+ pub mod compose;
++#[cfg(feature = "prover")]
+ pub mod cudagen;
++#[cfg(feature = "prover")]
+ pub mod cudakernels;
++#[cfg(feature = "prover")]
+ pub mod devacc;
++#[cfg(feature = "prover")]
+ pub mod devfrac;
++#[cfg(feature = "prover")]
+ pub mod devlogup;
++#[cfg(feature = "prover")]
+ pub mod devpre;
++#[cfg(feature = "prover")]
+ pub mod devtab;
++#[cfg(feature = "prover")]
+ pub mod device;
++#[cfg(feature = "prover")]
+ pub mod device_witness;
+ pub mod encoding;
++#[cfg(feature = "prover")]
+ pub mod exprprobe;
+ pub mod gadgets;
++#[cfg(feature = "prover")]
+ pub mod gencudakernels;
+ pub mod gkr_key_tile;
+ pub mod gkrlink;
+ pub mod layer;
+ pub mod layout;
++#[cfg(feature = "prover")]
+ pub mod logup_run;
++#[cfg(feature = "prover")]
+ pub mod plogup;
++#[cfg(feature = "prover")]
+ pub mod precache;
+ pub mod relations;
++#[cfg(feature = "prover")]
+ pub mod scalars;
++#[cfg(feature = "prover")]
+ pub mod shaperoot;
++#[cfg(feature = "prover")]
+ pub mod spans;
+ pub mod util;
++#[cfg(feature = "prover")]
+ pub mod witread;
+ 
+ /// The dequant gadget's device witness generation, under the name `devacc.rs`
+ /// still reaches it by. The file is `gadgets/dequant/device.rs` since #197.
++#[cfg(feature = "prover")]
+ pub use gadgets::dequant::device as dev_dequant_witness_gen;
+ 
+ /// The shared device witness-generation plumbing, under the name five callers
+ /// outside #197's owned files still reach it by. The file is `device_witness.rs`
+ /// since #197, and each family's generation is its own gadget's `device`.
++#[cfg(feature = "prover")]
+ pub use device_witness as dev_attention_freivalds_witness_gen;
+--- a/prover/src/relations.rs
++++ b/prover/src/relations.rs
+@@ -22,13 +22,16 @@
+ 
+ use num_traits::One;
+ use stwo::core::fields::qm31::SecureField;
++#[cfg(feature = "prover")]
+ use stwo::prover::backend::simd::m31::PackedM31;
++#[cfg(feature = "prover")]
+ use stwo::prover::backend::simd::qm31::PackedQM31;
+ use stwo_constraint_framework::preprocessed_columns::PreProcessedColumnId;
+ use stwo_constraint_framework::{
+     EvalAtRow, FrameworkEval, Relation, RelationEntry, relation,
+ };
+ 
++#[cfg(feature = "prover")]
+ use crate::common::Eval;
+ 
+ relation!(NormRel, 6);
+@@ -93,6 +96,7 @@
+ }
+ 
+ /// A table's own side: `-multiplicity / (z - combine(row))`.
++#[cfg(feature = "prover")]
+ pub fn table_col<R: Relation<PackedM31, PackedQM31> + Sync>(
+     log_rows: u32,
+     rel: &R,
+@@ -126,6 +130,7 @@
+ }
+ 
+ impl TableKind {
++    #[cfg(feature = "prover")]
+     pub(crate) fn combine(&self, v: &[PackedM31]) -> PackedQM31 {
+         match self {
+             TableKind::Norm(r) => r.combine(v),
+@@ -140,6 +145,7 @@
+ impl FrameworkEval for TableEval {
+     /// milestone 2b: the flat parameter block for the generated
+     /// constraint kernel (`gpu/m2b/cudagen.rs`).
++    #[cfg(feature = "prover")]
+     fn cuda_eval_blob(&self) -> Option<Vec<u8>> {
+         crate::cudagen::blob_for(self)
+     }
+@@ -181,6 +187,7 @@
+ impl FrameworkEval for RangeTableEval {
+     /// milestone 2b: the flat parameter block for the generated
+     /// constraint kernel (`gpu/m2b/cudagen.rs`).
++    #[cfg(feature = "prover")]
+     fn cuda_eval_blob(&self) -> Option<Vec<u8>> {
+         crate::cudagen::blob_for(self)
+     }
+--- a/prover/src/util.rs
++++ b/prover/src/util.rs
+@@ -99,6 +99,7 @@
+     BYTE_ACC.get_or_init(|| std::sync::Mutex::new(Default::default()))
+ }
+ 
++#[cfg(feature = "prover")]
+ pub fn add_phase(name: &'static str, secs: f64) {
+     let k = current_chunk();
+     // B11 stream V, lever 1: the same call that accumulates a phase's seconds
+@@ -121,6 +122,7 @@
+ /// `add_phase` covers every phase the wall report names; this is for the few
+ /// places where the interesting instant is a *start* -- the GKR's input layers
+ /// arriving on the card, say -- or where a phase is not timed at all.
++#[cfg(feature = "prover")]
+ pub fn mark_timeline(name: &str) {
+     stwo::prover::lookups::gkr_prover::memmark::mark(name);
+ }
+@@ -284,6 +286,7 @@
+ /// recorded number must name its configuration even when the env is empty.
+ /// `source` is `"env"` when the run set the variable and `"default"` when it
+ /// took the table above.
++#[cfg(feature = "prover")]
+ pub fn modes_json() -> Value {
+     let mut modes = serde_json::Map::new();
+     let mut put = |name: &str, value: u32| {
+@@ -406,6 +409,7 @@
+ /// the driver version, and the CUDA version the driver supports.  `None` for
+ /// each when there is no `nvidia-smi` or it answers nothing, which is the
+ /// case on a machine without a device.
++#[cfg(feature = "prover")]
+ fn nvidia_smi() -> &'static (Option<String>, Option<String>, Option<String>) {
+     static SMI: std::sync::OnceLock<(Option<String>, Option<String>, Option<String>)> =
+         std::sync::OnceLock::new();
+@@ -433,10 +437,12 @@
+     })
+ }
+ 
++#[cfg(feature = "prover")]
+ fn gpu_name() -> Option<String> {
+     nvidia_smi().0.clone()
+ }
+ 
++#[cfg(feature = "prover")]
+ pub fn env_json() -> Value {
+     json!({
+         "threads": rayon::current_num_threads(),
+@@ -556,6 +562,7 @@
+ /// lax argmax turns no gadget off -- it proves a weaker statement in its place
+ /// (`crate::cli::ARGMAX_LAX`) -- so it is listed here for the same reason the skips
+ /// are: a run that used it is a control, and `all_bound` is false for it.
++#[cfg(feature = "prover")]
+ pub fn unsound_skips() -> Vec<String> {
+     std::env::args()
+         .filter_map(|a| {
+@@ -601,6 +608,7 @@
+            "unbound": unbound})
+ }
+ 
++#[cfg(feature = "prover")]
+ pub fn provenance_json() -> Value {
+     let p = prov().lock().unwrap();
+     let mut args = std::env::args();
+@@ -634,6 +642,7 @@
+     })
+ }
+ 
++#[cfg(feature = "prover")]
+ pub fn emit(name: &str, body: Value) {
+     let out = json!({
+         "bench": name,

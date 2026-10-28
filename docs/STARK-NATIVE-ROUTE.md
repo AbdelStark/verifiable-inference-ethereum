@@ -28,7 +28,7 @@ The EIP facts below are verified; the sizes and gas multiples are estimates from
 - **Stwo fork:** a vendored NitrooZK fork of stwo v2.1.0, plus SASH's own verifier edits.
 - **Merkle trees:** non-lifted, mixed-degree, hashed with M31-reduced BLAKE2s (`vcs::Blake2sM31MerkleChannel`).
 - **Trees per segment:** 6 to 10, composition tree included: shape, model, base and interaction, then one per boundary side (residual stream in and out, K/V), then the composition tree (`docs/EVM-GAS-MODEL.md` §1).
-- **GKR:** one LogUp-GKR batch proof per segment, covering the lookups of up to five component families (attention key tiles, dequant, residual stream, Freivalds, attnout; `head` carries one too). It is verified outside stwo's `verify`, between trees 2 and 3, by `partially_verify_batch` from stwo's `prover` module, which needs the `prover` feature and a nightly toolchain.
+- **GKR:** one LogUp-GKR batch proof per segment, covering the lookups of up to five component families (attention key tiles, dequant, residual stream, Freivalds, attnout; `head` carries one too). It is verified outside stwo's `verify`, between trees 2 and 3, by `partially_verify_batch` from stwo's `prover` module, which needs the `prover` feature and a nightly toolchain. This repo's `sp1/patches/0002-move-gkr-verifier-to-core-lookups.patch` moves `partially_verify_batch` and the sum-check verifier to `stwo::core::lookups`, so the verifier build needs neither.
 - **PCS:** `log_blowup = 1`, 100 queries, 0 PoW bits, for 100 conjectured bits.
 
 ## StarkWare's stack today
@@ -61,8 +61,8 @@ The EIP facts below are verified; the sizes and gas multiples are estimates from
 
 ## SP1's weak spots
 
-- **No BLAKE2s or M31/QM31 precompile in SP1 v6.10.** The ~4.64M BLAKE2s compressions and the field arithmetic run as plain RISC-V. That is roughly 10^10 cycles per inference by our estimate, unmeasured. S-two Cairo and StarkWare's circuit library make exactly these operations native.
-- **Large guest input.** `verify_composed` reads serde JSON: about 761 MB per run, 84.6 MB for the `head` segment alone.
+- **No BLAKE2s or M31/QM31 precompile in SP1 v6.10.** The ~4.64M BLAKE2s compressions and the field arithmetic run as plain RISC-V. Our earlier estimate was roughly 10^10 cycles per inference. `docs/EVM-GAS-MODEL.md` §6 measures the unit costs, at 2,139 cycles per compression and 148 per DEEP-quotient step. With a `bincode` proof, its extrapolation for all 23 segments comes to ~2.3e10 cycles from the measured parts alone. Estimating the unmeasured work (OODS evaluation, FRI, the channel and GKR) from #41's synthetic runs raises it to ~3.75–4.92e10. #45 measures it. S-two Cairo and StarkWare's circuit library make exactly these operations native.
+- **Large guest input.** `verify_composed` reads serde JSON: about 761 MB per run, 84.6 MB for the `head` segment alone. Decoding JSON in the guest costs ~30 cycles per byte, so the proof buffer moves to `bincode`, at 8x fewer cycles (`docs/EVM-GAS-MODEL.md` §6.2, `SPEC.md` §1.1).
 - **No verifier-only build.** The verifier sits inside SASH's monolithic prover crate, which always enables stwo's `prover` and `parallel` features, rayon and the CUDA modules, and needs nightly. A guest means splitting out and maintaining a verifier crate. Prior art shows a stwo verifier compiling inside SP1 (`Okm165/stwo-verifier-sp1`), but not this fork or GKR.
 - **Weak Groth16 setup.** L2BEAT rates SP1 v6.1.0's Groth16 phase-2 setup red: Succinct ran it, with 18 participants and no public call. The PLONK option rests on Aztec Ignition and is rated green. If we stay on SP1, PLONK costs ~30k more gas for a stronger setup.
 

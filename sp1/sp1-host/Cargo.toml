@@ -7,8 +7,32 @@ license.workspace = true
 authors.workspace = true
 publish.workspace = true
 
+[features]
+# Cycle-tracker regions need sp1-sdk's profiling executor, which is slower; only the stwo-bench test
+# and the unit-costs command (docs/EVM-GAS-MODEL.md §6) turn it on, with the command's dependencies.
+profiling = [
+    "sp1-sdk/profiling",
+    "dep:bincode",
+    "dep:hex",
+    "dep:postcard",
+    "dep:serde_json",
+    "dep:sha2",
+    "dep:stwo",
+]
+
+[[bin]]
+name = "unit-costs"
+path = "src/bin/unit_costs.rs"
+required-features = ["profiling"]
+
 [dependencies]
+bincode = { workspace = true, optional = true }
+hex = { version = "0.4.3", optional = true }
+postcard = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
+sha2 = { version = "0.10.9", optional = true }
 sp1-sdk.workspace = true
+stwo = { workspace = true, optional = true }
 
 [build-dependencies]
 sp1-build.workspace = true

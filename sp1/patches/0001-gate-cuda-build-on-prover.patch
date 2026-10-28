@@ -1,0 +1,45 @@
+Gate nitroo's CUDA build steps on the prover feature.
+
+Part of the verifier-only build of SASH eb95bfa that the SP1 segment guest runs
+(verifiable-inference-ethereum SPEC.md §1.1). Upstream source is Apache-2.0;
+this patch modifies it (Apache-2.0 §4(b)).
+
+- nitroo/crates/stwo/build.rs ran CUDA cmake on every non-macOS host, whatever
+  the features, and its macOS `exit(0)` left unreachable code that nitroo's
+  -Dwarnings rejects. It now returns before cmake on macOS and whenever the
+  `prover` feature is off (CARGO_FEATURE_PROVER unset).
+- nitroo/crates/constraint-framework/src/lib.rs declared `mod cuda_domain` and
+  re-exported `CudaDomainEvaluator` unconditionally, and cuda_domain.rs imports
+  stwo::prover. Both are now gated on `prover`.
+
+--- a/nitroo/crates/constraint-framework/src/lib.rs
++++ b/nitroo/crates/constraint-framework/src/lib.rs
+@@ -3,6 +3,7 @@
+ 
+ /// ! This module contains helpers to express and use constraints for components.
+ mod component;
++#[cfg(feature = "prover")]
+ mod cuda_domain;
+ 
+ #[cfg(feature = "prover")]
+@@ -19,6 +20,7 @@
+ use core::ops::{Add, AddAssign, Mul, Neg, Sub};
+ 
+ pub use component::{FrameworkComponent, FrameworkEval, TraceLocationAllocator};
++#[cfg(feature = "prover")]
+ pub use cuda_domain::CudaDomainEvaluator;
+ pub use info::InfoEvaluator;
+ use num_traits::{One, Zero};
+--- a/nitroo/crates/stwo/build.rs
++++ b/nitroo/crates/stwo/build.rs
+@@ -1,7 +1,8 @@
+ use std::path::PathBuf;
+ fn main() {
+-    #[cfg(target_os = "macos")]
+-    std::process::exit(0);
++    if cfg!(target_os = "macos") || std::env::var_os("CARGO_FEATURE_PROVER").is_none() {
++        return;
++    }
+     let dst = cmake::Config::new("src/stwo_cuda/cuda")
+         .profile("Release")
+         .build_arg("--jobs=16")

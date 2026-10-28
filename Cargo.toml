@@ -3,6 +3,10 @@ resolver = "3"
 members = [
     "crates/sash-evm-primitives",
 ]
+# The vendored SASH tree (sp1/scripts/vendor-sash.sh) holds nitroo's own workspace. Cargo checks the
+# workspace roots it has already loaded before reading nitroo's manifest, so without this exclude it
+# would resolve nitroo's inherited fields against this workspace when sp1/ builds it.
+exclude = ["sp1/vendor"]
 
 [workspace.package]
 version = "0.1.0"

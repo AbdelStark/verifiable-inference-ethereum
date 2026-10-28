@@ -1,0 +1,16 @@
+[package]
+name = "stwo-bench"
+description = "SP1 guest exercising nitroo's Stwo verifier primitives without the prover feature"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[dependencies]
+bincode.workspace = true
+blake2.workspace = true
+postcard.workspace = true
+serde_json.workspace = true
+sp1-zkvm.workspace = true
+stwo.workspace = true
