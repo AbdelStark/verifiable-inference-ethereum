@@ -1,0 +1,48 @@
+Split verify_composed into byte decoding and a verify over the parsed statement.
+
+Part of the verifier-only build of SASH eb95bfa that the SP1 segment guest runs
+(verifiable-inference-ethereum SPEC.md §1.1). Upstream source is Apache-2.0;
+this patch modifies it (Apache-2.0 §4(b)).
+
+The segment check parses `Fixed` itself, checks its own rules on it and on its
+`Plan`, then verifies. Through the byte entry it would parse `Fixed` and run
+`Plan::new` a second time.
+
+- prover/src/compose.rs: verify_composed keeps its three decodes and their
+  rejections, builds `Plan::new(&fixed.params)` as before, and returns
+  `verify_composed_parsed(&fixed, &plan, &claims, proof)`. The new
+  `pub fn verify_composed_parsed(fixed: &Fixed, plan: &Plan, claims: &Claims,
+  proof: Proof) -> Verdict` is the rest of the old body, unchanged but for
+  reading `fixed`, `plan` and `claims` through references; its caller passes
+  the `Plan` of the same `fixed.params`. With `prover`, `t0` now starts in
+  verify_composed_parsed, so `Verdict.verify_secs` no longer counts the JSON
+  decoding; nothing else in the `Verdict` moves.
+
+--- a/prover/src/compose.rs
++++ b/prover/src/compose.rs
+@@ -7424,8 +7424,6 @@
+ /// multiplier from its own challenges, and runs stwo's verify -- no prover
+ /// struct crosses this boundary.
+ pub fn verify_composed(fixed_bytes: &[u8], claims_bytes: &[u8], proof_bytes: &[u8]) -> Verdict {
+-    #[cfg(feature = "prover")]
+-    let t0 = std::time::Instant::now();
+     let Ok(fixed) = serde_json::from_slice::<Fixed>(fixed_bytes) else {
+         return Verdict::rejected("unparseable fixed statement");
+     };
+@@ -7436,6 +7434,16 @@
+         return Verdict::rejected("unparseable proof");
+     };
+     let plan = Plan::new(&fixed.params);
++    verify_composed_parsed(&fixed, &plan, &claims, proof)
++}
++
++/// `verify_composed` over the parsed statement, claims and proof.  `plan` must
++/// be `Plan::new(&fixed.params)`: every relation draw, challenge count and GKR
++/// instance below comes from it, so a caller that already built it for the
++/// same `fixed` passes it rather than building it twice.
++pub fn verify_composed_parsed(fixed: &Fixed, plan: &Plan, claims: &Claims, proof: Proof) -> Verdict {
++    #[cfg(feature = "prover")]
++    let t0 = std::time::Instant::now();
+     let p = &plan.p;
+     // the claims' shape must match the plan before anything indexes into them
+     let n_residual_stream = plan.residual_stream.as_ref().map(|g| g.components.len()).unwrap_or(0);

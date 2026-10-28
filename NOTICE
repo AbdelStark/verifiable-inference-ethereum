@@ -78,6 +78,9 @@ the patches modify:
     prover/src/relations.rs
     prover/src/util.rs
 
+  sp1/patches/0004-split-verify-composed.patch:
+    prover/src/compose.rs
+
 SASH's NOTICE (Apache-2.0 §4(d)), carried with its source:
 
   zk-prover

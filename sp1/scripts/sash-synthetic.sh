@@ -1,14 +1,17 @@
 #!/usr/bin/env bash
 # Builds upstream SASH's prover (default features: SIMD backend, prover on) from the vendored tree,
 # runs upstream's test suite (its pinned synthetic digests included), and generates the synthetic bundle corpus with the upstream
-# oracle's verdict for each bundle. Linux only: the prover links the CUDA runtime (no GPU needed).
+# oracle's verdict for each bundle. Then runs the segment check's bundle and differential tests
+# (sp1/sash-segment-check, SPEC.md §1.1) on that corpus against the oracle. Linux only: the prover
+# links the CUDA runtime (no GPU needed).
 #
 # Records (committed): sp1/testdata/synthetic.sha256 and sp1/testdata/synthetic.oracle.json.
 # The bundles themselves stay in the gitignored sp1/testdata/synthetic/. A run fails unless the fresh
 # corpus and oracle output equal the records. Every run also writes the fresh ones next to them
 # (testdata/*.fresh, gitignored, uploaded by CI) so an intended change can be reviewed and committed
 # from any host. SASH_SYNTHETIC_BOOTSTRAP=1 overwrites the records; so does a run with neither record
-# yet, which then fails so that they get reviewed and committed.
+# yet, which then fails so that they get reviewed and committed. Either way the segment check's tests
+# still run, on the records just written.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -89,15 +92,23 @@ rm -f "$corpus/.oracle.jsonl"
 (cd "$corpus" && sha256sum -- * | sort -k2) >testdata/synthetic.sha256.fresh
 
 records=(testdata/synthetic.sha256 testdata/synthetic.oracle.json)
-if [[ "${SASH_SYNTHETIC_BOOTSTRAP:-}" == 1 || ( ! -f "${records[0]}" && ! -f "${records[1]}" ) ]]; then
+missing=0
+[[ -f "${records[0]}" || -f "${records[1]}" ]] || missing=1
+if [[ "${SASH_SYNTHETIC_BOOTSTRAP:-}" == 1 || "$missing" == 1 ]]; then
     cp testdata/synthetic.sha256.fresh "${records[0]}"
     cp testdata/synthetic.oracle.json.fresh "${records[1]}"
     echo "Wrote ${records[*]} from this run"
-    [[ "${SASH_SYNTHETIC_BOOTSTRAP:-}" == 1 ]] || fail "the records were missing; review and commit the ones this run wrote"
-    exit 0
+else
+    for record in "${records[@]}"; do
+        [[ -f "$record" ]] || fail "$record is missing while the other record exists; restore it from git"
+        diff "$record" "$record.fresh" || fail "$record differs from this run ($record.fresh)"
+    done
+    echo "OK: corpus and oracle output match ${records[*]}"
 fi
-for record in "${records[@]}"; do
-    [[ -f "$record" ]] || fail "$record is missing while the other record exists; restore it from git"
-    diff "$record" "$record.fresh" || fail "$record differs from this run ($record.fresh)"
-done
-echo "OK: corpus and oracle output match ${records[*]}"
+
+# The sp1/ workspace, on the repository's toolchain and in its own target directory.
+echo "== segment check: bundle and differential tests on the corpus"
+SASH_SYNTHETIC_CORPUS="$PWD/$corpus" SASH_ORACLE="$oracle" CARGO_TARGET_DIR="$PWD/target" \
+    cargo test --locked -p sash-segment-check -- --ignored
+
+[[ "$missing" == 0 ]] || fail "the records were missing; review and commit the ones this run wrote"
