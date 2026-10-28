@@ -72,17 +72,25 @@ M2's comparison with S-two is a bounded microbenchmark: what S-two's Cairo AIR c
 
 ### Setup
 
-- **Machine:** Apple M3 Max, 14 cores (10 performance + 4 efficiency), 36 GiB, macOS 15.7.3. #38's SP1 runs share it; the runs recorded here did not overlap with them. Each proof waits up to 3 minutes for the 1-minute load average to fall below 3, and records the load averages next to its timing.
-- **Toolchain:** `starkware-libs/stwo-cairo@2b1fb4ded5496fb2db4e8261cd5ee5ef6b710839`, with its `rust-toolchain.toml` (`nightly-2026-01-15`, rustc 1.94.0-nightly `86a49fd71`) and `.tool-versions` (`scarb 2.18.0`).
-- **Prover:** `run_and_prove` from `crates/dev_utils`, built with `RUSTFLAGS="-C target-cpu=native"` and run with `--program_type executable --verify`. It uses the default production parameters (`crates/prover/src/prover.rs:409-424`): Blake2s channel, `log_blowup 1`, 70 queries, `pow_bits 26`, 96 bits. Every proof in the tables passed `--verify`.
+- **Machines.** Each machine ran the whole series and the calibration, so every fit uses points from one machine.
+  - **Apple M3 Max:** 14 cores (10 performance + 4 efficiency), 36 GiB, macOS 15.7.3. #38's SP1 runs share it; the runs recorded here did not overlap with them. Each proof waits up to 3 minutes for the 1-minute load average to fall below 3, and records the load averages next to its timing.
+  - **AMD EPYC 7R13** (`/proc/cpuinfo`), on Hugging Face Jobs' `cpu-performance` flavor, which the Jobs API lists as 32 vCPU, 256 GB, $0.031667 per minute. The job saw:
+    - CPU: 32 logical CPUs (16 cores × 2 threads), `nproc` 32, cgroup CPU quota 32;
+    - memory: 247 GiB `MemTotal`, cgroup memory limit 275 GB;
+    - OS: Ubuntu 24.04.5 LTS (`ubuntu:24.04` image), Linux 6.12.94 (amzn2023), with AVX2 and SHA-NI.
+    
+    Job `6ae1430d41e90535df76ce4c` ran for 626 s, build included, about $0.33. The proofs ran back to back (`--settle-s 0`), so its load averages are mostly the previous proof's threads winding down.
+  - **The conclusions use the EPYC figures.** Only the EPYC proved BLAKE2s up to 2^18: its BLAKE2s fit rests on five points with no swap, against three on the M3 Max, the last of which swapped. A 32-vCPU, 256 GB server is also closer to the host a prover would run on. The M3 Max figures stay as a second machine, showing how much the times depend on the hardware.
+- **Toolchain, the same on both machines:** `starkware-libs/stwo-cairo@2b1fb4ded5496fb2db4e8261cd5ee5ef6b710839`, with its `rust-toolchain.toml` (`nightly-2026-01-15`, rustc 1.94.0-nightly `86a49fd71`) and `.tool-versions` (`scarb 2.18.0`, `e6144df0f`).
+- **Prover:** `run_and_prove` from `crates/dev_utils`, built on each machine with `RUSTFLAGS="-C target-cpu=native"` and run with `--program_type executable --verify`. It uses the default production parameters (`crates/prover/src/prover.rs:409-424`): Blake2s channel, `log_blowup 1`, 70 queries, `pow_bits 26`, 96 bits. Every proof in the tables passed `--verify`.
 - **Benchmarks:** the Scarb executable `bench/stwo-cairo/` (`stwo_unit_costs`), compiled like stwo-cairo's `proving` profile (`enable-gas = false`, `unsafe-panic = true`). Its arguments select the benchmark and N:
   - `blake2s`: N chained `core::blake::blake2s_compress` calls, `byte_count += 64` each;
   - `qm31`: N chained fused mul-adds `acc * b + c` on `core::qm31::qm31`, as `verifier_core/src/fields/qm31/opcode.cairo:50` does;
   - `m31`: N M31 values read from the arguments as `Array<core::qm31::m31>`: the range-checked deserialization only, with no work per value after it.
 - **One workaround:** at this commit, `run_and_prove --program_type executable` fails on any Scarb executable. The executable passes only the builtins it uses, but the prover reads all 11 public-segment pointers (the adapter's bootloader context), so it panics or reports "Constraints not satisfied". The script prepends a Standalone header that receives all 11 builtins and calls the executable's Bootloader entrypoint. That adds 15 steps (16 for the verifier, which uses `bitwise`). The tables give `scarb execute`'s step counts, without them.
-- **Reproduce:** `python3 -I bench/stwo-cairo/run.py` clones the pin into `runs/stwo-cairo/`, writes proofs and logs to `runs/stwo-unit-costs/`, and prints every table below. It asserts the two calibration step counts, and that the rows it derives from `get_execution_resources` give every growing component's log size in each proof's claim. It takes about an hour; neither `make check` nor CI runs it.
+- **Reproduce:** `python3 -I bench/stwo-cairo/run.py` clones the pin into `runs/stwo-cairo/`, writes proofs and logs to `runs/stwo-unit-costs/`, and prints every table below for the machine it runs on. It asserts the two calibration step counts, and that the rows it derives from `get_execution_resources` give every growing component's log size in each proof's claim. On macOS it times with `/usr/bin/time -l`, on Linux with GNU `/usr/bin/time -v`. It takes about an hour on the M3 Max, mostly waiting for the load to settle, and 10 minutes on the EPYC with `--settle-s 0`. Neither `make check` nor CI runs it.
 
-### Per-N measurements
+### Per-N measurements: Apple M3 Max
 
 Steps and max memory address come from `scarb execute --print-resource-usage`. Time, peak RSS and peak footprint come from `/usr/bin/time -l` over the whole `run_and_prove` command: the Cairo VM run, adaptation, proving, verification and writing the proof. The VM run and adaptation take about 3 s of the calibration's 48.6 s. Trace cells are the prover's "Witness trace cells" (base + interaction trees); the 543,100,528-cell preprocessed tree is the same in every run. Cells/step is that whole-run total over the steps. Peak footprint includes memory that macOS compressed or swapped out, so it is the figure that has to fit in 36 GiB.
 
@@ -98,7 +106,7 @@ Steps and max memory address come from `scarb execute --print-resource-usage`. T
 | 2^17 | 1,835,078 | 1,704,321 | — | — | — | — | — | 37.0 when stopped | 3.0/3.7/3.6 | out of memory |
 | 2^18 | | | | | | | | | | not attempted |
 
-**Out of memory at N = 2^17:** the script stops a proof whose footprint passes 35 GiB. In an earlier pass without that limit, macOS killed the 2^17 proof at a peak footprint of 40.7 GiB, after its RSS reached 22.9 GiB. 2^18 needs more memory still and was not attempted. Proving them needs a larger machine, which needs explicit approval and a budget (AGENTS.md §2.6). The three points from 2^14 to 2^16 are enough for the fit.
+**Out of memory at N = 2^17:** the script stops a proof whose footprint passes 35 GiB. In an earlier pass without that limit, macOS killed the 2^17 proof at a peak footprint of 40.7 GiB, after its RSS reached 22.9 GiB. 2^18 needs more memory still and was not attempted. Both were proved on the EPYC ([below](#per-n-measurements-and-fits-amd-epyc-7r13)), at 46.0 and 79.5 GiB of peak RSS. The M3 Max's BLAKE2s fit uses its three points from 2^14 to 2^16.
 
 **QM31 fused mul-adds:**
 
@@ -124,9 +132,9 @@ Steps and max memory address come from `scarb execute --print-resource-usage`. T
 | 2^17 | 2,228,285 | 1,835,383 | 277,258,112 | 124 | 7.92 | 281,349 | 16.3 | 12.8 | 2.9/2.8/3.1 | verified |
 | 2^18 | 4,456,509 | 3,670,391 | 517,775,232 | 116 | 12.32 | 361,730 | 19.0 | 15.0 | 3.0/3.0/3.2 | verified |
 
-### Fits: fixed cost plus per-op cost
+### Fits: Apple M3 Max
 
-Least squares over the points at N ≥ 2^14: 2^14 to 2^16 for BLAKE2s, 2^14 to 2^18 for the others.
+Fixed cost plus per-op cost, by least squares over the points at N ≥ 2^14: 2^14 to 2^16 for BLAKE2s, 2^14 to 2^18 for the others.
 
 | Per op | BLAKE2s compression | QM31 mul-add | M31 ingested |
 |---|---:|---:|---:|
@@ -150,6 +158,69 @@ Least squares over the points at N ≥ 2^14: 2^14 to 2^16 for BLAKE2s, 2^14 to 2
   - QM31: 2 `qm_31_add_mul_opcode` instances, since the mul and the add are separate opcodes, plus 6 loop instructions.
   - M31: 17 ordinary instructions and 2 range-check builtin instances per value, with no special opcode. This is the deserialization alone; the benchmark does nothing with the values afterwards.
 
+### Per-N measurements and fits: AMD EPYC 7R13
+
+The same measurements as on the M3 Max. Time and peak RSS come from GNU `/usr/bin/time -v`. Linux reports no peak footprint, and the job used no swap, so peak RSS is the figure that has to fit in RAM.
+
+**BLAKE2s compressions:**
+
+| N | Steps | Max memory address | Trace cells | Cells/step | Time (s) | Steps/s | Peak RSS (GiB) | Load avg (1/5/15 min) | Status |
+|---:|---:|---:|---:|---:|---:|---:|---:|---|---|
+| 2^12 | 57,414 | 53,633 | 164,617,856 | 2,867 | 8.32 | 6,901 | 13.3 | 9.4/5.9/4.8 | verified |
+| 2^13 | 114,758 | 106,881 | 242,163,328 | 2,110 | 8.36 | 13,727 | 14.0 | 10.7/6.3/4.9 | verified |
+| 2^14 | 229,446 | 213,377 | 397,254,272 | 1,731 | 10.24 | 22,407 | 16.5 | 14.0/7.1/5.2 | verified |
+| 2^15 | 458,822 | 426,369 | 707,436,160 | 1,542 | 14.56 | 31,512 | 20.6 | 12.0/6.9/5.2 | verified |
+| 2^16 | 917,574 | 852,353 | 1,327,799,936 | 1,447 | 21.27 | 43,139 | 28.8 | 12.6/7.3/5.3 | verified |
+| 2^17 | 1,835,078 | 1,704,321 | 2,568,527,488 | 1,400 | 36.07 | 50,875 | 46.0 | 16.3/8.6/5.8 | verified |
+| 2^18 | 3,670,086 | 3,408,257 | 5,049,982,592 | 1,376 | 63.56 | 57,742 | 79.5 | 19.0/10.4/6.6 | verified |
+
+**QM31 fused mul-adds:**
+
+| N | Steps | Max memory address | Trace cells | Cells/step | Time (s) | Steps/s | Peak RSS (GiB) | Load avg (1/5/15 min) | Status |
+|---:|---:|---:|---:|---:|---:|---:|---:|---|---|
+| 2^12 | 32,851 | 29,082 | 40,859,536 | 1,244 | 7.46 | 4,404 | 12.2 | 14.9/10.8/6.9 | verified |
+| 2^13 | 65,619 | 57,754 | 44,971,920 | 685 | 7.51 | 8,738 | 12.3 | 17.5/11.4/7.2 | verified |
+| 2^14 | 131,155 | 115,098 | 53,196,688 | 406 | 7.57 | 17,326 | 12.3 | 21.0/12.4/7.5 | verified |
+| 2^15 | 262,227 | 229,786 | 69,646,224 | 266 | 7.78 | 33,705 | 12.5 | 19.4/12.2/7.5 | verified |
+| 2^16 | 524,371 | 459,162 | 102,545,296 | 196 | 8.52 | 61,546 | 13.0 | 19.2/12.3/7.6 | verified |
+| 2^17 | 1,048,659 | 917,914 | 168,343,440 | 161 | 8.97 | 116,907 | 13.7 | 19.3/12.6/7.7 | verified |
+| 2^18 | 2,097,235 | 1,835,418 | 299,939,728 | 143 | 10.83 | 193,651 | 15.2 | 16.5/12.2/7.6 | verified |
+
+**M31 ingestion:**
+
+| N | Steps | Max memory address | Trace cells | Cells/step | Time (s) | Steps/s | Peak RSS (GiB) | Load avg (1/5/15 min) | Status |
+|---:|---:|---:|---:|---:|---:|---:|---:|---|---|
+| 2^12 | 69,693 | 57,719 | 44,257,152 | 635 | 7.91 | 8,811 | 12.3 | 18.4/12.7/7.9 | verified |
+| 2^13 | 139,325 | 115,063 | 51,773,312 | 372 | 8.25 | 16,888 | 12.3 | 21.8/13.7/8.2 | verified |
+| 2^14 | 278,589 | 229,751 | 66,805,632 | 240 | 7.98 | 34,911 | 12.5 | 18.7/13.3/8.1 | verified |
+| 2^15 | 557,117 | 459,127 | 96,870,272 | 174 | 8.84 | 63,022 | 12.9 | 16.0/12.9/8.1 | verified |
+| 2^16 | 1,114,173 | 917,879 | 156,999,552 | 141 | 9.93 | 112,203 | 13.8 | 13.8/12.5/8.0 | verified |
+| 2^17 | 2,228,285 | 1,835,383 | 277,258,112 | 124 | 13.37 | 166,663 | 14.8 | 12.9/12.4/8.1 | verified |
+| 2^18 | 4,456,509 | 3,670,391 | 517,775,232 | 116 | 19.32 | 230,668 | 18.3 | 11.4/12.1/8.1 | verified |
+
+Fits over N = 2^14 to 2^18 for all three:
+
+| Per op | BLAKE2s compression | QM31 mul-add | M31 ingested |
+|---|---:|---:|---:|
+| Steps; memory addresses; trace cells, padded at N = 2^k | 14; 13; 18,932 | 8; 7; 1,004 | 17; 14; 1,835 |
+| Time, fit | 216.0 µs | 12.9 µs | 46.3 µs |
+| Time, marginal between the two largest N | 209.7 µs | 14.2 µs | 45.4 µs |
+| Time fit residuals, N = 2^14, 2^15, … (s) | −0.50, +0.28, −0.08, +0.56, −0.26 | −0.06, −0.06, +0.25, −0.14, +0.02 | +0.04, +0.14, −0.29, +0.12, −0.01 |
+| Peak RSS | 269.3 KiB | 12.2 KiB | 24.5 KiB |
+| **Fixed** (time; peak RSS) | 7.2 s; 12.2 GiB | 7.4 s; 12.2 GiB | 7.2 s; 12.1 GiB |
+| M3 Max time fit, for comparison | 353.2 µs | 11.7 µs | 29.3 µs |
+
+- **Only time and memory depend on the machine.** Steps, memory addresses and trace cells are identical on both machines at every N both ran, and so are the per-op step, address and cell fits.
+- **BLAKE2s is linear here, at 216 µs per compression,** 39% below the M3 Max fit. Five points fit within ±0.56 s, and the marginal slope between 2^17 and 2^18 (209.7 µs) is 3% below the fit. The M3 Max's convex curve came with swap at 2^16, so it was probably memory pressure, not the prover.
+- **The EPYC proves faster but runs the serial stages slower.** The log timestamps split each run into stages:
+  - **Proving:** the EPYC is faster. It takes 19.6 s against 25.1 s for BLAKE2s at 2^16, and 22.6 s against 41.2 s for the calibration.
+  - **Before proving:** the EPYC is slower. `run_and_prove` first loads the program and its JSON arguments, then runs the Cairo VM and adapts the trace. These stages take 21.1 s of the calibration's 45.8 s on the EPYC, against 6.1 s of 48.6 s on the M3 Max.
+- **This makes M31 ingestion 58% slower: 46.3 µs per felt against 29.3 µs.**
+  - **Loading the arguments:** at 2^18, `run_and_prove` spends 5.65 s on the JSON argument file before the VM starts (2.79 s at 2^17), against 1.33 s (0.68 s) on the M3 Max. That is about 22 µs per felt against 5 µs, half the EPYC's slope.
+  - **The VM run and adaptation** take 2.1 s against 0.8 s at 2^18.
+  - **Proving** is about the same: 10.7 s against 10.1 s.
+- **Fixed costs are higher:** 7.2–7.4 s per proof, against 2.2–4.8 s on the M3 Max, and 12.1–12.2 GiB of peak RSS.
+
 ### Rows and cells per op
 
 Per BLAKE2s compression, at N = 2^16 with 65,536 `blake_compress_opcode` instances from `get_execution_resources`:
@@ -162,7 +233,7 @@ Per BLAKE2s compression, at N = 2^16 with 65,536 `blake_compress_opcode` instanc
 | `triple_xor_32` | 21 + 20 | 8 | 8 (2^19) | 328 | 328 |
 | **Total** | | **99** | **153** | **11,090** | **17,354** |
 
-- **The inferred 99 rows and 11,090 cells hold.** The proof confirms the four log sizes, and the opcode count equals N.
+- **The inferred 99 rows and 11,090 cells hold.** The proof confirms the four log sizes, and the opcode count equals N. The EPYC's 2^18 proof gives the same 153 padded rows per compression, at log sizes 18, 22, 25 and 21.
 - **Padding:** at N = 2^k, padding to powers of two makes it 153 rows and 17,354 cells.
 - **Whole trace:** with the opcodes, memory and lookup components a compression also touches, it is 18,932 cells per compression (the fit above).
 - **QM31 mul-add:** 2 `qm_31_add_mul_opcode` rows of 73 + 24 columns, 194 cells, unpadded and padded alike (2^19 rows at N = 2^18). With everything else it is 1,004 cells.
@@ -170,16 +241,20 @@ Per BLAKE2s compression, at N = 2^16 with 65,536 `blake_compress_opcode` instanc
 
 ### Calibration against StarkWare's reference verifiers
 
-The two CI commands, run from `stwo_cairo_verifier/` with `--profile proving`, execute in exactly the CI's step counts; the script asserts both. The `stwo_cairo_verifier` run was then proved:
+The two CI commands, run from `stwo_cairo_verifier/` with `--profile proving`, execute in exactly the CI's step counts on both machines; the script asserts both. The `stwo_cairo_verifier` run was then proved:
 
-| Program | Steps | Max memory address | Time (s) | Steps/s | Trace cells | Cells/step | Peak RSS (GiB) | Peak footprint (GiB) | Load avg | Status |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|---|---|
-| `stwo_cairo_verifier` (`qm31_opcode`) | 18,152,624 | 18,556,598 | 48.6 | 373,204 | 1,939,445,536 | 107 | 19.2 | 32.5 | 3.0/4.0/5.2 | verified |
-| `stwo_circuit_verifier` (`qm31_opcode`) | 1,982,220 | 1,953,362 | executed only | | | | | | | |
+| Program | Machine | Steps | Max memory address | Time (s) | Steps/s | Trace cells | Cells/step | Peak RSS (GiB) | Peak footprint (GiB) | Load avg | Status |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---|---|
+| `stwo_cairo_verifier` (`qm31_opcode`) | M3 Max | 18,152,624 | 18,556,598 | 48.6 | 373,204 | 1,939,445,536 | 107 | 19.2 | 32.5 | 3.0/4.0/5.2 | verified |
+| `stwo_cairo_verifier` (`qm31_opcode`) | EPYC | 18,152,624 | 18,556,598 | 45.8 | 396,173 | 1,939,445,536 | 107 | 35.4 | — | 5.1/10.1/7.8 | verified |
+| `stwo_circuit_verifier` (`qm31_opcode`) | both | 1,982,220 | 1,953,362 | executed only | | | | | | | |
 
-- **It agrees with StarkWare's "about 1 minute".** One M3 Max runs `run_and_prove` on the Cairo verifier in 48.6 s, VM run, adaptation and verification included.
-- **It only just fits.** The peak footprint is 32.5 GiB, and swap grew from 22.5 to 33.2 GiB during the run, so the time may be inflated.
-- **Steps/s depends on the opcode mix.** The verifier runs at 373k steps/s with 107 trace cells per step over the whole run. At their largest N, the microbenchmarks' whole runs reach 36k steps/s for BLAKE2s (1,447 cells per step), 265k for QM31 (143) and 362k for M31 ingestion (116).
+- **It agrees with StarkWare's "about 1 minute".** `run_and_prove` on the Cairo verifier takes 48.6 s on the M3 Max and 45.8 s on the EPYC, VM run, adaptation and verification included. The EPYC proves in 22.6 s, against 41.2 s, but spends 21.1 s before proving, against 6.1 s.
+- **It only just fits the M3 Max.** The peak footprint is 32.5 GiB, and swap grew from 22.5 to 33.2 GiB during the run, so that time may be inflated. On the EPYC it peaks at 35.4 GiB of RSS, with no swap.
+- **Steps/s depends on the opcode mix.** The verifier runs at 373k steps/s on the M3 Max (396k on the EPYC), with 107 trace cells per step over the whole run. At their largest N, the microbenchmarks' whole runs reach, on the M3 Max (EPYC):
+  - BLAKE2s: 36k steps/s at 2^16, 1,447 cells per step (58k at 2^18, 1,376 cells per step);
+  - QM31: 265k (194k), 143 cells per step;
+  - M31 ingestion: 362k (231k), 116 cells per step.
 
 **The three ops are about half of a real verifier.** Applying the unit costs to the verifier's own op counts (22,925 `blake_compress_opcode`; 610,391 `qm_31_add_mul_opcode`, i.e. 305,196 mul-adds; 270,641 argument felts) predicts:
 
@@ -189,9 +264,10 @@ The two CI commands, run from `stwo_cairo_verifier/` with `--profile proving`, e
 | Max memory address | 18,556,598 | 6,223,777 | 2.98 |
 | `MemoryAddressToId` uses | 71,827,552 | 39,277,054 | 1.83 |
 | Trace cells | 1,939,445,536 | 1,324,131,001 | 1.46 |
-| Time (s) | 48.6 | 24.4 | 1.99 |
+| Time (s), EPYC | 45.8 | 28.9 | 1.59 |
+| Time (s), M3 Max | 48.6 | 24.4 | 1.99 |
 
-The rest is AIR evaluation, channel draws, FRI folding, Merkle path walking and control flow. The extrapolation below gives both the modelled figures and the figures scaled by these ratios. The verifier checks a Cairo AIR proof, not a SASH one, so the ratios are an indication, not a bound.
+Everything but time is the same on both machines. The rest is AIR evaluation, channel draws, FRI folding, Merkle path walking and control flow. The extrapolation below gives both the modelled figures and the figures scaled by these ratios. The verifier checks a Cairo AIR proof, not a SASH one, so the ratios are an indication, not a bound.
 
 ### Extrapolation to TinyLlama (estimate)
 
@@ -201,14 +277,17 @@ From `docs/EVM-GAS-MODEL.md` §1 (65,967,346 leaf M31s, 519,784 OODS values, 501
 - **Ingested felts** = leaf M31s + 4 × OODS values + 8 × internal hashes. Each costs one M31 ingestion, including the 32-bit hash words.
 - **Costs add linearly.** Each segment is its own proof, so it pays once the largest of the three fixed costs.
 
-| Workload | BLAKE2s | QM31 mul-adds | Ingested felts | Steps | Trace cells | Time, fit: BLAKE2s / QM31 / ingestion / fixed (s) | Time, modelled ops (s) | Time, scaled by the calibration (s) |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|
-| Per inference (23 proofs) | 4,641,448 | 53,837,100 | 72,194,394 | 1,722,983,681 | 1.99 × 10^11 unpadded | 1,639 / 632 / 2,117 / 111 | 4,499–4,990 (75–83 min) | 8,960 (~149 min) |
-| `head`, the largest segment | 525,665 | 7,063,600 | 8,533,469 | 208,937,170 | 3.31 × 10^10 padded (2.30 × 10^10 unpadded) | 186 / 83 / 250 / 5 | 524–830 | 1,043 |
+Steps and trace cells don't depend on the machine; the times use the EPYC's fits, with the M3 Max's beside them:
 
-- **The time is a range.** Its low end uses the fits, the next the marginal slopes between the two largest N (4,969 s per inference, 579 s for `head`), and the high end the trace cells times the 25.1 ns per padded cell of the largest proof measured, the calibration (4,990 s on unpadded cells per inference, 830 s for `head`). The fits imply 383k–399k steps/s and 15.8 ns per padded cell for `head`, faster than every measured run, so they are the floor. The per-inference cells are unpadded because the model doesn't have each segment's op counts.
-- **The scaled column** multiplies the fit-based time by the calibration's measured / modelled time (1.99), for the work the three ops leave out.
-- **Ingestion dominates,** at about 47% of the fit-based time, against 36% for BLAKE2s and 14% for QM31.
+| Workload | BLAKE2s | QM31 mul-adds | Ingested felts | Steps | Trace cells | Time, fit: BLAKE2s / QM31 / ingestion / fixed (s), EPYC | Time, modelled ops (s), EPYC | Time, scaled by the calibration (s), EPYC | M3 Max: modelled ops; scaled (s) |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Per inference (23 proofs) | 4,641,448 | 53,837,100 | 72,194,394 | 1,722,983,681 | 1.99 × 10^11 unpadded | 1,003 / 696 / 3,344 / 171 | 5,185–5,213 (~87 min) | 8,279 (~138 min) | 4,499–4,990; 8,960 |
+| `head`, the largest segment | 525,665 | 7,063,600 | 8,533,469 | 208,937,170 | 3.31 × 10^10 padded (2.30 × 10^10 unpadded) | 114 / 91 / 395 / 7 | 605–608 | 965 | 524–830; 1,043 |
+
+- **The modelled-ops time is the fit and the marginal slopes between the two largest N.** On the EPYC they agree within 1%. The fits imply 331k steps/s per inference and 344k for `head`, below the calibration's 396k.
+- **Time per trace cell doesn't carry over between op mixes.** Multiplying the cells by the 12.6 ns per padded cell of the EPYC's largest proof gives 2,504 s per inference and 417 s for `head`. That proof is BLAKE2s at 2^18, and per marginal cell ingestion costs 25 ns on the EPYC, against 11–13 ns for BLAKE2s and QM31. On the M3 Max the largest proof was the calibration, at 25.1 ns per cell, which put that cross-check at the top of its range (4,990 s per inference, 830 s for `head`). The per-inference cells are unpadded because the model doesn't have each segment's op counts.
+- **The scaled column** multiplies the fit-based time by the calibration's measured / modelled time: 1.59 on the EPYC, 1.99 on the M3 Max. It stands in for the work the three ops leave out.
+- **Ingestion dominates,** at 64% of the EPYC's fit-based time per inference, against 19% for BLAKE2s, 13% for QM31 and 3% for the fixed costs. On the M3 Max the split is 47%, 36% and 14%. About half of the EPYC's ingestion cost is `run_and_prove` reading the JSON argument file, so a prover that loads its arguments faster would cut it.
 
 Checks for `head`:
 
@@ -219,14 +298,15 @@ Checks for `head`:
 | Steps | 208,937,170 (2^27.64) | 515,075,845 (2^28.94) | |
 | Largest component | log size 26: `add_opcode_small` (51.3M rows), `blake_g` (42.1M), `assert_eq_opcode_double_deref` (34.7M), `jnz_opcode_taken` (33.7M) | | |
 | Memory tables | `memory_id_to_small` full at 2^24 values; 76.8M big values in three `memory_id_to_big` tables (2^25, 2^25 and 9.6M rows) | | |
-| Peak footprint | ~310 GiB | | |
+| Peak memory, modelled ops only | ~429 GiB RSS (EPYC fit); ~310 GiB footprint (M3 Max fit) | | 247 GiB on the EPYC, 36 GiB on the M3 Max |
 
 - **What the estimate covers.**
   - The modelled column counts hashing, quotient accumulation and ingestion only. It excludes AIR evaluation, the out-of-domain evaluation of SASH's 20k–68k-column constraints that a real SASH verifier adds, and the mixed-degree Merkle tree walk. It also excludes the GKR verification, channel draws and FRI folding.
-  - It assumes per-op costs stay linear from the measured sizes (at most 2^23 rows) up to 2^26 rows. FFT and commitment costs grow as n log n.
+  - It assumes per-op costs stay linear from the measured sizes (at most 2^25 rows, `blake_g` in the EPYC's BLAKE2s 2^18 proof) up to 2^26 rows. FFT and commitment costs grow as n log n.
 - **The modelled ops pass both checks** with a factor of 3.1 to spare on memory addresses and 2.0 on relation uses.
 - **Scaled by the calibration, `head` has no margin left:** 0.98 of the memory-address bound and 0.93 P. A SASH verifier spends more on AIR evaluation than the Cairo verifier does, so a single `head` proof would probably cross a bound. Its verification would likely need splitting across several proofs, each paying the fixed cost again.
-- **`head` doesn't fit this machine.** Its ~310 GiB footprint (modelled ops only) is about 9x its RAM. The per-inference time is what M3-Max-class cores would take with enough memory: an estimate, not a run on this machine.
+- **`head` fits neither machine.** Its modelled ops alone come to ~429 GiB of peak RSS on the EPYC fit, 1.7x the 247 GiB it has, and ~310 GiB of footprint on the M3 Max fit, about 9x its RAM. Both fits come from proofs of at most 80 GiB (EPYC) and 27 GiB (M3 Max). The per-inference time is what the EPYC's cores would take with enough memory: an estimate, not a run.
+- **A 256 GB machine doesn't change the conclusion that `head` likely needs splitting.** The bounds that force the split don't depend on the machine: memory addresses and relation uses come out the same on both. And the memory to prove `head` in one piece is above 256 GB even for the modelled ops alone.
 - **Trace-length bound, unchecked context.** arXiv 2606.04311 (https://arxiv.org/pdf/2606.04311) reports a 2^29 + 1 trace-length bound for the S-two AIR. The `head` estimate, 2^27.64 steps (2^28.94 scaled) with components at 2^26, would sit below it.
 
 ### Security parameters differ
@@ -269,6 +349,7 @@ stwo-cairo's default proves at 96 bits with 70 queries and `pow_bits 26`. SASH's
 - L2BEAT, SP1 Hypercube (Groth16 v6.1.0 phase-2 setup red, PLONK on Aztec Ignition green): https://l2beat.com/zk-catalog/sp1hypercube
 - SP1 v6.10.0 syscalls (no BLAKE2s or M31): `succinctlabs/sp1@v6.10.0:crates/zkvm/entrypoint/src/syscalls/mod.rs`
 - Atlantic contract addresses: https://docs.herodotus.cloud/atlantic-api/contract-addresses
+- Hugging Face Jobs hardware and prices (`HfApi().list_jobs_hardware()`, 2026-10-28): `cpu-performance` is 32 vCPU, 256 GB, $0.031667 per minute. The EPYC runs are job `6ae1430d41e90535df76ce4c`.
 - WHIR EVM verification: https://ethresear.ch/t/evm-verification-of-whir-over-a-31-bit-field/24902
 - Herodotus Atlantic, L1 verification: https://docs.herodotus.cloud/atlantic-api/steps/l1-proof-verification
 - Herodotus Integrity: https://github.com/HerodotusDev/integrity
