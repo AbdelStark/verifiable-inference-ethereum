@@ -568,3 +568,20 @@ pub fn tinyllama_segments() -> Vec<SegmentClaim> {
 pub fn tinyllama_manifest(segs: &[SegmentClaim]) -> ModelManifest {
     ModelManifest::from_segments(segs, 32, TINYLLAMA_EOS_TOKEN_ID)
 }
+
+/// What `TinyLlamaFixture.sol` prints, from these constants (`make vectors`). Host-only, as
+/// `fixture` (see `lib.rs`).
+#[cfg(not(target_os = "zkvm"))]
+pub fn tinyllama_fixture_data() -> crate::fixture::FixtureData {
+    crate::fixture::FixtureData {
+        model_id: tinyllama_model_id(),
+        segments: tinyllama_segments(),
+        eos_token_id: TINYLLAMA_EOS_TOKEN_ID,
+        prompt_ids: TINYLLAMA_PROMPT_IDS.to_vec(),
+        answer_ids: TINYLLAMA_ANSWER_IDS.to_vec(),
+        tok_in: TINYLLAMA_TOK_IN.to_vec(),
+        tok_out: TINYLLAMA_TOK_OUT.to_vec(),
+        prompt: TINYLLAMA_PROMPT.to_string(),
+        response: TINYLLAMA_RESPONSE.to_string(),
+    }
+}
