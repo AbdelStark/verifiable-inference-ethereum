@@ -143,8 +143,8 @@ impl Outcome {
     }
 }
 
-/// A mutation of a positive bundle that stays structurally valid, and the variant
-/// `check_segment` must return for it (`"accept"` when it must accept).
+/// A mutation of a bundle that passes rules 1 to 7 (`sound_aligned`, `aligned_gkr5`, `embed`,
+/// `head_argmax`) that stays structurally valid, and the variant `check_segment` must return for it.
 pub struct Mutation {
     pub name: &'static str,
     pub base: &'static str,
@@ -321,12 +321,13 @@ pub const MUTATIONS: [Mutation; 21] = [
         expect: "Malformed",
     },
     Mutation {
-        // Accepted with another segmentIndex and fixedHash: the manifest's fixedHash pin (#47)
-        // is what refuses it.
+        // Verifies with another segmentIndex and fixedHash (`tests/bundles.rs`), then rule 8
+        // rejects it as `sound_aligned`; were it single-block, the manifest's fixedHash pin (#47)
+        // would refuse it.
         name: "layer_1_to_2",
         base: "sound_aligned",
         apply: |b| b.edit_fixed(|f| f["layer"] = json!(2)),
-        expect: "accept",
+        expect: "NotSingleBlock",
     },
     Mutation {
         // G9: `tok_in[25]` = 450 and `tok_in[1..=4]` solved under the bundle's own `w`.

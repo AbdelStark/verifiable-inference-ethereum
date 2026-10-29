@@ -13,7 +13,7 @@
                                      |
                                      v
 +-------------------------------------------------------------------------+
-| Off-Chain Proof Compression (planned: M2 guests, M3 aggregator + wrap)  |
+| Off-Chain Proof Compression (M2 segment guest present; M3 planned)      |
 |   - M2: SP1 v6 riscv64im guest per segment runs a verifier-only build   |
 |     of verify_composed (+ patch 0006); rejects token ids >= P;          |
 |     commits fixedHash                                                   |

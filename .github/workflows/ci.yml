@@ -47,11 +47,14 @@ jobs:
           if [[ "$EVENT" != pull_request ]]; then
             heavy=true
           else
-            # --no-renames: a file moved out of a gated path lists its old path too.
-            changed="$(git diff --no-renames --name-only HEAD^1 HEAD)"
-            echo "$changed"
+            # --no-renames: a file moved out of a gated path lists its old path too. -z: NUL-terminated
+            # paths, never quoted (git quotes a path with a special or, by default, non-ASCII byte, and a
+            # quoted path starts with `"`, which no pattern below matches).
+            changed="$RUNNER_TEMP/changed"
+            git -c core.quotePath=false diff --no-renames --name-only -z HEAD^1 HEAD >"$changed"
+            tr '\0' '\n' <"$changed"
             # sp1/ inherits the root Cargo.toml's workspace fields through sash-evm-primitives, and its toolchain.
-            if grep -qE '^(sp1/|crates/sash-evm-primitives/|Cargo\.toml$|rust-toolchain\.toml$|Makefile$|\.github/workflows/ci\.yml$)' <<<"$changed"; then
+            if grep -qzE '^(sp1/|crates/sash-evm-primitives/|Cargo\.toml$|rust-toolchain\.toml$|Makefile$|\.github/workflows/ci\.yml$)' "$changed"; then
               heavy=true
             else
               heavy=false
@@ -268,7 +271,7 @@ jobs:
         run: sha256sum --strict -c ../synthetic.sha256
       # Release: a debug executor is too slow for ~1.5e9-cycle runs. One thread: the native executor keeps guest
       # memory in /dev/shm (~5 GB per run), and two concurrent runs overflow the runner's /dev/shm (SIGBUS).
-      - name: Segment guest in the executor on every corpus bundle and bundle mutation (SPEC.md §2.1 G1-G7, G9)
+      - name: Segment guest in the executor on every corpus bundle and bundle mutation (SPEC.md §2.1 G1-G7, G9, G10)
         working-directory: sp1
         env:
           SASH_SYNTHETIC_CORPUS: ${{ github.workspace }}/sp1/testdata/synthetic

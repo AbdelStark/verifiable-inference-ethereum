@@ -86,7 +86,7 @@ fn forge_vector(f: &mut Value, original: &Original, vector: Vector) {
     f[vector.key()] = json!(forged.ids);
 }
 
-pub const CONTROLS: [Control; 7] = [
+pub const CONTROLS: [Control; 9] = [
     Control {
         name: "proof_queried_value",
         tag: "B0L10",
@@ -134,6 +134,24 @@ pub const CONTROLS: [Control; 7] = [
         what: "`tok_out[24]` = 450, `tok_out[0..=3]` solved to keep the Horner sum under the segment's own `w`",
         edit: |f, o| forge_vector(f, o, Vector::TokOut),
         expect: Expect::Reject("NotAccepted"),
+    },
+    Control {
+        name: "block_removed",
+        tag: "B0L10",
+        file: File::Fixed,
+        what: "`block` removed (`nn_pos_ok` holds without it)",
+        edit: |f, _| {
+            f.as_object_mut().expect("Fixed").remove("block");
+        },
+        expect: Expect::Reject("NotSingleBlock"),
+    },
+    Control {
+        name: "head_block_1",
+        tag: "head",
+        file: File::Fixed,
+        what: "`block` 0 to 1 (the head has no rotation, so `nn_pos_ok` holds)",
+        edit: |f, _| f["block"] = json!(1),
+        expect: Expect::Reject("NotSingleBlock"),
     },
     Control {
         name: "fixed_model_changed",

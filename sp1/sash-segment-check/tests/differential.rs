@@ -79,6 +79,8 @@ fn rules_beyond_accepts(bundle: &Bundle, reference: &Value) -> bool {
         && verdict["rq_scale_open"] == json!([])
         && verdict["ao_q_open"] == json!(false)
         && verdict["nn_open"] == json!(false)
+        && fixed.block == Some(0)
+        && fixed.params.c == 0
 }
 
 fn cases() -> Vec<(String, Bundle)> {
@@ -137,12 +139,17 @@ fn check_segment_agrees_with_the_oracle() {
             stricter.insert(name);
         }
     }
-    // Where upstream accepts and the guest does not: the unbound bundles and the mutations that
-    // only SPEC.md §1.1's own rules refuse. Not the three `UnsoundDequant` mutations: `kmax` and
-    // the dequant variants size the tables and claims the AIR reads, so upstream rejects those
-    // statements on its own (`kmax_22`: `sizes_ok` and `stark_ok` false, `OodsNotMatching`; the
+    // Where upstream accepts and the guest does not: the unbound bundles, the bundles and mutations
+    // with a prefix (rule 8), and the mutations that only SPEC.md §1.1's own rules refuse. Not the
+    // three `UnsoundDequant` mutations: `kmax` and the dequant variants size the tables and claims
+    // the AIR reads, so upstream rejects those statements on its own (`kmax_22`: `sizes_ok` and `stark_ok` false, `OodsNotMatching`; the
     // other two: `claims shape mismatch`); `UnsoundDequant` is the first rule to see them.
     let want: BTreeSet<String> = [
+        "sound_aligned",
+        "aligned_gkr5",
+        "embed",
+        "head_argmax",
+        "layer_1_to_2",
         "sound_gkrfive",
         "skip_residual_stream",
         "skip_layer_boundary",
