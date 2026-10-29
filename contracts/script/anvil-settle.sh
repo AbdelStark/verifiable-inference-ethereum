@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Mines the TinyLlama-1.1B dev-mode settlement (DeployDevAnvil.s.sol) on a local Osaka anvil node,
 # checks the receipts, and prints their gas. ANVIL_PORT overrides the port.
+# The settle transaction is floor-bound (EIP-7623), so its receipt and snapshot don't move with execution;
+# its execution gas, the top call's gasUsed in trace_transaction, is checked against settle_execution_gas.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -13,6 +15,7 @@ tx_gas_cap=16777216 # EIP-7825
 run_id=0x058d7f0512ac5fa539c1c21941f2bde128e85cedb4106adcff30e601d41d6b28 # SPEC.md §1.4
 broadcast=broadcast/DeployDevAnvil.s.sol/31337/run-latest.json
 snapshot=snapshots/VerifiableInferenceSettlement.json
+settle_execution_gas=117227 # docs/EVM-GAS-MODEL.md §4; update both for an intended change
 
 fail() {
     echo "ERROR: $*" >&2
@@ -50,6 +53,7 @@ echo "DeployDevAnvil.s.sol on anvil, hardfork $(cast rpc anvil_nodeInfo --rpc-ur
     "$(forge --version | head -n 1)"
 printf '%-52s %10s %10s %14s\n' "Transaction" "gasUsed" "gasLimit" "calldata (B)"
 settle_gas=""
+settle_hash=""
 for i in $(seq 0 4); do
     tx=$(jq -c ".transactions[$i]" "$broadcast")
     hash=$(jq -r .hash <<<"$tx")
@@ -66,7 +70,10 @@ for i in $(seq 0 4); do
     name=$(jq -r .contractName <<<"$tx")
     fn=$(jq -r '.function // empty' <<<"$tx")
     if [[ -n "$fn" ]]; then label="$name.${fn%%(*}"; else label="$name deployment"; fi
-    [[ "$fn" == verifyAndSettle* ]] && settle_gas=$gas_used
+    if [[ "$fn" == verifyAndSettle* ]]; then
+        settle_gas=$gas_used
+        settle_hash=$hash
+    fi
     printf '%-52s %10s %10s %14s\n' "$label" "$gas_used" "$gas_limit" "$calldata_bytes"
 done
 
@@ -83,6 +90,10 @@ events=$(jq -c --arg a "$settlement" --arg s "$event_sig" \
 snapshot_gas=$(jq -r .verifyAndSettle "$snapshot")
 [[ "$settle_gas" == "$snapshot_gas" ]] \
     || fail "verifyAndSettle receipt gasUsed $settle_gas != snapshot $snapshot_gas ($snapshot)"
+settle_exec=$(cast to-dec "$(cast rpc trace_transaction "$settle_hash" --rpc-url "$rpc" | jq -r '.[0].result.gasUsed')")
+echo "verifyAndSettle execution (trace_transaction top call gasUsed): $settle_exec"
+[[ "$settle_exec" == "$settle_execution_gas" ]] \
+    || fail "verifyAndSettle execution gas $settle_exec != settle_execution_gas $settle_execution_gas"
 
 echo "OK: 5 transactions mined; InferenceVerified(runId $run_id, DEV_TRANSCRIPT_ONLY);" \
-    "verifyAndSettle gasUsed matches $snapshot"
+    "verifyAndSettle gasUsed matches $snapshot and its execution gas matches settle_execution_gas"

@@ -62,7 +62,7 @@ make forge-test
 make anvil-demo
 ```
 
-`make anvil-demo` starts `anvil --hardfork osaka --enable-tx-gas-limit` (chain `31337`; port `8577`, or `ANVIL_PORT`), mines `DeployDevAnvil.s.sol`'s five transactions from anvil's first dev account, checks the receipts (status, `EIP-7825` gas limit, the `InferenceVerified` event with the `SPEC.md` §1.4 `runId`, and `verifyAndSettle`'s gas against its snapshot), prints their gas and stops the node. `make check` runs it too.
+`make anvil-demo` starts `anvil --hardfork osaka --enable-tx-gas-limit` (chain `31337`; port `8577`, or `ANVIL_PORT`), mines `DeployDevAnvil.s.sol`'s five transactions from anvil's first dev account, checks the receipts (status, `EIP-7825` gas limit, the `InferenceVerified` event with the `SPEC.md` §1.4 `runId`, `verifyAndSettle`'s gas against its snapshot, and its execution gas, from `trace_transaction`, against `settle_execution_gas` in the script, since the settle transaction pays the `EIP-7623` calldata floor), prints their gas and stops the node. `make check` runs it too.
 
 ### 3. Deploy to Hoodi (`560048`) (M4)
 

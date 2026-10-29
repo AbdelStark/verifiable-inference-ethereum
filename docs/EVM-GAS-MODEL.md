@@ -56,7 +56,7 @@ These figures derive from the §1 sizes and §7's compression counts, so they sh
 ## 4. Measured dev-mode settlement (Osaka)
 
 M1 measures the grid path and the dev-mode settlement on Foundry 1.8.6 (`evm_version = "osaka"`). Two sources, which agree on `verifyAndSettle`:
-- **anvil receipts:** `make anvil-demo` mines `DeployDevAnvil.s.sol` on `anvil --hardfork osaka --enable-tx-gas-limit` and prints this table.
+- **anvil receipts:** `make anvil-demo` mines `DeployDevAnvil.s.sol` on `anvil --hardfork osaka --enable-tx-gas-limit` and prints this table and the settle transaction's execution gas, which it checks against `settle_execution_gas` in `contracts/script/anvil-settle.sh`.
 - **forge snapshots:** `contracts/snapshots/*.json`, which `make check` regenerates and compares with the commit. Under `isolate = true`, the `verifyAndSettle` snapshot is the whole transaction and equals its receipt.
 
 | Transaction (anvil receipt, Osaka, Foundry 1.8.6) | `gasUsed` | Gas limit | Calldata |
@@ -67,7 +67,7 @@ M1 measures the grid path and the dev-mode settlement on Foundry 1.8.6 (`evm_ver
 | `VerifiableInferenceSettlement` deployment | 874,223 | 1,136,489 | 4,305 B |
 | `VerifiableInferenceSettlement.verifyAndSettle` | 218,380 | 301,636 | 7,972 B |
 
-**The settle transaction under `EIP-7623`** (anvil receipt, Osaka, Foundry 1.8.6). Its calldata is 7,972 B: 4,050 zero and 3,922 non-zero bytes. The settle transaction is floor-bound under Osaka: `gasUsed` is the calldata floor, so execution is measured separately, as the top call's `gasUsed` in anvil's `trace_transaction` (Parity-style) trace of the mined transaction, which excludes intrinsic and calldata gas.
+**The settle transaction under `EIP-7623`** (anvil receipt, Osaka, Foundry 1.8.6). Its calldata is 7,972 B: 4,050 zero and 3,922 non-zero bytes. The settle transaction is floor-bound under Osaka: `gasUsed` is the calldata floor, so execution is measured separately, as the top call's `gasUsed` in anvil's `trace_transaction` (Parity-style) trace of the mined transaction, which excludes intrinsic and calldata gas. Because the receipt and the `verifyAndSettle` snapshot stay at the floor, that execution figure is what `make anvil-demo` gates.
 
 | Part | Gas |
 |---|---:|
