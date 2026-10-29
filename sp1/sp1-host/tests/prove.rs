@@ -1,7 +1,7 @@
 //! `sp1-host prove`'s checks that need no GPU (`docs/EVM-GAS-MODEL.md` §8): an ELF or vkey other than
-//! the committed program's, a `fixedHash` other than its pin, and a proof path in the checkout's
-//! tracked tree or in the bundle directory are each rejected; the command exits before it starts the
-//! CUDA client.
+//! the committed program's, a `fixedHash` other than its pin, and a proof path that exists, is a
+//! symlink or lies in the checkout's tracked tree or in the bundle directory are each rejected; the
+//! command exits before it starts the CUDA client. The proof file is created with `create_new`.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -9,7 +9,8 @@ use std::process::Command;
 
 use sash_evm_primitives::segment::SegmentPublicValues;
 use sp1_host::prove::{
-    FIXED_PINS, VKEY, check_elf, check_fixed_hash, check_out, check_vkey, fixed_pin, repo_root,
+    FIXED_PINS, VKEY, check_elf, check_fixed_hash, check_out, check_vkey, create_out, fixed_pin,
+    repo_root,
 };
 
 /// `B0L10`'s line in `sp1/pins/tinyllama.fixed.sha256`.
@@ -85,15 +86,25 @@ fn committed_vkey_is_accepted() {
     check_vkey(VKEY).unwrap();
 }
 
+/// The committed vkey with one field changed: the last hex digit of `bytes32`, or `hash_u32[0] + 1`.
 #[test]
 fn another_vkey_is_rejected() {
-    let other = VKEY.replacen("0x0025", "0x0026", 1);
+    let (bytes32, hash_u32) = VKEY.split_once('\n').unwrap();
+    let flipped = match bytes32.chars().last().unwrap() {
+        '0' => '1',
+        _ => '0',
+    };
+    let other = format!("{}{flipped}\n{hash_u32}", &bytes32[..bytes32.len() - 1]);
     assert_ne!(other, VKEY);
     let err = check_vkey(&other).unwrap_err();
     assert!(err.contains("sp1/segment-guest.vkey"), "{err}");
-    let hash_u32 = VKEY.replacen("317546511", "317546512", 1);
-    assert_ne!(hash_u32, VKEY);
-    check_vkey(&hash_u32).unwrap_err();
+
+    let (head, rest) = hash_u32.split_once('[').unwrap();
+    let (first, tail) = rest.split_once(',').unwrap();
+    let raised = first.parse::<u64>().unwrap() + 1;
+    let other = format!("{bytes32}\n{head}[{raised},{tail}");
+    assert_ne!(other, VKEY);
+    check_vkey(&other).unwrap_err();
 }
 
 #[test]
@@ -247,4 +258,78 @@ fn out_in_the_bundle_directory_is_rejected() {
     assert!(err.contains("in the bundle directory"), "{err}");
     fs::remove_dir_all(root).unwrap();
     fs::remove_dir_all(outside).unwrap();
+}
+
+#[test]
+fn symlink_out_is_rejected() {
+    let root = temp_dir("root-symlink");
+    let bundle = root.join("runs/tinyllama");
+    fs::create_dir_all(&bundle).unwrap();
+    let outside = temp_dir("symlink-outside");
+    // Outside the checkout, to a file in the bundle directory and, dangling, to a new file in the
+    // checkout's tracked tree.
+    fs::write(bundle.join("B0L10.proof.json"), b"pinned").unwrap();
+    let links = temp_dir("symlinks");
+    std::os::unix::fs::symlink(
+        bundle.join("B0L10.proof.json"),
+        links.join("B0L10.proof.bin"),
+    )
+    .unwrap();
+    std::os::unix::fs::symlink(
+        root.join("sp1/head.proof.bin"),
+        links.join("head.proof.bin"),
+    )
+    .unwrap();
+    // Under runs/, to a file outside the checkout.
+    std::os::unix::fs::symlink(
+        outside.join("B0L11.proof.bin"),
+        root.join("runs/B0L11.proof.bin"),
+    )
+    .unwrap();
+    for (out, tag) in [
+        (links.join("B0L10.proof.bin"), "B0L10"),
+        (links.join("head.proof.bin"), "head"),
+        (root.join("runs/B0L11.proof.bin"), "B0L11"),
+    ] {
+        let err = check_out(&out, tag, &root, &bundle).unwrap_err();
+        assert!(err.contains("is a symlink"), "{}: {err}", out.display());
+    }
+    assert_eq!(
+        fs::read(bundle.join("B0L10.proof.json")).unwrap(),
+        b"pinned"
+    );
+    fs::remove_dir_all(root).unwrap();
+    fs::remove_dir_all(outside).unwrap();
+    fs::remove_dir_all(links).unwrap();
+}
+
+#[test]
+fn existing_out_is_rejected() {
+    let root = temp_dir("root-existing");
+    let bundle = root.join("runs/tinyllama");
+    fs::create_dir_all(&bundle).unwrap();
+    fs::write(root.join("runs/B0L10.proof.bin"), b"an earlier proof").unwrap();
+    let err = check_out(&root.join("runs/B0L10.proof.bin"), "B0L10", &root, &bundle).unwrap_err();
+    assert!(err.contains("already exists"), "{err}");
+    fs::remove_dir_all(root).unwrap();
+}
+
+/// What appeared at the checked path before the write: a file, a symlink to a file in the bundle
+/// directory and a dangling symlink. `create_out` refuses each and leaves its target untouched.
+#[test]
+fn create_out_refuses_any_existing_path() {
+    let dir = temp_dir("create-out");
+    let pinned = dir.join("B0L10.proof.json");
+    fs::write(&pinned, b"pinned").unwrap();
+    fs::write(dir.join("file.proof.bin"), b"an earlier proof").unwrap();
+    std::os::unix::fs::symlink(&pinned, dir.join("link.proof.bin")).unwrap();
+    std::os::unix::fs::symlink(dir.join("missing"), dir.join("dangling.proof.bin")).unwrap();
+    for name in ["file.proof.bin", "link.proof.bin", "dangling.proof.bin"] {
+        create_out(&dir.join(name)).unwrap_err();
+    }
+    assert_eq!(fs::read(&pinned).unwrap(), b"pinned");
+    assert!(!dir.join("missing").exists());
+    create_out(&dir.join("B0L10.proof.bin")).unwrap();
+    assert_eq!(fs::read(dir.join("B0L10.proof.bin")).unwrap(), b"");
+    fs::remove_dir_all(dir).unwrap();
 }

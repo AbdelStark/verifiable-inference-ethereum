@@ -77,9 +77,11 @@ pub fn check_fixed_hash(public_values: &[u8], pin: &[u8; 32]) -> Result<[u8; 32]
     Ok(values.fixed_hash)
 }
 
-/// The proof file's path, made absolute: named `<tag>.proof.bin`, in an existing directory that is
-/// `<root>/runs/` or under it, or outside `root`, and never `bundle` or inside it. Proof bytes never
-/// land in the checkout's tracked tree or beside the pinned bundle files.
+/// The proof file's path, made absolute: named `<tag>.proof.bin`, not an existing path (writing
+/// follows a symlink, even a dangling one, to a target the directory checks never see), in an
+/// existing directory that is `<root>/runs/` or under it, or outside `root`, and never `bundle` or
+/// inside it. Proof bytes never land in the checkout's tracked tree or beside the pinned bundle
+/// files. [`create_out`] opens the path at the end and refuses whatever appeared there meanwhile.
 pub fn check_out(out: &Path, tag: &str, root: &Path, bundle: &Path) -> Result<PathBuf, String> {
     let name = format!("{tag}.proof.bin");
     if out.file_name().and_then(|n| n.to_str()) != Some(name.as_str()) {
@@ -92,6 +94,17 @@ pub fn check_out(out: &Path, tag: &str, root: &Path, bundle: &Path) -> Result<Pa
     let dir = fs::canonicalize(parent)
         .map_err(|e| format!("--out's directory {}: {e}", parent.display()))?;
     let root = fs::canonicalize(root).map_err(|e| format!("{}: {e}", root.display()))?;
+    let path = dir.join(name);
+    match fs::symlink_metadata(&path) {
+        Ok(m) if m.file_type().is_symlink() => {
+            return Err(format!(
+                "--out {} is a symlink, which could lead into the checkout or the bundle directory",
+                out.display()
+            ));
+        }
+        Ok(_) => return Err(format!("--out {} already exists", out.display())),
+        Err(_) => {}
+    }
     if dir.starts_with(&root) && !dir.starts_with(root.join("runs")) {
         return Err(format!(
             "--out {} is inside the checkout {} and not under its runs/",
@@ -109,7 +122,17 @@ pub fn check_out(out: &Path, tag: &str, root: &Path, bundle: &Path) -> Result<Pa
             bundle.display()
         ));
     }
-    Ok(dir.join(name))
+    Ok(path)
+}
+
+/// Creates the proof file at `path`, which [`check_out`] returned: `create_new`, so it refuses any
+/// existing path, a symlink or a dangling one included, that appeared there since the check.
+pub fn create_out(path: &Path) -> Result<fs::File, String> {
+    fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+        .map_err(|e| format!("{}: {e}", path.display()))
 }
 
 /// `VmHWM` of this process' `sp1-gpu-server` child (`/proc/<pid>/status`), which runs the prover:

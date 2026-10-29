@@ -62,7 +62,7 @@ fn plus_p(v: &mut Value) {
     *v = json!(v.as_u64().expect("a token id") + P);
 }
 
-pub const CONTROLS: [Control; 5] = [
+pub const CONTROLS: [Control; 7] = [
     Control {
         name: "proof_queried_value",
         tag: "B0L10",
@@ -94,6 +94,24 @@ pub const CONTROLS: [Control; 5] = [
         what: "`tok_out[0]` + P",
         edit: |f| plus_p(&mut f["tok_out"][0]),
         expect: Expect::Reject("TokenIdOutOfField"),
+    },
+    Control {
+        name: "block_removed",
+        tag: "B0L10",
+        file: File::Fixed,
+        what: "`block` removed (`nn_pos_ok` holds without it)",
+        edit: |f| {
+            f.as_object_mut().expect("Fixed").remove("block");
+        },
+        expect: Expect::Reject("NotSingleBlock"),
+    },
+    Control {
+        name: "head_block_1",
+        tag: "head",
+        file: File::Fixed,
+        what: "`block` 0 to 1 (the head has no rotation, so `nn_pos_ok` holds)",
+        edit: |f| f["block"] = json!(1),
+        expect: Expect::Reject("NotSingleBlock"),
     },
     Control {
         name: "fixed_model_changed",

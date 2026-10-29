@@ -7,7 +7,8 @@
 //! - `Malformed`: `fixed` does not parse;
 //! - 1 to 5 on the parsed `Fixed` and its `Plan`, before any verification: `TokenIdOutOfField`,
 //!   `SecurityParams`, `MissingLayer`, `UnboundEdge`, `UnsoundDequant`;
-//! - 6 and 7 on the `Verdict`: `NotAccepted`, `OpenSeam`.
+//! - 6 and 7 on the `Verdict`: `NotAccepted`, `OpenSeam`;
+//! - 8 on the statement, last, since it guards the public values: `NotSingleBlock`.
 //!
 //! A `Plan::new` assertion or any other panic in the verifier build is a rejection with no
 //! variant: natively the check panics, in the guest it exits 1.
@@ -68,6 +69,9 @@ pub enum Reject {
         ao_q_open: bool,
         nn_open: bool,
     },
+    /// Rule 8: the statement is not the single token block `B0`: its `block`, and its prefix length
+    /// `params.c`.
+    NotSingleBlock { block: Option<usize>, prefix: usize },
 }
 
 impl Reject {
@@ -81,6 +85,7 @@ impl Reject {
             Reject::UnsoundDequant { .. } => "UnsoundDequant",
             Reject::NotAccepted { .. } => "NotAccepted",
             Reject::OpenSeam { .. } => "OpenSeam",
+            Reject::NotSingleBlock { .. } => "NotSingleBlock",
         }
     }
 }
@@ -108,7 +113,9 @@ pub fn check_segment(
     let proof: Proof =
         bincode::deserialize(proof).map_err(|e| undecodable("proof", e.to_string()))?;
     let verdict = verify_composed_parsed(&fixed, &plan, &claims, proof);
-    check_verdict(segment_index, &fixed, &plan, &verdict)
+    let values = check_verdict(segment_index, &fixed, &plan, &verdict)?;
+    single_block(&fixed)?;
+    Ok(values)
 }
 
 fn undecodable(what: &str, e: String) -> Reject {
@@ -131,7 +138,8 @@ pub fn check_statement(fixed: &Fixed) -> Result<(u16, Plan), Reject> {
 }
 
 /// Rules 6 and 7 on the verifier build's `Verdict` for the statement `check_statement` passed,
-/// then the accepted segment's public values: the only way `check_segment` returns them.
+/// then the accepted segment's public values: the only way `check_segment` returns them, which it
+/// does once rule 8 also holds.
 pub fn check_verdict(
     segment_index: u16,
     fixed: &Fixed,
@@ -242,6 +250,20 @@ fn failed_checks(verdict: &Verdict) -> Vec<String> {
         })
         .map(|(name, _)| name)
         .collect()
+}
+
+/// Rule 8: `block` is `Some(0)` and the statement has no prefix keys (`params.c == 0`). The public
+/// values omit the K/V (`Axis::Token`) boundary roots, which bind a prefix's keys and values to the
+/// block that wrote them, so a statement with a prefix would read keys and values bound to nothing.
+/// Block 0 also fixes `rope.pos0` at 0 (`nn_pos_ok`).
+fn single_block(fixed: &Fixed) -> Result<(), Reject> {
+    if fixed.block == Some(0) && fixed.params.c == 0 {
+        return Ok(());
+    }
+    Err(Reject::NotSingleBlock {
+        block: fixed.block,
+        prefix: fixed.params.c,
+    })
 }
 
 fn seams_closed(verdict: &Verdict) -> Result<(), Reject> {

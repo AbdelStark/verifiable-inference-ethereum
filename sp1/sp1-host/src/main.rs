@@ -20,8 +20,8 @@ use sha2::{Digest, Sha256};
 use sp1_host::controls::CONTROLS;
 use sp1_host::fixture::{check_fixture_out, contracts_src, fixture_from_bundles};
 use sp1_host::prove::{
-    FIXED_PINS, check_elf, check_fixed_hash, check_out, check_vkey, fixed_pin, gpu_server_vm_hwm,
-    repo_root, vkey_text,
+    FIXED_PINS, check_elf, check_fixed_hash, check_out, check_vkey, create_out, fixed_pin,
+    gpu_server_vm_hwm, repo_root, vkey_text,
 };
 use sp1_host::sizes::{Sizes, table};
 use sp1_host::trace::function_samples;
@@ -73,8 +73,8 @@ enum Command {
         /// The segment's tag.
         #[arg(long)]
         tag: String,
-        /// Where the compressed proof goes: `<tag>.proof.bin`, under the checkout's `runs/` or outside
-        /// the checkout, and never in the bundle directory.
+        /// Where the compressed proof goes: `<tag>.proof.bin`, no symlink, under the checkout's `runs/`
+        /// or outside the checkout, and never in the bundle directory.
         #[arg(long)]
         out: PathBuf,
     },
@@ -350,9 +350,10 @@ fn prove_on_gpu(
         hex::encode(fixed_hash)
     );
 
-    proof
-        .save(out)
-        .map_err(|e| format!("{}: {e}", out.display()))?;
+    // `SP1ProofWithPublicValues::save`'s encoding, through a file that refuses an existing path.
+    let mut file = std::io::BufWriter::new(create_out(out)?);
+    bincode::serialize_into(&mut file, &proof).map_err(|e| format!("{}: {e}", out.display()))?;
+    std::io::Write::flush(&mut file).map_err(|e| format!("{}: {e}", out.display()))?;
     let bytes = read(out)?;
     println!("proof: {}", out.display());
     println!("proof size: {} bytes", bytes.len());

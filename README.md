@@ -8,8 +8,8 @@ An unpublished 23-segment SASH run for `TinyLlama/TinyLlama-1.1B-Chat-v1.0` (`fe
 
 Mainnet and Hoodi run Osaka, which binds this project; Amsterdam is tracked alongside it ([docs/EVM-GAS-MODEL.md](docs/EVM-GAS-MODEL.md) §2 lists both forks' constants). Verifying those proofs directly in one EVM transaction would need at least ~863x the `EIP-7825` per-transaction cap under Osaka (~1,131x under Amsterdam), estimated from those sizes: calldata plus ~10.27 billion gas of `BLAKE2s` in Solidity, which no precompile computes ([docs/EVM-GAS-MODEL.md](docs/EVM-GAS-MODEL.md) §3). `verifiable-inference-ethereum` therefore splits the work across two layers, without weakening SASH's execution relation:
 
-1. **Off-chain segment verification and compression (planned, M2 and M3):**
-   - M2: an SP1 v6 `riscv64im` guest per segment runs a verifier-only build of SASH's `verify_composed` ([SPEC.md](SPEC.md) §1.1). Unmodified, `verify_composed` cannot run in a guest: it calls `std::time::Instant::now`, and its crate needs stwo's nightly `prover` feature (for the GKR verifier) and nitroo's CUDA build script.
+1. **Off-chain segment verification and compression (M2 present, M3 planned):**
+   - M2 (`sp1/segment-guest`): an SP1 v6 `riscv64im` guest per segment runs a verifier-only build of SASH's `verify_composed` ([SPEC.md](SPEC.md) §1.1). Unmodified, `verify_composed` cannot run in a guest: it calls `std::time::Instant::now`, and its crate needs stwo's nightly `prover` feature (for the GKR verifier) and nitroo's CUDA build script.
    - M3: an aggregator guest verifies the 23 segment proofs and commits `publicDigest`; an SP1 v6 BN254 wrap (Groth16 or PLONK, chosen at M3 start) makes it verifiable on-chain through `Sp1SashSegmentVerifier.sol` (~270k gas, estimated).
 2. **Native Solidity SASH grid settlement (`contracts/src/`, present):**
    Enforces on-chain in pure Solidity:

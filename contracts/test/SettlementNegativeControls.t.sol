@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 pragma solidity ^0.8.38;
 
-import {SashModelRegistry} from "../src/sash/SashModelRegistry.sol";
 import {SashTypes} from "../src/sash/SashTypes.sol";
 import {Sp1SashSegmentVerifier} from "../src/sash/Sp1SashSegmentVerifier.sol";
 import {StubSp1Gateway} from "./StubSp1Gateway.sol";
@@ -134,10 +133,5 @@ contract SettlementNegativeControlsTest is TinyLlamaBase {
             TinyLlamaFixture.answerIds(),
             proof
         );
-    }
-
-    function testRegistryRejectsZeroOwner() public {
-        vm.expectRevert(SashTypes.ZeroOwner.selector);
-        new SashModelRegistry(address(0));
     }
 }

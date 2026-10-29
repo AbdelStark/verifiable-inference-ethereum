@@ -52,16 +52,39 @@ fn rejects_with(name: &str, run: &Execution, variant: &str) {
     eprintln!("{name}: exit 1, {variant}, {} cycles", run.cycles);
 }
 
+/// The single token block `B0`, with no prefix keys: the one corpus bundle that passes every rule.
 #[test]
 #[ignore = "needs the synthetic corpus in SASH_SYNTHETIC_CORPUS (sp1 or sp1-cached CI job)"]
-fn sound_aligned_accepts() {
-    accepts_as_native("sound_aligned", &Bundle::load("sound_aligned"));
+fn single_block_accepts() {
+    accepts_as_native("single_block", &Bundle::load("single_block"));
 }
 
+/// `layer` 1 to 2 on `single_block` is accepted, with the native public values: the new
+/// `segmentIndex` and `fixedHash`, the rest unchanged.
 #[test]
 #[ignore = "needs the synthetic corpus in SASH_SYNTHETIC_CORPUS (sp1 or sp1-cached CI job)"]
-fn aligned_gkr5_accepts() {
-    accepts_as_native("aligned_gkr5", &Bundle::load("aligned_gkr5"));
+fn layer_1_to_2_accepts_with_another_index_and_fixed_hash() {
+    let m = MUTATIONS.iter().find(|m| m.name == "layer_1_to_2").unwrap();
+    assert_eq!(m.expect, "accept");
+    let got = accepts_as_native(m.name, &m.bundle());
+    let Outcome::Accept(original) = Bundle::load(m.base).check() else {
+        panic!("{} must be accepted natively", m.base);
+    };
+    let original = original.encode();
+    assert_eq!(got[0..2], [0, 2]);
+    assert_eq!(got[2..130], original[2..130]);
+    assert_ne!(got[130..162], original[130..162]);
+    assert_eq!(got[162..], original[162..]);
+}
+
+/// The other corpus bundles that pass rules 1 to 7: block 0 with a 128-key prefix (`SPEC.md` §2.1
+/// G10).
+#[test]
+#[ignore = "needs the synthetic corpus in SASH_SYNTHETIC_CORPUS (sp1 or sp1-cached CI job)"]
+fn prefix_bundles_reject() {
+    for tag in ["sound_aligned", "aligned_gkr5"] {
+        rejects_with(tag, &run(&Bundle::load(tag)), "NotSingleBlock");
+    }
 }
 
 /// The corpus bundles with an unbound edge (`SPEC.md` §2.1 G5).
@@ -132,6 +155,12 @@ fn mutations_not_accepted() {
     mutations_reject_with("NotAccepted");
 }
 
+#[test]
+#[ignore = "needs the synthetic corpus in SASH_SYNTHETIC_CORPUS (sp1 or sp1-cached CI job)"]
+fn mutations_not_single_block() {
+    mutations_reject_with("NotSingleBlock");
+}
+
 /// A `proof` buffer that does not decode as `bincode` rejects at rule 6, in the guest's own decode
 /// rather than halting in `io::read`.
 #[test]
@@ -153,22 +182,4 @@ fn undecodable_proof_is_not_accepted() {
         "proof_truncated: stderr: {}",
         run.stderr
     );
-}
-
-/// `layer` 1 to 2 on `sound_aligned` verifies, with the native public values: the new
-/// `segmentIndex` and `fixedHash`, the rest unchanged.
-#[test]
-#[ignore = "needs the synthetic corpus in SASH_SYNTHETIC_CORPUS (sp1 or sp1-cached CI job)"]
-fn layer_1_to_2_accepts_with_another_index_and_fixed_hash() {
-    let m = MUTATIONS.iter().find(|m| m.name == "layer_1_to_2").unwrap();
-    assert_eq!(m.expect, "accept");
-    let got = accepts_as_native(m.name, &m.bundle());
-    let Outcome::Accept(original) = Bundle::load(m.base).check() else {
-        panic!("{} must verify natively", m.base);
-    };
-    let original = original.encode();
-    assert_eq!(got[0..2], [0, 2]);
-    assert_eq!(got[2..130], original[2..130]);
-    assert_ne!(got[130..162], original[130..162]);
-    assert_eq!(got[162..], original[162..]);
 }

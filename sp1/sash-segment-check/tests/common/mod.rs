@@ -52,8 +52,9 @@ pub fn oracle_records() -> &'static BTreeMap<String, Value> {
     })
 }
 
-pub const BUNDLES: [&str; 8] = [
+pub const BUNDLES: [&str; 9] = [
     "sound_aligned",
+    "single_block",
     "aligned_gkr5",
     "sound_gkrfive",
     "skip_residual_stream",
@@ -139,8 +140,9 @@ impl Outcome {
     }
 }
 
-/// A mutation of a positive bundle that stays structurally valid, and the variant
-/// `check_segment` must return for it (`"accept"` when it must accept).
+/// A mutation of a bundle that passes rules 1 to 7 (`sound_aligned`, `aligned_gkr5`,
+/// `single_block`) that stays structurally valid, and the variant `check_segment` must return for
+/// it (`accept` when it passes every rule).
 pub struct Mutation {
     pub name: &'static str,
     pub base: &'static str,
@@ -162,7 +164,7 @@ fn flip_hex_digit(v: &mut Value) {
     *v = json!(format!("{}{last}", &s[..s.len() - 1]));
 }
 
-pub const MUTATIONS: [Mutation; 19] = [
+pub const MUTATIONS: [Mutation; 20] = [
     Mutation {
         name: "merkle_hash_flipped",
         base: "sound_aligned",
@@ -301,12 +303,23 @@ pub const MUTATIONS: [Mutation; 19] = [
         expect: "Malformed",
     },
     Mutation {
-        // Accepted with another segmentIndex and fixedHash: the manifest's fixedHash pin (#47)
-        // is what refuses it.
+        // Accepted with another segmentIndex and fixedHash (`tests/bundles.rs`): the manifest's
+        // fixedHash pin refuses it on-chain.
         name: "layer_1_to_2",
-        base: "sound_aligned",
+        base: "single_block",
         apply: |b| b.edit_fixed(|f| f["layer"] = json!(2)),
         expect: "accept",
+    },
+    Mutation {
+        // Rules 1 to 7 still hold: `nn_pos_ok` passes when `block` is absent.
+        name: "block_removed",
+        base: "single_block",
+        apply: |b| {
+            b.edit_fixed(|f| {
+                f.as_object_mut().unwrap().remove("block");
+            })
+        },
+        expect: "NotSingleBlock",
     },
     Mutation {
         name: "aligned_gkr5_pre_root_changed",

@@ -254,7 +254,7 @@ target/release/sp1-host trace-share --trace <tag>.trace.json
 
 The two agree within 0.13 points: the bare compression's 2,139 cycles include a little loop and call overhead that the profiler counts outside `compress`.
 
-**Controls on the real bundles.** `make sp1-execute` then writes five modified copies under `OUT/controls/`, never in the bundle directory, and runs each natively and in the executor. Both sides give the same outcome:
+**Controls on the real bundles.** `make sp1-execute` then writes seven modified copies under `OUT/controls/`, never in the bundle directory, and runs each natively and in the executor. Both sides give the same outcome:
 
 | Control | Segment and file | Native and executor | Executor cycles |
 |---|---|---|---:|
@@ -263,6 +263,10 @@ The two agree within 0.13 points: the bare compression's 2,139 cycles include a 
 | `tok_in[0]` + P | `B0L0` fixed | exit 1, `TokenIdOutOfField` | 3,939,888 |
 | `tok_out[0]` + P | `head` fixed | exit 1, `TokenIdOutOfField` | 12,112,996 |
 | `model`'s last hex digit changed (no rule reads it) | `B0L10` fixed | exit 0, the unmodified public values but for `fixedHash`, `86c43bf7…89f08a5` against the pin `fa81937c…e19faf47`; the `manifestRootsHash` check rejects it (control 21, `SPEC.md` §2.1) | 1,879,910,406 |
+| `block` removed (`nn_pos_ok` holds without it) | `B0L10` fixed | exit 1, `NotSingleBlock` | 1,880,280,426 (local build) |
+| `block` 0 to 1 (the head has no rotation, so `nn_pos_ok` holds) | `head` fixed | exit 1, `NotSingleBlock` | 6,216,215,546 (local build) |
+
+The two `NotSingleBlock` rows (rule 8) ran on a local `cargo prove build` of the segment guest, not the committed Docker build the other rows use; their cycles change with the ELF.
 
 **Against the per-request limits** (one request per segment) **and in GPU time:**
 
@@ -296,7 +300,7 @@ Each figure is labelled measured or estimated. Estimates are computed from the m
   target/release/sp1-host prove --elf <segment-guest> --bundle ../runs/tinyllama --tag B0L10 --out <dir>/B0L10.proof.bin
   ```
 
-  `sp1-host prove` checks everything it can on the CPU before it starts the CUDA client: an `--out` named `<tag>.proof.bin` under the checkout's `runs/` or outside the checkout, never in the bundle directory; the ELF's sha256 against `sp1/segment-guest.elf.sha256`; its vkey, from a CPU setup, against `sp1/segment-guest.vkey`; and an executor run on the input, which must exit 0 with the `fixedHash` in `sp1/pins/tinyllama.fixed.sha256`. It then builds the CUDA client (which downloads `sp1-gpu-server` into `~/.sp1/bin` on first use and starts it; timed apart, so neither the download nor the start counts as setup or proving), sets the key up and checks the GPU key's vkey again, proves in compressed mode, verifies the proof, compares its public values with the executor's byte for byte and its `fixedHash` with the pin, then writes the proof. It prints each step's time, the proof's size and sha256, and `VmHWM` of `sp1-gpu-server`, the process that proves. GPU memory is sampled every second with `nvidia-smi --query-gpu=memory.used`. The bundles were checked against `sp1/pins/tinyllama.sha256` on the host first, and the bundles and proofs were deleted from it afterwards.
+  `sp1-host prove` checks everything it can on the CPU before it starts the CUDA client: an `--out` named `<tag>.proof.bin` that does not exist yet (a symlink included), under the checkout's `runs/` or outside the checkout, never in the bundle directory; the ELF's sha256 against `sp1/segment-guest.elf.sha256`; its vkey, from a CPU setup, against `sp1/segment-guest.vkey`; and an executor run on the input, which must exit 0 with the `fixedHash` in `sp1/pins/tinyllama.fixed.sha256`. It then builds the CUDA client (which downloads `sp1-gpu-server` into `~/.sp1/bin` on first use and starts it; timed apart, so neither the download nor the start counts as setup or proving), sets the key up and checks the GPU key's vkey again, proves in compressed mode, verifies the proof, compares its public values with the executor's byte for byte and its `fixedHash` with the pin, then writes the proof through a file it creates only if nothing exists at that path. It prints each step's time, the proof's size and sha256, and `VmHWM` of `sp1-gpu-server`, the process that proves. GPU memory is sampled every second with `nvidia-smi --query-gpu=memory.used`. The bundles were checked against `sp1/pins/tinyllama.sha256` on the host first, and the bundles and proofs were deleted from it afterwards.
 
 ### 8.1 Measured
 
@@ -367,9 +371,11 @@ Both routes priced per inference on Hugging Face Jobs, each by its own method:
 - **The security parameters differ** (`docs/STARK-NATIVE-ROUTE.md`, "Security parameters differ"): matching SASH's 100 bits on the S-two side changes its query count or PoW.
 - **Machines differ:** one GPU at $0.045833/min against one 32-vCPU CPU machine at $0.031667/min.
 
-### 8.4 Go/no-go criteria (proposed thresholds; the user decides)
+### 8.4 Go/no-go: GO on SP1
 
-| | Criterion | Figure | Proposed threshold | Status |
+The thresholds below are the ones `docs/ROADMAP.md` records with M2's decision, GO on SP1.
+
+| | Criterion | Figure | Threshold | Status |
 |---|---|---|---|---|
 | F1 | Every segment's §7 figures within half of SP1's limits | `head`, the largest: 6.21e9 cycles, 0.62% of sp1-sdk 6.10.0's 1e12-cycle `MAINNET_DEFAULT_CYCLE_LIMIT` (`network/mod.rs`); the network's 1e12-PGU request cap is not assessed: it is #38's figure, unverified, and sp1-sdk 6.10.0 defines no PGU cap (its 1e9-PGU `DEFAULT_GAS_LIMIT` is a default a request overrides, §7); 35,640,318 stdin bytes, 0.21% of the 16 GiB input region (`SP1_ZKVM_INPUT_REGION_SIZE` default `1 << 34`, sp1 `crates/zkvm/entrypoint/build.rs`); native executor child peak RSS 4,725,551,104 B (§8.1), 18.3% of its 24 GiB `DEFAULT_MEMORY_LIMIT` | ≤ 50% of each limit | Passes for cycles, input and RSS; PGU cap not assessed |
 | F2 | `B0L10` and `head` prove without running out of memory | Both prove and verify, twice; peak 26,541 MiB of the GPU's 97,887 MiB, `sp1-gpu-server` `VmHWM` 25,671,472 kB of the 256 GB allotted | Both prove and verify | Passes |
@@ -377,8 +383,8 @@ Both routes priced per inference on Hugging Face Jobs, each by its own method:
 | C2 | Wall time per inference, 23 segments in parallel, aggregator and wrap included | `head`'s 721.6 s (measured) + the aggregator, about 210 s (estimate) + the wrap (M3): about 15.5 min plus the wrap | ≤ 1 h, about twice SASH's own 31 min | Meets it, if the wrap takes under about 44 min |
 | C3 | §7's measured cycles against the ~1e10 estimate made before #45 | 4.79e10, 4.79× | ≤ 10× | Passes |
 
-**Recommendation: GO**, under the proposed thresholds. Proposed rule: GO if F1 and F2 pass and C1 and C2 meet the thresholds the user sets.
+**GO**: F1 and F2 pass, and C1 and C2 meet their thresholds.
 
 - F1 and F2 pass: every segment fits SP1's limits with a wide margin, and the largest proves in 27% of one card's memory.
-- C1 and C2 meet the proposed thresholds: $4.10–4.25 per inference for the 23 segments on one GPU, about the S-two route's scaled estimate, which still needs a Cairo SASH verifier that does not exist; about 12 minutes for `head` with the segments in parallel.
+- C1 and C2 meet the thresholds: $4.10–4.25 per inference for the 23 segments on one GPU, about the S-two route's scaled estimate, which still needs a Cairo SASH verifier that does not exist; about 12 minutes for `head` with the segments in parallel.
 - The margins are what M3 must measure first: the aggregator and the wrap are estimates, and C1 leaves about $0.60 for them. The cost is 13–14× SASH's own proving, and BLAKE2s, with no SP1 precompile, is about a quarter of it.

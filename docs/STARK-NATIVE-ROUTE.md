@@ -13,7 +13,7 @@ The question raised in review: SASH already produces Circle STARK proofs, so why
   3. Submit it to SHARP as a Cairo program, through Herodotus Atlantic, which accepts Cairo PIEs only. SHARP registers a fact on L1. A custom stwo circuit gets there only through a Cairo run of `stwo_circuit_verifier`.
   
   It is transparent, with no BN254 and no trusted setup. It is also many months of work that nobody has done.
-- **The SP1 route works with today's proofs**, but it is weak exactly where STARK tooling is strong: SP1 has no BLAKE2s or M31 precompile. M2's go/no-go should therefore compare it against the Cairo/S-two route.
+- **The SP1 route works with today's proofs**, but it is weak exactly where STARK tooling is strong: SP1 has no BLAKE2s or M31 precompile. M2's go/no-go compared it against the Cairo/S-two route and chose SP1 (`docs/EVM-GAS-MODEL.md` §8, `docs/ROADMAP.md`).
 
 ## Why SASH proofs can't settle on Ethereum directly
 
@@ -339,7 +339,7 @@ S-two's figures cover OODS constraint evaluation, FRI, the channel and GKR only 
 
 ## Implications for the roadmap
 
-- **M2:** SP1's proving cost, its comparison with S-two and the go/no-go criteria for M3 are in `docs/EVM-GAS-MODEL.md` §8. M2 builds no prototype SASH verifier in Cairo or S-two.
+- **M2:** SP1's proving cost, its comparison with S-two and the go/no-go for M3 (GO on SP1) are in `docs/EVM-GAS-MODEL.md` §8. M2 built no prototype SASH verifier in Cairo or S-two.
 - **M3:** prefer PLONK over Groth16 for the setup, unless the gas difference matters.
 - **SHARP route:**
   - bind to SHARP's own contracts, not to Atlantic's upgradeable Satellite diamond proxy, whose `isCairoFactValid(fact_hash, is_mocked)` also serves facts registered without on-chain verification. Two choices:

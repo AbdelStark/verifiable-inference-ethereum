@@ -1,8 +1,8 @@
 //! One `SPEC.md` §1.1 rule at a time, on statements and verdicts built here. Rules 1 to 3 run before
-//! `Plan::new`, so their controls go through `check_segment` itself; rules 4, 5 and 7 are checked on
-//! a constructed binding table, dequant `Spec` and `Verdict`, since `Params::default()` is not a
-//! statement `Plan::new` accepts. The synthetic bundles (`tests/bundles.rs`) run rules 1 to 6
-//! through `check_segment`, and rule 7 through `check_verdict` on a bundle's own `Plan` and
+//! `Plan::new`, so their controls go through `check_segment` itself; rules 4, 5, 7 and 8 are checked
+//! on a constructed binding table, dequant `Spec`, `Verdict` and statement, since `Params::default()`
+//! is not a statement `Plan::new` accepts. The synthetic bundles (`tests/bundles.rs`) run rules 1 to
+//! 6 and 8 through `check_segment`, and rule 7 through `check_verdict` on a bundle's own `Plan` and
 //! `Verdict` with a seam opened, since no corpus bundle has an open seam.
 
 use sash_evm_primitives::tinyllama_fixture::{TINYLLAMA_TOK_IN, TINYLLAMA_TOK_OUT};
@@ -331,6 +331,29 @@ fn open_seam() {
                 rq_scale_open: v.rq_scale_open.clone(),
                 ao_q_open: v.ao_q_open,
                 nn_open: v.nn_open
+            })
+        );
+    }
+}
+
+#[test]
+fn not_single_block() {
+    assert_eq!(single_block(&fixed()), Ok(()));
+    let changes: [fn(&mut Fixed); 4] = [
+        |f| f.block = None,
+        |f| f.block = Some(1),
+        // Block 0 with a prefix: the synthetic corpus' attention bundles (`--ctx 128`).
+        |f| f.params.c = 128,
+        |f| f.params.c = 32,
+    ];
+    for change in changes {
+        let mut f = fixed();
+        change(&mut f);
+        assert_eq!(
+            single_block(&f),
+            Err(Reject::NotSingleBlock {
+                block: f.block,
+                prefix: f.params.c
             })
         );
     }
