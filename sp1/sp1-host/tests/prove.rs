@@ -87,11 +87,17 @@ fn committed_vkey_is_accepted() {
 
 #[test]
 fn another_vkey_is_rejected() {
-    let other = VKEY.replacen("0x0025", "0x0026", 1);
+    // One digit changed, at the last hex digit of `bytes32` or the last digit of `hash_u32[0]`.
+    let bump = |at: usize| {
+        let mut v = VKEY.as_bytes().to_vec();
+        v[at] = if v[at] == b'0' { b'1' } else { b'0' };
+        String::from_utf8(v).unwrap()
+    };
+    let other = bump(VKEY.find("0x").unwrap() + 2 + 63);
     assert_ne!(other, VKEY);
     let err = check_vkey(&other).unwrap_err();
     assert!(err.contains("sp1/segment-guest.vkey"), "{err}");
-    let hash_u32 = VKEY.replacen("317546511", "317546512", 1);
+    let hash_u32 = bump(VKEY.find(',').unwrap() - 1);
     assert_ne!(hash_u32, VKEY);
     check_vkey(&hash_u32).unwrap_err();
 }

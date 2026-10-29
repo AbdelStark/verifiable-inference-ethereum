@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Checks the synthetic bundle corpus in sp1/testdata/synthetic (gitignored) with upstream's oracle
-# (sp1/sash-oracle, already built: SASH_ORACLE, default target/sash/release/sash-oracle): each
+# Checks the synthetic bundle corpus in sp1/testdata/synthetic (gitignored) with the oracle
+# (sp1/sash-oracle: upstream with patch 0006 only, already built: SASH_ORACLE, default
+# target/sash/release/sash-oracle): each
 # bundle's accepts(), unbound edges and pinned proof.json digest; then the corpus files and the
 # oracle's output against the committed records; then runs the segment check's bundle and
 # differential tests (sp1/sash-segment-check, SPEC.md §1.1) on the corpus against the oracle.
@@ -55,6 +56,8 @@ expect skip_layer_boundary '[13]' ''
 expect skip_kv_boundary '[14]' ''
 expect skip_embedding '[15]' ''
 expect head '[16]' e3f31c1d4aeae77e
+expect embed '[]' ''
+expect head_argmax '[]' ''
 
 jq -s 'add' "$corpus/.oracle.jsonl" >testdata/synthetic.oracle.json.fresh
 rm -f "$corpus/.oracle.jsonl"

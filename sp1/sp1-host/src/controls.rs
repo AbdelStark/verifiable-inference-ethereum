@@ -6,8 +6,11 @@ use std::fs;
 use std::path::Path;
 
 use sash_segment_check::check_segment;
+use sash_segment_check::forge::{Vector, forge};
 use serde_json::{Value, json};
 use sp1_sdk::blocking::prelude::*;
+use zk_prover::common::Proof;
+use zk_prover::compose::{Claims, Fixed};
 
 use crate::{Execution, SegmentInput, execute};
 
@@ -45,12 +48,19 @@ impl File {
     }
 }
 
+/// The unmodified segment, parsed, for the edits that derive their change from it.
+pub struct Original {
+    pub fixed: Fixed,
+    pub claims: Claims,
+    pub proof: Proof,
+}
+
 pub struct Control {
     pub name: &'static str,
     pub tag: &'static str,
     pub file: File,
     pub what: &'static str,
-    pub edit: fn(&mut Value),
+    pub edit: fn(&mut Value, &Original),
     pub expect: Expect,
 }
 
@@ -62,13 +72,27 @@ fn plus_p(v: &mut Value) {
     *v = json!(v.as_u64().expect("a token id") + P);
 }
 
-pub const CONTROLS: [Control; 5] = [
+/// G9: `tok_in[25]` (`B0L0`) or `tok_out[24]` (`head`) set to 450, with four slack positions solved
+/// so that the Horner sum under the `w` the segment was proved with is unchanged
+/// (`sash_segment_check::forge`). Panics if neither transcript reproduces the claims.
+fn forge_vector(f: &mut Value, original: &Original, vector: Vector) {
+    let forged = forge(&original.fixed, &original.claims, &original.proof, vector)
+        .unwrap_or_else(|e| panic!("G9 forgery of {}: {e}", vector.key()));
+    eprintln!(
+        "G9 forgery of {}: solved under the {:?} transcript's w",
+        vector.key(),
+        forged.transcript
+    );
+    f[vector.key()] = json!(forged.ids);
+}
+
+pub const CONTROLS: [Control; 7] = [
     Control {
         name: "proof_queried_value",
         tag: "B0L10",
         file: File::Proof,
         what: "`queried_values[0][0]` + 1 mod P (the proof still decodes)",
-        edit: |p| plus_one_mod_p(&mut p["queried_values"][0][0]),
+        edit: |p, _| plus_one_mod_p(&mut p["queried_values"][0][0]),
         expect: Expect::Reject("NotAccepted"),
     },
     Control {
@@ -76,7 +100,7 @@ pub const CONTROLS: [Control; 5] = [
         tag: "B0L10",
         file: File::Claims,
         what: "`ao_out[0]` + 1 mod P (still decodable)",
-        edit: |c| plus_one_mod_p(&mut c["ao_out"][0]),
+        edit: |c, _| plus_one_mod_p(&mut c["ao_out"][0]),
         expect: Expect::Reject("NotAccepted"),
     },
     Control {
@@ -84,7 +108,7 @@ pub const CONTROLS: [Control; 5] = [
         tag: "B0L0",
         file: File::Fixed,
         what: "`tok_in[0]` + P",
-        edit: |f| plus_p(&mut f["tok_in"][0]),
+        edit: |f, _| plus_p(&mut f["tok_in"][0]),
         expect: Expect::Reject("TokenIdOutOfField"),
     },
     Control {
@@ -92,15 +116,31 @@ pub const CONTROLS: [Control; 5] = [
         tag: "head",
         file: File::Fixed,
         what: "`tok_out[0]` + P",
-        edit: |f| plus_p(&mut f["tok_out"][0]),
+        edit: |f, _| plus_p(&mut f["tok_out"][0]),
         expect: Expect::Reject("TokenIdOutOfField"),
+    },
+    Control {
+        name: "tok_in_horner_forged",
+        tag: "B0L0",
+        file: File::Fixed,
+        what: "`tok_in[25]` = 450, `tok_in[1..=4]` solved to keep the Horner sum under the segment's own `w`",
+        edit: |f, o| forge_vector(f, o, Vector::TokIn),
+        expect: Expect::Reject("NotAccepted"),
+    },
+    Control {
+        name: "tok_out_horner_forged",
+        tag: "head",
+        file: File::Fixed,
+        what: "`tok_out[24]` = 450, `tok_out[0..=3]` solved to keep the Horner sum under the segment's own `w`",
+        edit: |f, o| forge_vector(f, o, Vector::TokOut),
+        expect: Expect::Reject("NotAccepted"),
     },
     Control {
         name: "fixed_model_changed",
         tag: "B0L10",
         file: File::Fixed,
         what: "`model`'s last hex digit changed (no rule reads it)",
-        edit: |f| {
+        edit: |f, _| {
             let model = f["model"].as_str().expect("Fixed.model").to_string();
             let last = if model.ends_with('0') { '1' } else { '0' };
             f["model"] = json!(format!("{}{last}", &model[..model.len() - 1]));
@@ -113,12 +153,25 @@ impl Control {
     /// Writes the modified copy of the segment's three files to `dir`.
     pub fn write_copy(&self, bundles: &Path, dir: &Path) -> Result<(), String> {
         fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
-        for file in [File::Fixed, File::Claims, File::Proof] {
+        let files = [File::Fixed, File::Claims, File::Proof].map(|file| {
             let name = format!("{}.{}.json", self.tag, file.kind());
-            let bytes = fs::read(bundles.join(&name)).map_err(|e| format!("{name}: {e}"))?;
+            let bytes = fs::read(bundles.join(&name)).map_err(|e| format!("{name}: {e}"));
+            (file, name, bytes)
+        });
+        let parse = |i: usize| match &files[i].2 {
+            Ok(bytes) => Ok(bytes.as_slice()),
+            Err(e) => Err(e.clone()),
+        };
+        let original = Original {
+            fixed: serde_json::from_slice(parse(0)?).map_err(|e| format!("fixed.json: {e}"))?,
+            claims: serde_json::from_slice(parse(1)?).map_err(|e| format!("claims.json: {e}"))?,
+            proof: serde_json::from_slice(parse(2)?).map_err(|e| format!("proof.json: {e}"))?,
+        };
+        for (file, name, bytes) in files {
+            let bytes = bytes?;
             let bytes = if file.kind() == self.file.kind() {
                 let mut v: Value = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
-                (self.edit)(&mut v);
+                (self.edit)(&mut v, &original);
                 serde_json::to_vec(&v).map_err(|e| e.to_string())?
             } else {
                 bytes

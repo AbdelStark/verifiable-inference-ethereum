@@ -11,7 +11,7 @@ help:
 	@echo "  make sp1-check   - Vendor SASH, check nitroo's Stwo (also with count-ops) and SASH's zk-prover library without the prover feature on stable, then cargo fmt --check, the segment check's unit tests, the executor tests and clippy -D warnings in sp1/ (needs SP1 v6.10.0 and protoc)"
 	@echo "  make sp1-docker  - Build the segment guest and stwo-bench reproducibly in the SP1 v6.10.0 Docker image pinned by digest, print their ELF sha256 and the segment guest's vkey, and compare both with sp1/segment-guest.elf.sha256 and sp1/segment-guest.vkey"
 	@echo "  make sash-synthetic"
-	@echo "                  - Linux + CUDA 12.9 toolkit only: build upstream SASH's prover, check its pinned digests, regenerate the synthetic corpus and its oracle records, and run the segment check's bundle and differential tests on it"
+	@echo "                  - Linux + CUDA 12.9 toolkit only: build SASH's prover (sp1/vendor/sash), check upstream's pinned digests, regenerate the synthetic corpus and its oracle records, and run the segment check's bundle and differential tests on it"
 	@echo "  make sp1-guest-suite"
 	@echo "                  - Check the synthetic corpus in SASH_SYNTHETIC_CORPUS (default sp1/testdata/synthetic) against sp1/testdata/synthetic.sha256, run the segment guest in the SP1 executor on every bundle and bundle mutation, and render TinyLlamaFixture.sol with sp1-host fixture-from-bundles from a corpus statement carrying the TinyLlama tokens"
 	@echo "  make bundles-check"

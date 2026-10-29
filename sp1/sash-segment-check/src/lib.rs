@@ -296,5 +296,9 @@ fn root(hex: &str) -> [u8; 32] {
     out
 }
 
+/// G9's token forgeries, for the controls (`SPEC.md` §2.1); never in the guest.
+#[cfg(feature = "forge")]
+pub mod forge;
+
 #[cfg(test)]
 mod tests;

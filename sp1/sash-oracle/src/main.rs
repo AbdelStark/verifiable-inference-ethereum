@@ -1,5 +1,7 @@
-//! `sash-oracle DIR TAG`: runs upstream SASH's `verify_composed` on `DIR/TAG.{fixed,claims,proof}.json`
-//! with no calibration, as the guest does, and prints one JSON object:
+//! `sash-oracle DIR TAG`: runs upstream SASH's `verify_composed`, with only the patches that change
+//! behaviour (`sp1/vendor/sash-oracle`: patch 0006, which binds the token vectors into the transcript),
+//! on `DIR/TAG.{fixed,claims,proof}.json` with no calibration, as the guest does, and prints one JSON
+//! object:
 //! - `verdict`: the serialized `Verdict`, without its timing fields;
 //! - `accepts`: `Verdict::accepts()`;
 //! - `binding`: `Plan::new(&fixed.params).binding_json(fixed.layer)`, or `null` if `Fixed` does not parse;

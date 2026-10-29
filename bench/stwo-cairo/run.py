@@ -67,10 +67,10 @@ QM31_COMPONENT = "qm_31_add_mul_opcode"
 # TinyLlama-1.1B SASH run, docs/EVM-GAS-MODEL.md §1, and the BLAKE2s compressions its verifier
 # runs, Merkle hash_node plus channel, counted natively (§3, §7).
 TINYLLAMA = {
-    "all 23 segments": {"segments": 23, "leaf_m31": 65_967_346, "oods": 519_784,
-                        "columns": 501_235, "hashes": 518_489, "blake2s": 5_133_478},
-    "head (largest)": {"segments": 1, "leaf_m31": 8_099_813, "oods": 69_560,
-                       "columns": 68_484, "hashes": 19_427, "blake2s": 557_316},
+    "all 23 segments": {"segments": 23, "leaf_m31": 65_987_266, "oods": 519_784,
+                        "columns": 501_235, "hashes": 518_617, "blake2s": 5_134_853},
+    "head (largest)": {"segments": 1, "leaf_m31": 8_164_242, "oods": 69_560,
+                       "columns": 68_484, "hashes": 19_534, "blake2s": 561_462},
 }
 
 # The executable's Standalone entrypoint passes only the builtins the program uses, but
