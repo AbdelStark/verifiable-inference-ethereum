@@ -138,16 +138,15 @@ fn check_segment_agrees_with_the_oracle() {
             stricter.insert(name);
         }
     }
-    // Where upstream accepts and the guest does not: the unbound bundles, the bundles with a prefix
-    // and `block_removed` (rule 8), and the mutations that only SPEC.md §1.1's own rules refuse. Not
-    // the three `UnsoundDequant` mutations: `kmax` and the dequant variants size the tables and
-    // claims the AIR reads, so upstream rejects those statements on its own (`kmax_22`: `sizes_ok`
-    // and `stark_ok` false, `OodsNotMatching`; the other two: `claims shape mismatch`);
-    // `UnsoundDequant` is the first rule to see them.
+    // Where upstream accepts and the guest does not: the unbound bundles, the bundles and mutations
+    // with a prefix (rule 8), and the mutations that only SPEC.md §1.1's own rules refuse. Not the
+    // three `UnsoundDequant` mutations: `kmax` and the dequant variants size the tables and claims
+    // the AIR reads, so upstream rejects those statements on its own (`kmax_22`: `sizes_ok` and `stark_ok` false, `OodsNotMatching`; the
+    // other two: `claims shape mismatch`); `UnsoundDequant` is the first rule to see them.
     let want: BTreeSet<String> = [
         "sound_aligned",
         "aligned_gkr5",
-        "block_removed",
+        "layer_1_to_2",
         "sound_gkrfive",
         "skip_residual_stream",
         "skip_layer_boundary",

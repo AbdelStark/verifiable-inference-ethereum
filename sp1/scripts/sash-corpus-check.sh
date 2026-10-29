@@ -48,7 +48,6 @@ expect() {
 }
 rm -f "$corpus/.oracle.jsonl"
 expect sound_aligned '[]' db6d17a700c25457
-expect single_block '[]' ''
 expect aligned_gkr5 '[]' ''
 expect sound_gkrfive '[3,5]' d4d90d4fbdedec94
 expect skip_residual_stream '[1,2,3,5,6,7,8,9,10,11,13]' ''

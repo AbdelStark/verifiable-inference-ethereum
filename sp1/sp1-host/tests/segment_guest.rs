@@ -1,16 +1,16 @@
 //! The segment guest in the SP1 executor on the synthetic corpus (`SPEC.md` §1.1 and the guest rows
 //! of §2.1): every corpus bundle and every bundle mutation of `sash-segment-check`'s native tests,
-//! whose mutations this suite shares. Positives exit 0 with the native `check_segment`'s public
-//! values, byte for byte; controls exit 1 with a panic message naming the native test's `Reject`
-//! variant. The `Verdict`-level and other unit-level controls stay native-only. Run by
-//! `make sp1-guest-suite` and in the `sp1` or `sp1-cached` CI job:
+//! whose mutations this suite shares. Each exits 1 with a panic message naming the native test's
+//! `Reject` variant: no corpus bundle is the single token block `B0` (rule 8), so none exits 0 here
+//! (`AGENTS.md` §9); `make sp1-execute` runs the accepting TinyLlama segments. The `Verdict`-level
+//! and other unit-level controls stay native-only. Run by `make sp1-guest-suite` and in the `sp1` or
+//! `sp1-cached` CI job:
 //! `SASH_SYNTHETIC_CORPUS=<dir> cargo test --release --locked -p sp1-host --test segment_guest -- --ignored`.
 
 #[path = "../../sash-segment-check/tests/common/mod.rs"]
 mod common;
 
-use common::{Bundle, MUTATIONS, Outcome};
-use sash_evm_primitives::segment::SEGMENT_PUBLIC_VALUES_LEN;
+use common::{Bundle, MUTATIONS};
 use sp1_host::{Execution, SEGMENT_GUEST_ELF, SegmentInput, execute};
 
 /// The guest on the three buffers `sp1-host execute` would give it for `bundle`.
@@ -26,19 +26,6 @@ fn run_buffers(input: SegmentInput) -> Execution {
     execute(SEGMENT_GUEST_ELF, input.stdin()).expect("executor error")
 }
 
-/// Exit 0, and the public values `check_segment` returns natively for the same bundle.
-fn accepts_as_native(name: &str, bundle: &Bundle) -> Vec<u8> {
-    let run = run(bundle);
-    assert_eq!(run.exit_code, 0, "{name}: stderr: {}", run.stderr);
-    let Outcome::Accept(native) = bundle.check() else {
-        panic!("{name}: the native check does not accept");
-    };
-    assert_eq!(run.public_values.len(), SEGMENT_PUBLIC_VALUES_LEN, "{name}");
-    assert_eq!(run.public_values, native.encode(), "{name}");
-    eprintln!("{name}: exit 0, {} cycles, {} PGU", run.cycles, run.gas);
-    run.public_values
-}
-
 /// Exit 1, nothing committed, and a panic message naming `variant`.
 fn rejects_with(name: &str, run: &Execution, variant: &str) {
     assert_eq!(run.exit_code, 1, "{name}: stderr: {}", run.stderr);
@@ -52,33 +39,8 @@ fn rejects_with(name: &str, run: &Execution, variant: &str) {
     eprintln!("{name}: exit 1, {variant}, {} cycles", run.cycles);
 }
 
-/// The single token block `B0`, with no prefix keys: the one corpus bundle that passes every rule.
-#[test]
-#[ignore = "needs the synthetic corpus in SASH_SYNTHETIC_CORPUS (sp1 or sp1-cached CI job)"]
-fn single_block_accepts() {
-    accepts_as_native("single_block", &Bundle::load("single_block"));
-}
-
-/// `layer` 1 to 2 on `single_block` is accepted, with the native public values: the new
-/// `segmentIndex` and `fixedHash`, the rest unchanged.
-#[test]
-#[ignore = "needs the synthetic corpus in SASH_SYNTHETIC_CORPUS (sp1 or sp1-cached CI job)"]
-fn layer_1_to_2_accepts_with_another_index_and_fixed_hash() {
-    let m = MUTATIONS.iter().find(|m| m.name == "layer_1_to_2").unwrap();
-    assert_eq!(m.expect, "accept");
-    let got = accepts_as_native(m.name, &m.bundle());
-    let Outcome::Accept(original) = Bundle::load(m.base).check() else {
-        panic!("{} must be accepted natively", m.base);
-    };
-    let original = original.encode();
-    assert_eq!(got[0..2], [0, 2]);
-    assert_eq!(got[2..130], original[2..130]);
-    assert_ne!(got[130..162], original[130..162]);
-    assert_eq!(got[162..], original[162..]);
-}
-
-/// The other corpus bundles that pass rules 1 to 7: block 0 with a 128-key prefix (`SPEC.md` §2.1
-/// G10).
+/// The corpus bundles that pass rules 1 to 7: block 0 with a 128-key prefix (`SPEC.md` §2.1 G10).
+/// The guest verifies them and rejects them at the last rule.
 #[test]
 #[ignore = "needs the synthetic corpus in SASH_SYNTHETIC_CORPUS (sp1 or sp1-cached CI job)"]
 fn prefix_bundles_reject() {

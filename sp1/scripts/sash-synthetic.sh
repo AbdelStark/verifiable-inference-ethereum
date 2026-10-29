@@ -49,8 +49,6 @@ compose() {
     RAYON_NUM_THREADS=4 "$prover" "${syn[@]}" "$@" --ser-dir "$corpus" --ser-tag "$tag" >"$corpus/$tag.compose.out"
 }
 compose sound_aligned "${aligned[@]}" --layer 1 --block 0
-# The single token block B0: no prefix keys (the last --ctx wins), as every TinyLlama segment.
-compose single_block "${aligned[@]}" --ctx 0 --layer 1 --block 0
 compose aligned_gkr5 "${aligned[@]}" "${gkr5[@]}" --layer 1 --block 0
 compose sound_gkrfive "${narrow[@]}" --synth-residual-stream --diagonal-block "${gkr5[@]}" --layer 1 --block 0
 compose skip_residual_stream "${aligned[@]}" --unsound-skip-residual-stream --layer 1 --block 0
