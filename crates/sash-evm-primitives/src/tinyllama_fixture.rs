@@ -1,6 +1,8 @@
 //! 23-segment TinyLlama-1.1B-Chat-v1.0 SASH fixture.
 //!
-//! Taken from an unpublished SASH run that M2 checks against the proof bundles:
+//! Taken from an unpublished SASH run whose 23 proof bundles regenerate the fixture byte for byte
+//! (`make sp1-fixture-check`: the segment guest's public values, rendered by `sp1-host
+//! fixture-from-bundles`):
 //! sg-ai-safety-hub/zk-inference-prover @ eb95bfa887299d1637550228d42086c27cbb2b3b
 //! over TinyLlama/TinyLlama-1.1B-Chat-v1.0 @ fe8a4ea1ffedaf415f4da2f062534de366a451e6
 //! (profile y-attnout-w12, S = 32 tokens: 25 prompt + 8 answer tokens ending at EOS = 2).

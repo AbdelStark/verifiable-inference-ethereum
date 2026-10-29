@@ -1,4 +1,4 @@
-.PHONY: help check rust-check vectors forge-test anvil-demo sp1-vendor sp1-check sp1-docker sash-synthetic sp1-guest-suite bundles-check sp1-execute clean
+.PHONY: help check rust-check vectors forge-test anvil-demo sp1-vendor sp1-check sp1-docker sash-synthetic sp1-guest-suite bundles-check sp1-execute sp1-fixture-check clean
 
 help:
 	@echo "Targets:"
@@ -18,6 +18,8 @@ help:
 	@echo "                  - Check the 69 TinyLlama proof bundle files in BUNDLES (default runs/tinyllama) against sp1/pins/tinyllama.sha256"
 	@echo "  make sp1-execute BUNDLES=runs/tinyllama OUT=<dir> [ELF=<path>] [PINS=write]"
 	@echo "                  - Check the bundles, run the Docker-built segment guest (ELF, default make sp1-docker's) on all 23 TinyLlama segments in the SP1 executor, check each against native check_segment and sp1/pins/tinyllama.fixed.sha256 (PINS=write writes it), print the per-segment metrics and run the controls on modified copies in OUT"
+	@echo "  make sp1-fixture-check BUNDLES=runs/tinyllama [ELF=<path>]"
+	@echo "                  - Check the bundles and the Docker-built segment guest (ELF), run it on all 23 TinyLlama segments in the SP1 executor, render TinyLlamaFixture.sol from its public values with sp1-host fixture-from-bundles, and compare it byte for byte with the committed fixture"
 	@echo "  make clean       - Clean build outputs"
 
 rust-check:
@@ -115,12 +117,17 @@ bundles-check:
 	cd "$(BUNDLES)" && shasum -a 256 --strict --quiet -c "$(CURDIR)/sp1/pins/tinyllama.sha256"
 	@echo "OK: the 69 bundle files in $(BUNDLES) match sp1/pins/tinyllama.sha256"
 
-# The segment guest from `make sp1-docker`; sp1-execute checks it against the committed sha256 and vkey.
+# The segment guest from `make sp1-docker`; sp1-execute and sp1-fixture-check check it against the
+# committed sha256 and vkey.
 ELF ?= $(CURDIR)/sp1/target/elf-compilation/docker/riscv64im-succinct-zkvm-elf/release/segment-guest
 
 sp1-execute: sp1-vendor
 	$(MAKE) bundles-check BUNDLES="$(BUNDLES)"
 	BUNDLES="$(BUNDLES)" OUT="$(OUT)" ELF="$(ELF)" PINS="$(PINS)" sp1/scripts/sp1-execute.sh
+
+sp1-fixture-check: sp1-vendor
+	$(MAKE) bundles-check BUNDLES="$(BUNDLES)"
+	BUNDLES="$(BUNDLES)" ELF="$(ELF)" sp1/scripts/sp1-fixture-check.sh
 
 clean:
 	cargo clean
