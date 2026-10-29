@@ -13,7 +13,7 @@ contract TinyLlamaSettlementTest is TinyLlamaBase {
     function testEndToEndTinyLlama23SegmentDevSettlement() public {
         bytes memory proof = devVerifier.computeDevProof(TinyLlamaFixture.PUBLIC_DIGEST);
         // runId, promptHash and answerHash from SPEC.md §1.4
-        bytes32 specRunId = 0x0f614a4f82d3c3656dc9b15b897a5b07f621b312f5e37ae58c42b7391223e430;
+        bytes32 specRunId = 0x058d7f0512ac5fa539c1c21941f2bde128e85cedb4106adcff30e601d41d6b28;
         vm.expectEmit(address(settlement));
         emit VerifiableInferenceSettlement.InferenceVerified(
             specRunId,

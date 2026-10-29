@@ -4,7 +4,7 @@ pragma solidity ^0.8.38;
 import {SashTypes} from "./SashTypes.sol";
 
 /// @title SashModelRegistry
-/// @notice Enrolls immutable `(preRoot, modelRoot)` manifests and sequence parameters for SASH LLM profiles.
+/// @notice Enrolls immutable `(preRoot, modelRoot, fixedHash)` manifests and sequence parameters for SASH LLM profiles.
 contract SashModelRegistry {
     address public immutable OWNER;
     mapping(bytes32 => SashTypes.ModelManifest) private _manifests;

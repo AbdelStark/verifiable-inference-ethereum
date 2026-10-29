@@ -10,7 +10,7 @@ rpc="http://127.0.0.1:${port}"
 # anvil's first dev account, unlocked on the node, so no key is needed
 sender=0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266
 tx_gas_cap=16777216 # EIP-7825
-run_id=0x0f614a4f82d3c3656dc9b15b897a5b07f621b312f5e37ae58c42b7391223e430 # SPEC.md §1.4
+run_id=0x058d7f0512ac5fa539c1c21941f2bde128e85cedb4106adcff30e601d41d6b28 # SPEC.md §1.4
 broadcast=broadcast/DeployDevAnvil.s.sol/31337/run-latest.json
 snapshot=snapshots/VerifiableInferenceSettlement.json
 

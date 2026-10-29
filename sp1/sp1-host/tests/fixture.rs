@@ -85,7 +85,7 @@ fn out_under_contracts_src_is_refused() {
 }
 
 /// The 23 TinyLlama segment claims from `tinyllama_fixture.rs` with the token hashes the guest commits
-/// on `B0L0` and `head` (`SPEC.md` §1.1), and `fixedHash = [i + 1; 32]` for segment `i`.
+/// on `B0L0` and `head` (`SPEC.md` §1.1), each `fixedHash` included.
 fn tinyllama_public_values() -> Vec<[u8; 226]> {
     tinyllama_segments()
         .iter()
@@ -97,7 +97,7 @@ fn tinyllama_public_values() -> Vec<[u8; 226]> {
                 model_root: c.model_root,
                 residual_in_root: c.residual_in_root,
                 residual_out_root: c.residual_out_root,
-                fixed_hash: [i as u8 + 1; 32],
+                fixed_hash: c.fixed_hash,
                 tok_in_hash: if i == 0 {
                     compute_token_hash(&TINYLLAMA_TOK_IN)
                 } else {

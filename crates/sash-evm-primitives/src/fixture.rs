@@ -53,7 +53,8 @@ fn write_fixture(out: &mut String, data: &FixtureData) -> fmt::Result {
          \n\
          /// @title TinyLlamaFixture\n\
          /// @notice 23-segment TinyLlama-1.1B-Chat-v1.0 SASH constants (`y-attnout-w12`), taken from an\n\
-         ///         unpublished SASH run that M2 checks against the proof bundles.\n",
+         ///         unpublished SASH run whose 23 proof bundles regenerate this file byte for byte\n\
+         ///         (`make sp1-fixture-check`).\n",
     );
     writeln!(out, "/// @dev Prompt: {:?}", data.prompt)?;
     writeln!(out, "///      Response: {:?}", data.response)?;
@@ -136,9 +137,10 @@ fn write_segments(out: &mut String, segs: &[SegmentClaim]) -> fmt::Result {
         )?;
         writeln!(
             out,
-            "            residualOutRoot: {}",
+            "            residualOutRoot: {},",
             hex0x(s.residual_out_root)
         )?;
+        writeln!(out, "            fixedHash: {}", hex0x(s.fixed_hash))?;
         writeln!(out, "        }});")?;
     }
     writeln!(out, "    }}")
@@ -196,10 +198,10 @@ impl AssembledRun {
 }
 
 /// Assembles the run from the 23 segments' public values in segment order (`SPEC.md` §1.1) and the
-/// token vectors their hashes commit to, and checks it with `verify_sash_grid`. `fixedHash` is not
-/// read. `promptIds = tokIn[0..L]` and `answerIds = tokOut[L-1..S]`, with `L = prompt_len` and
-/// `S = tokIn.len()`; the manifest takes `SEQ_LEN = S`, so a `tokOut` of another length fails the
-/// grid with `InvalidSequenceLength`.
+/// token vectors their hashes commit to, and checks it with `verify_sash_grid`. Each claim is the
+/// first 162 bytes of its public values, `fixedHash` included. `promptIds = tokIn[0..L]` and
+/// `answerIds = tokOut[L-1..S]`, with `L = prompt_len` and `S = tokIn.len()`; the manifest takes
+/// `SEQ_LEN = S`, so a `tokOut` of another length fails the grid with `InvalidSequenceLength`.
 pub fn assemble_fixture(
     public_values: &[SegmentPublicValues],
     tok_in: &[u32],
@@ -233,6 +235,7 @@ pub fn assemble_fixture(
             model_root: v.model_root,
             residual_in_root: v.residual_in_root,
             residual_out_root: v.residual_out_root,
+            fixed_hash: v.fixed_hash,
         });
     }
     if public_values[0].tok_in_hash != compute_token_hash(tok_in) {
@@ -286,8 +289,7 @@ mod tests {
     const COMMITTED: &str = include_str!("../../../contracts/src/sash/TinyLlamaFixture.sol");
 
     /// The 23 public values the segment guests commit for the TinyLlama run, encoded with the
-    /// `SPEC.md` §1.1 encoder and decoded back. `fixedHash` is `[i + 1; 32]` for segment `i`:
-    /// non-zero and different per segment, which assembly ignores.
+    /// `SPEC.md` §1.1 encoder and decoded back, `fixedHash` included.
     fn public_values() -> Vec<SegmentPublicValues> {
         tinyllama_segments()
             .iter()
@@ -299,7 +301,7 @@ mod tests {
                     model_root: c.model_root,
                     residual_in_root: c.residual_in_root,
                     residual_out_root: c.residual_out_root,
-                    fixed_hash: [i as u8 + 1; 32],
+                    fixed_hash: c.fixed_hash,
                     tok_in_hash: if i == 0 {
                         compute_token_hash(&TINYLLAMA_TOK_IN)
                     } else {
@@ -336,6 +338,22 @@ mod tests {
         assert_eq!(fixture.prompt_ids, TINYLLAMA_PROMPT_IDS);
         assert_eq!(fixture.answer_ids, TINYLLAMA_ANSWER_IDS);
         assert_eq!(render_fixture(&fixture), COMMITTED);
+    }
+
+    /// Assembly takes each segment's `fixedHash` from its public values: another one renders another
+    /// fixture, whose `MANIFEST_ROOTS_HASH` and `PUBLIC_DIGEST` differ from the committed ones.
+    #[test]
+    fn another_fixed_hash_renders_another_fixture() {
+        let mut v = public_values();
+        v[22].fixed_hash[31] ^= 0x01;
+        let run = assemble(&v).expect("assembles");
+        assert_eq!(run.segments[22].fixed_hash, v[22].fixed_hash);
+        let rendered = render_fixture(&run.into_fixture(
+            tinyllama_model_id(),
+            TINYLLAMA_PROMPT.to_string(),
+            TINYLLAMA_RESPONSE.to_string(),
+        ));
+        assert_ne!(rendered, COMMITTED);
     }
 
     #[test]

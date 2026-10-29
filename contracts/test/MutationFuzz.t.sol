@@ -32,7 +32,7 @@ contract MutationFuzzTest is TinyLlamaBase {
             modelId ^= mask;
         } else if (target == 1) {
             SashTypes.SegmentClaim memory seg = segs[index % segs.length];
-            uint256 field = (index / segs.length) % 5;
+            uint256 field = (index / segs.length) % 6;
             if (field == 0) {
                 vm.assume(mask16 != 0);
                 seg.segmentIndex ^= mask16;
@@ -41,7 +41,8 @@ contract MutationFuzzTest is TinyLlamaBase {
                 if (field == 1) seg.preRoot ^= mask;
                 else if (field == 2) seg.modelRoot ^= mask;
                 else if (field == 3) seg.residualInRoot ^= mask;
-                else seg.residualOutRoot ^= mask;
+                else if (field == 4) seg.residualOutRoot ^= mask;
+                else seg.fixedHash ^= mask;
             }
         } else if (target == 6) {
             vm.assume(mask8 != 0);

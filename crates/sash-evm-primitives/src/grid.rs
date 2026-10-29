@@ -11,6 +11,8 @@ pub struct SegmentClaim {
     pub model_root: [u8; 32],
     pub residual_in_root: [u8; 32],
     pub residual_out_root: [u8; 32],
+    /// `sha256` of the segment's parsed `Fixed` with `tok_in` and `tok_out` cleared (`SPEC.md` §1.1).
+    pub fixed_hash: [u8; 32],
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -22,11 +24,14 @@ pub struct ModelManifest {
 }
 
 impl ModelManifest {
+    /// `sha256(preRoot[0] || modelRoot[0] || fixedHash[0] || ... || fixedHash[N-1])`
+    /// (matches Solidity `SashGridVerifier.computeManifestRootsHash`).
     pub fn compute_roots_hash(segments: &[SegmentClaim]) -> [u8; 32] {
         let mut hasher = Sha256::new();
         for seg in segments {
             hasher.update(seg.pre_root);
             hasher.update(seg.model_root);
+            hasher.update(seg.fixed_hash);
         }
         hasher.finalize().into()
     }
@@ -42,7 +47,7 @@ impl ModelManifest {
 }
 
 /// `sha256(modelId || be32(n) || n * (be16(segmentIndex) || preRoot || modelRoot || residualInRoot
-/// || residualOutRoot) || tokenHash(tokIn) || tokenHash(tokOut))`
+/// || residualOutRoot || fixedHash) || tokenHash(tokIn) || tokenHash(tokOut))`
 /// (matches Solidity `SashGridVerifier.computePublicDigest`).
 pub fn compute_public_digest(
     model_id: [u8; 32],
@@ -59,6 +64,7 @@ pub fn compute_public_digest(
         h.update(s.model_root);
         h.update(s.residual_in_root);
         h.update(s.residual_out_root);
+        h.update(s.fixed_hash);
     }
     h.update(compute_token_hash(tok_in));
     h.update(compute_token_hash(tok_out));
@@ -182,7 +188,7 @@ mod tests {
         let manifest = tinyllama_manifest(&segs);
         assert_eq!(
             hex::encode(manifest.manifest_roots_hash),
-            "fd8ecd8c79795b3a79e426d60a912d0a8a160188539c9b12dd3803b249c55b26"
+            "5537541600ba4323d8f27606150c5583e689ca527590d33cd3d3b20bb04de646"
         );
         assert_eq!(
             hex::encode(compute_token_hash(&TINYLLAMA_TOK_IN)),
@@ -199,7 +205,7 @@ mod tests {
                 &TINYLLAMA_TOK_IN,
                 &TINYLLAMA_TOK_OUT
             )),
-            "8c27cadf1bc21512bbb76eb63b23699b9af32d18b92d7cdf5a90a489b8000c6b"
+            "cf52e19e82f82680f0098ab435b52e22512f3d634bd7a947d32abc76d067b3ef"
         );
         assert_eq!(
             hex::encode(compute_token_hash(&TINYLLAMA_PROMPT_IDS)),
@@ -337,6 +343,16 @@ mod tests {
                 got: 22,
                 expected: 23
             })
+        );
+    }
+
+    #[test]
+    fn control_21_forged_fixed_hash() {
+        let mut s = tinyllama_segments();
+        s[22].fixed_hash[31] ^= 0x01;
+        assert_eq!(
+            check(None, Some(&s), None, None, None),
+            Err(GridError::ManifestRootMismatch)
         );
     }
 }

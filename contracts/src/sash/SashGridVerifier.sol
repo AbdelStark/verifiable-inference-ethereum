@@ -13,16 +13,19 @@ library SashGridVerifier {
         return sha256(abi.encodePacked(ids));
     }
 
+    /// @notice `sha256(preRoot[0] || modelRoot[0] || fixedHash[0] || ... || fixedHash[n-1])`.
     function computeManifestRootsHash(SashTypes.SegmentClaim[] calldata segments) internal pure returns (bytes32) {
         uint256 n = segments.length;
-        bytes memory buf = new bytes(64 * n);
+        bytes memory buf = new bytes(96 * n);
         for (uint256 i = 0; i < n; ++i) {
             bytes32 preRt = segments[i].preRoot;
             bytes32 modelRt = segments[i].modelRoot;
-            uint256 baseOff = 64 * i;
+            bytes32 fixedH = segments[i].fixedHash;
+            uint256 baseOff = 96 * i;
             assembly ("memory-safe") {
                 mstore(add(add(buf, 32), baseOff), preRt)
                 mstore(add(add(buf, 64), baseOff), modelRt)
+                mstore(add(add(buf, 96), baseOff), fixedH)
             }
         }
         return sha256(buf);
@@ -35,36 +38,38 @@ library SashGridVerifier {
         uint32[] calldata tokOut
     ) internal pure returns (bytes32) {
         uint256 n = segments.length;
-        // 32 B modelId + 4 B BE len + n * 130 B per SegmentClaim + 2 * 32 B token hashes
-        bytes memory buf = new bytes(100 + 130 * n);
+        // 32 B modelId + 4 B BE len + n * 162 B per SegmentClaim + 2 * 32 B token hashes
+        bytes memory buf = new bytes(100 + 162 * n);
         assembly ("memory-safe") {
             mstore(add(buf, 32), modelId)
         }
-        // casting to 'uint32' is safe because a calldata array cannot hold 2^32 130-byte claims
+        // casting to 'uint32' is safe because a calldata array cannot hold 2^32 162-byte claims
         // forge-lint: disable-next-line(unsafe-typecast)
         writeU32BE(buf, 32, uint32(n));
 
         for (uint256 i = 0; i < n; ++i) {
             SashTypes.SegmentClaim calldata s = segments[i];
-            uint256 o = 36 + 130 * i;
+            uint256 o = 36 + 162 * i;
             writeU16BE(buf, o, s.segmentIndex);
 
             bytes32 preRt = s.preRoot;
             bytes32 modelRt = s.modelRoot;
             bytes32 resIn = s.residualInRoot;
             bytes32 resOut = s.residualOutRoot;
+            bytes32 fixedH = s.fixedHash;
             assembly ("memory-safe") {
                 let ptr := add(add(buf, 32), add(o, 2))
                 mstore(ptr, preRt)
                 mstore(add(ptr, 32), modelRt)
                 mstore(add(ptr, 64), resIn)
                 mstore(add(ptr, 96), resOut)
+                mstore(add(ptr, 128), fixedH)
             }
         }
 
         bytes32 tokInHash = computeTokenHash(tokIn);
         bytes32 tokOutHash = computeTokenHash(tokOut);
-        uint256 tail = 36 + 130 * n;
+        uint256 tail = 36 + 162 * n;
         assembly ("memory-safe") {
             let ptr := add(add(buf, 32), tail)
             mstore(ptr, tokInHash)

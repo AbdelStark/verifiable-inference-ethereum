@@ -193,4 +193,26 @@ contract GridNegativeControlsTest is TinyLlamaBase {
             proof
         );
     }
+
+    function testNegative21_ForgedFixedHashReverts() public {
+        SashTypes.SegmentClaim[] memory segs = TinyLlamaFixture.segments();
+        segs[22].fixedHash ^= bytes32(uint256(1));
+        bytes memory proof = _devProofFor(segs);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                SashTypes.ManifestRootMismatch.selector,
+                this.externalRootsHash(segs),
+                TinyLlamaFixture.MANIFEST_ROOTS_HASH
+            )
+        );
+        settlement.verifyAndSettle(
+            TinyLlamaFixture.MODEL_ID,
+            segs,
+            TinyLlamaFixture.tokIn(),
+            TinyLlamaFixture.tokOut(),
+            TinyLlamaFixture.promptIds(),
+            TinyLlamaFixture.answerIds(),
+            proof
+        );
+    }
 }

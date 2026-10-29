@@ -62,31 +62,32 @@ M1 measures the grid path and the dev-mode settlement on Foundry 1.8.6 (`evm_ver
 | Transaction (anvil receipt, Osaka, Foundry 1.8.6) | `gasUsed` | Gas limit | Calldata |
 |---|---:|---:|---:|
 | `SashModelRegistry` deployment | 291,752 | 379,277 | 1,292 B |
-| `SashModelRegistry.enrollModel` | 92,065 | 134,644 | 164 B |
+| `SashModelRegistry.enrollModel` | 92,053 | 127,147 | 164 B |
 | `DevTranscriptSegmentVerifier` deployment | 223,223 | 290,189 | 837 B |
-| `VerifiableInferenceSettlement` deployment | 872,019 | 1,133,624 | 4,293 B |
-| `VerifiableInferenceSettlement.verifyAndSettle` | 201,052 | 277,702 | 7,236 B |
+| `VerifiableInferenceSettlement` deployment | 874,223 | 1,136,489 | 4,305 B |
+| `VerifiableInferenceSettlement.verifyAndSettle` | 218,380 | 301,636 | 7,972 B |
 
-**The settle transaction under `EIP-7623`** (anvil receipt, Osaka, Foundry 1.8.6). Its calldata is 7,236 B: 4,048 zero and 3,188 non-zero bytes.
+**The settle transaction under `EIP-7623`** (anvil receipt, Osaka, Foundry 1.8.6). Its calldata is 7,972 B: 4,050 zero and 3,922 non-zero bytes. The settle transaction is floor-bound under Osaka: `gasUsed` is the calldata floor, so execution is measured separately, as the top call's `gasUsed` in anvil's `trace_transaction` (Parity-style) trace of the mined transaction, which excludes intrinsic and calldata gas.
 
 | Part | Gas |
 |---|---:|
 | Intrinsic | 21,000 |
-| Standard calldata: 4 × 4,048 + 16 × 3,188 | 67,200 |
-| Execution: receipt − intrinsic − standard calldata | 112,852 |
-| **`gasUsed`** | **201,052** |
-| Floor: 21,000 + 10 × 4,048 + 40 × 3,188 | 189,000 |
+| Standard calldata: 4 × 4,050 + 16 × 3,922 | 78,952 |
+| Execution: `trace_transaction` top call `gasUsed` | 117,227 |
+| Standard + execution: 21,000 + 78,952 + 117,227 | 217,179 |
+| Floor: 21,000 + 10 × 4,050 + 40 × 3,922 | 218,380 |
+| **`gasUsed`**: the larger of the two | **218,380** |
 
-The floor doesn't bind, but it is only 12,052 gas below `gasUsed`: cutting execution by more than ~12k would make the calldata floor bind.
+The floor binds by 1,201 gas, so cutting execution no longer lowers the settle transaction's cost; only less calldata does.
 
 | Component of the settle execution (Osaka, Foundry 1.8.6) | Gas | Source |
 |---|---:|---|
 | `SashModelRegistry.getManifest` | 7,080 | forge snapshot |
-| `SashGridVerifier.verifyGrid`: count and indices, `manifestRootsHash` (sha256 over 23 × 64 B), 22 residual links, prompt, teacher-forcing loop, answer and EOS | 37,106 | forge snapshot (`pure` harness) |
-| `SashGridVerifier.computePublicDigest`: sha256 over the 23 claims, `sha256(tokIn)`, `sha256(tokOut)` | 27,832 | forge snapshot (`pure` harness) |
-| Rest of `verifyAndSettle` (derived: 112,852 − the rows above): `runId` and prompt / answer hashes, the verifier calls, calldata decoding, the `settledRuns` cold `SSTORE` and the `InferenceVerified` event | 40,834 | derived |
+| `SashGridVerifier.verifyGrid`: count and indices, `manifestRootsHash` (sha256 over 23 × 96 B), 22 residual links, prompt, teacher-forcing loop, answer and EOS | 40,000 | forge snapshot (`pure` harness) |
+| `SashGridVerifier.computePublicDigest`: sha256 over the 23 claims (23 × 162 B), `sha256(tokIn)`, `sha256(tokOut)` | 28,961 | forge snapshot (`pure` harness) |
+| Rest of `verifyAndSettle` (derived: 117,227 − the rows above): `runId` and prompt / answer hashes, the verifier calls, calldata decoding, the `settledRuns` cold `SSTORE` and the `InferenceVerified` event | 41,186 | derived |
 
-The harness snapshots include their own ABI decoding, so the split between rows is approximate. The total is the measured receipt.
+The harness snapshots include their own ABI decoding, so the split between rows is approximate. The total is the measured execution.
 
 ### Amsterdam (provisional)
 
@@ -97,28 +98,28 @@ No receipt field separates state gas, so it is derived from the `EIP-8037` const
 | Transaction (anvil receipt, Amsterdam, Foundry nightly `024702852`) | `gasUsed` | State gas (derived) | Rest | Osaka |
 |---|---:|---:|---:|---:|
 | `SashModelRegistry` deployment (1,095 B) | 1,902,912 | 1,858,950 | 43,962 | 291,752 |
-| `SashModelRegistry.enrollModel` (3 new slots) | 350,025 | 293,760 | 56,265 | 92,065 |
+| `SashModelRegistry.enrollModel` (3 new slots) | 350,025 | 293,760 | 56,265 | 92,053 |
 | `DevTranscriptSegmentVerifier` deployment (784 B) | 1,420,693 | 1,383,120 | 37,573 | 223,223 |
-| `VerifiableInferenceSettlement` deployment (3,763 B) | 6,032,117 | 5,940,990 | 91,127 | 872,019 |
-| `VerifiableInferenceSettlement.verifyAndSettle` (1 new slot) | 478,104 | 97,920 | floor-bound | 201,052 |
+| `VerifiableInferenceSettlement` deployment (3,763 B) | 6,032,117 | 5,940,990 | 91,127 | 874,223 |
+| `VerifiableInferenceSettlement.verifyAndSettle` (1 new slot), computed | 525,208 | 97,920 | floor-bound | 218,380 |
 
-The settle transaction is floor-bound: 15,000 (`EIP-2780`) + 64 × 7,236 calldata bytes (`EIP-7976`) = 478,104, about 2.4x its Osaka cost. Deployments cost 6–7x more, almost all of it state gas.
+The settle row is computed, not mined: 15,000 (`EIP-2780`) + 64 × 7,972 calldata bytes (`EIP-7976`) = 525,208, about 2.4x its Osaka cost. It is floor-bound, as the nightly's receipt was for the 7,236 B calldata before the claims carried `fixedHash` (478,104 = 15,000 + 64 × 7,236). The `enrollModel` and `VerifiableInferenceSettlement` deployment rows are that nightly's receipts for the bytecode before `fixedHash` (the settlement contract was 3,763 B; it is 3,773 B now); #24 re-mines every row. Deployments cost 6–7x more, almost all of it state gas.
 
 ## 5. Aggregated settlement gas breakdown (Osaka)
 
-One transaction carrying `SegmentClaim[23]`, the four token arrays and one wrapped SP1 proof: 7,492 B of ABI calldata with a 260 B Groth16-sized proof, 3,417 non-zero and 4,075 zero bytes. The SP1 verifier is an estimate until M3 measures it; the rest is the measured dev-mode settlement (§4).
+One transaction carrying `SegmentClaim[23]`, the four token arrays and one wrapped SP1 proof: 8,228 B of ABI calldata with a 260 B Groth16-sized proof, 4,151 non-zero and 4,077 zero bytes (the dev settlement's 7,972 B with its 32 B dev proof replaced by 260 non-zero bytes and 28 B of padding). The SP1 verifier is an estimate until M3 measures it; the rest is the measured dev-mode settlement (§4).
 
 | Component | Gas | Source |
 |---|---:|---|
 | Intrinsic tx gas | 21,000 | — |
-| Standard calldata: 4 × 4,075 + 16 × 3,417 | 70,972 | computed |
-| Dev-mode settle execution, 112,852, less the dev verifier's ~1,000 | ~111,850 | measured (§4: anvil receipt, Osaka, Foundry 1.8.6) |
+| Standard calldata: 4 × 4,077 + 16 × 4,151 | 82,724 | computed |
+| Dev-mode settle execution, 117,227, less the dev verifier's ~1,000 | ~116,230 | measured (§4: anvil `trace_transaction`, Osaka, Foundry 1.8.6) |
 | `Sp1SashSegmentVerifier` (BN254 wrap: ~270k Groth16, ~300k PLONK; chosen at M3 start) | ~270,000 | estimate, M3 measures it |
-| **Total single-tx gas** | **~473,800** (~2.8% of `EIP-7825`) | estimate, M3 measures it |
+| **Total single-tx gas** | **~490,000** (~2.9% of `EIP-7825`) | estimate, M3 measures it |
 
-The floor, 21,000 + 10 × 4,075 + 40 × 3,417 = 198,430 gas, is below the total, so it doesn't bind.
+The floor, 21,000 + 10 × 4,077 + 40 × 4,151 = 227,810 gas, is below the total, so it doesn't bind: the verifier's execution outweighs its 260 B of calldata.
 
-Under Amsterdam the floor alone is 15,000 + 64 × 7,492 = 494,488 gas, and the cold `SSTORE` rises to ~110,000 gas (§2), so the aggregated settlement would cost roughly 0.5–0.56M gas (estimate). M3 measures it.
+Under Amsterdam the floor alone is 15,000 + 64 × 8,228 = 541,592 gas, and the cold `SSTORE` rises to ~110,000 gas (§2), so the aggregated settlement would cost roughly 0.54–0.57M gas (estimate). M3 measures it.
 
 ## 6. SP1 unit costs of SASH's verifier (measured)
 
@@ -204,7 +205,7 @@ All 23 segments of the §1 run, verified by the segment guest (`SPEC.md` §1.1) 
 
   `ELF` is the Docker build: `make sp1-docker`'s output (the default) on an x86_64 host with the pinned image, or the `segment-guest-elf` artifact of the `sp1-workspace` CI job. `OUT` must be outside the repository or gitignored, and never the bundle directory or inside it. The target checks the 69 bundle files (`make bundles-check`), checks the ELF's sha256 and vkey against the committed ones, and runs `sp1-host execute` once per segment, each in its own process, so each peak RSS is that segment's. It checks every segment's 226 bytes of public values (`OUT/<tag>.public-values`) against native `check_segment`, and its `fixedHash` against `sp1/pins/tinyllama.fixed.sha256` (`PINS=write` writes that file). It prints the table below, then runs the controls. A segment that exits 1 or hits `CYCLE_LIMIT` stops the run.
 
-Every segment exits 0, its public values equal native `check_segment`'s, and its `fixedHash` equals its pin. Bytes `0..130` of the 23 public values, the segment claims, equal the fixture's (`crates/sash-evm-primitives/src/tinyllama_fixture.rs`); #46 checks that: `sp1-host fixture-from-bundles --public-values OUT --bundles BUNDLES --prompt-len 25 --out PATH` renders `TinyLlamaFixture.sol` from the 23 public values and the token vectors of `B0L0.fixed.json` and `head.fixed.json`, after checking the token hashes and the grid, and `PATH`, never under `contracts/src`, is compared with the committed file. Cycles (`report.total_instruction_count()`) and PGU (`report.gas()`) depend only on the ELF and the input, with the defaults above, and `make sp1-execute` reproduces them exactly. Peak RSS depends on the executor build and the machine: the same `head` run peaks at 5,836,177,408 bytes in a `profiling` build of `sp1-host`.
+Every segment exits 0, its public values equal native `check_segment`'s, and its `fixedHash` equals its pin. Bytes `0..162` of the 23 public values, the segment claims, equal the fixture's (`crates/sash-evm-primitives/src/tinyllama_fixture.rs`); #46 checks that: `sp1-host fixture-from-bundles --public-values OUT --bundles BUNDLES --prompt-len 25 --out PATH` renders `TinyLlamaFixture.sol` from the 23 public values and the token vectors of `B0L0.fixed.json` and `head.fixed.json`, after checking the token hashes and the grid, and `PATH`, never under `contracts/src`, is compared with the committed file. Cycles (`report.total_instruction_count()`) and PGU (`report.gas()`) depend only on the ELF and the input, with the defaults above, and `make sp1-execute` reproduces them exactly. Peak RSS depends on the executor build and the machine: the same `head` run peaks at 5,836,177,408 bytes in a `profiling` build of `sp1-host`.
 
 | Segment | Cycles | PGU | Stdin bytes | Peak RSS (bytes) | `hash_node` compressions | Channel compressions | BLAKE2s share | Decode `Fixed` + `Claims` (cycles) | Decode proof (cycles) | Decode share |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
@@ -261,7 +262,7 @@ The two agree within 0.13 points: the bare compression's 2,139 cycles include a 
 | `ao_out[0]` + 1 mod P (still decodable) | `B0L10` claims | exit 1, `NotAccepted` | 541,917,369 |
 | `tok_in[0]` + P | `B0L0` fixed | exit 1, `TokenIdOutOfField` | 3,939,888 |
 | `tok_out[0]` + P | `head` fixed | exit 1, `TokenIdOutOfField` | 12,112,996 |
-| `model`'s last hex digit changed (no rule reads it) | `B0L10` fixed | exit 0, the unmodified public values but for `fixedHash`, `86c43bf7…89f08a5` against the pin `fa81937c…e19faf47`; #47's `manifestRootsHash` check rejects it | 1,879,910,406 |
+| `model`'s last hex digit changed (no rule reads it) | `B0L10` fixed | exit 0, the unmodified public values but for `fixedHash`, `86c43bf7…89f08a5` against the pin `fa81937c…e19faf47`; the `manifestRootsHash` check rejects it (control 21, `SPEC.md` §2.1) | 1,879,910,406 |
 
 **Against the per-request limits** (one request per segment) **and in GPU time:**
 
