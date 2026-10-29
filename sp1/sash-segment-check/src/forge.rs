@@ -1,9 +1,11 @@
 //! G9's forgeries (`SPEC.md` §2.1), behind the `forge` feature: never in the guest. A published
 //! token vector is changed at one position, with four slack positions solved so that its Horner
 //! image under `w_residual_stream` stays the one the claims carry. `embed_tok_ok` and `head_tok_ok`
-//! compare only that image, so a verifier whose transcript never absorbs the vectors accepts such a
-//! forgery; SASH with `sp1/patches/0006` mixes them before `w` is drawn (`SPEC.md` §1.1), so a
-//! changed vector draws another `w`.
+//! compare only that image, so on a segment proved without `sp1/patches/0006`, a verifier whose
+//! transcript never absorbs the vectors accepts such a forgery solved under upstream's `w`. With
+//! the patch, prover and verifier mix the vectors before `w` is drawn (`SPEC.md` §1.1), so a
+//! changed vector draws another `w` and the forgery rejects; a segment proved with the patch
+//! rejects under an unpatched verifier whether forged or not.
 //!
 //! [`forge`] solves under the `w` the proof was made with, found by replaying both transcripts and
 //! keeping the one whose `w` gives the claims' Horner image of the honest vector, and refuses a
