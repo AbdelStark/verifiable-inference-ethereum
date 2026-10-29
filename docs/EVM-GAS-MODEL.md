@@ -195,7 +195,7 @@ All 23 segments of the §1 run, verified by the segment guest (`SPEC.md` §1.1) 
 - **SP1:** sp1-sdk `6.10.0` (circuit version `v6.1.0`), `LightProver`, `calculate_gas(true)`, `CYCLE_LIMIT` `12,000,000,000`.
 - **Executor:** portable. sp1-core-executor 6.10.0 uses its native executor only on Linux x86_64 without the `profiling` feature (`build.rs`), so every macOS run is portable.
 - **Machine:** Apple M3 Max, 14 cores, 36 GiB, macOS 15.7.3.
-- **Program:** the committed segment guest, #43's x86_64 Docker build: ELF sha256 `d8e6280fad7c667f5b07c18d891bf2444a1304046df2838b94161a77e6b52e28` (`sp1/segment-guest.elf.sha256`), vkey `bytes32` `0x0025dac01e6b93eabfce48c8400bcd4c7bd401f61d2d82dfabfe1e2ee3eea2e2` (`sp1/segment-guest.vkey`).
+- **Program:** the segment guest before patch 0006, #43's x86_64 Docker build (the committed guest, with patch 0006, has another ELF and vkey): ELF sha256 `d8e6280fad7c667f5b07c18d891bf2444a1304046df2838b94161a77e6b52e28` (`sp1/segment-guest.elf.sha256`), vkey `bytes32` `0x0025dac01e6b93eabfce48c8400bcd4c7bd401f61d2d82dfabfe1e2ee3eea2e2` (`sp1/segment-guest.vkey`).
 - **SP1 options:** the defaults. `make sp1-execute` refuses to run if any variable `SP1CoreOpts::default()` reads is set (`MINIMAL_TRACE_CHUNK_THRESHOLD`, `GAS_TRACE_CHUNK_THRESHOLD`, `TRACE_CHUNK_SLOTS`, `GAS_TRACE_CHUNK_SLOTS`, `MEMORY_LIMIT`, `SHARD_SIZE`, `ELEMENT_THRESHOLD`, `HEIGHT_THRESHOLD`, `FULL_SIZE_SHARDS`): gas estimation treats each trace chunk as a shard, so the PGU depends on them.
 - **Command** (about 10 minutes; not in `make check` or CI, which have no bundles):
 
