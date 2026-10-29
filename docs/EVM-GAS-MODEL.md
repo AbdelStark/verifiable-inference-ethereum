@@ -4,7 +4,7 @@ M1 has measured the grid path and the dev-mode settlement (§4). Every other gas
 
 ## 1. TinyLlama-1.1B SASH proof sizes
 
-Figures from the same unpublished SASH run as the fixture (`SPEC.md` §1.4), whose bundles `AbdelStark/hallmark`'s recipe (`make e2e-llm` at `675c99af66067d129dac30d6acc6612f4e392e68`) regenerates byte for byte and `sp1/pins/tinyllama.sha256` pins: all 23 segments (`B0L0..B0L21` + `head`) of `TinyLlama/TinyLlama-1.1B-Chat-v1.0` (`fe8a4ea1ffedaf415f4da2f062534de366a451e6`) proved with `sg-ai-safety-hub/zk-inference-prover` (`eb95bfa887299d1637550228d42086c27cbb2b3b`, profile `y-attnout-w12`, `S = 32` tokens). `sp1-host sizes` recomputes every row from the bundles:
+Figures from the same unpublished SASH run as the fixture (`SPEC.md` §1.4), whose bundles `AbdelStark/hallmark`'s recipe (`make e2e-llm` at `675c99af66067d129dac30d6acc6612f4e392e68`, with patch 0006 applied before the prover build, `SPEC.md` §1.4) produced and `sp1/pins/tinyllama.sha256` pins: all 23 segments (`B0L0..B0L21` + `head`) of `TinyLlama/TinyLlama-1.1B-Chat-v1.0` (`fe8a4ea1ffedaf415f4da2f062534de366a451e6`) proved with `sg-ai-safety-hub/zk-inference-prover` (`eb95bfa887299d1637550228d42086c27cbb2b3b`, profile `y-attnout-w12`, `S = 32` tokens) plus the token binding (`sp1/patches/0006`, `SPEC.md` §1.1). `sp1-host sizes` recomputes every row from the bundles:
 
 ```bash
 make sp1-vendor
@@ -17,14 +17,14 @@ cd sp1 && cargo run --release --locked -p sp1-host --bin sp1-host -- sizes --bun
 | Committed trace columns (`Fixed.sizes`: every tree but the 8-column composition tree) | 20,911 | 19,612 | 68,484 | 501,235 |
 | Max trace `log_size` | 26 | 21 | 21 | 26 |
 | FRI inner layers | 25 | 20 | 20 | 486 |
-| Raw JSON bundle size (`fixed`, `claims` and `proof`) | 34,830,250 B | 30,399,070 B | 85,547,307 B | 761,015,496 B |
-| STARK proof, stwo `size_estimate()` (in memory, not a wire format) | 13,137,372 B | 11,521,348 B | 34,158,020 B | 289,377,192 B |
-| GKR proof, `serde_json` bytes (`Claims.gkr`) | 312,711 B | 312,662 B | 257,094 B | 7,136,009 B |
+| Raw JSON bundle size (`fixed`, `claims` and `proof`) | 34,377,502 B | 30,399,070 B | 86,143,890 B | 761,159,331 B |
+| STARK proof, stwo `size_estimate()` (in memory, not a wire format) | 12,960,104 B | 11,521,348 B | 34,419,240 B | 289,461,144 B |
+| GKR proof, `serde_json` bytes (`Claims.gkr`) | 312,783 B | 312,662 B | 257,129 B | 7,136,116 B |
 | Sampled OODS `QM31` values | 21,718 | 20,406 | 69,560 | 519,784 |
-| Queried + witness leaf `M31`s (the committed trees' queried values and column witness) | 2,940,131 | 2,630,253 | 8,099,813 | 65,967,346 |
-| Internal Merkle + FRI sibling hashes | 31,151 | 20,305 | 19,427 | 518,489 |
+| Queried + witness leaf `M31`s (the committed trees' queried values and column witness) | 2,895,622 | 2,630,253 | 8,164,242 | 65,987,266 |
+| Internal Merkle + FRI sibling hashes | 31,172 | 20,305 | 19,534 | 518,617 |
 
-The bundles corrected four figures of the run's earlier summary: the per-segment JSON sizes were `proof.json` alone; `size_estimate()` is 40 B more per segment, the 40-byte `PcsConfig` nitroo's estimate counts; and the totals are 501,235 columns, not 501,197, and 486 FRI inner layers, not 485.
+Patch 0006 changes the transcript of the two segments that publish a token vector, `B0L0` and `head`, so their re-proved proofs open other query positions and their queried values, sibling hashes and JSON sizes differ from the proofs without it; the other 21 segments' files are byte-identical. The bundles corrected four figures of the run's earlier summary: the per-segment JSON sizes were `proof.json` alone; `size_estimate()` is 40 B more per segment, the 40-byte `PcsConfig` nitroo's estimate counts; and the totals are 501,235 columns, not 501,197, and 486 FRI inner layers, not 485.
 
 ## 2. Network rules
 
@@ -45,13 +45,13 @@ Osaka binds, and Amsterdam is tracked alongside it. Mainnet and Hoodi run Osaka.
 
 These figures derive from the §1 sizes and §7's compression counts, so they share their provenance.
 
-1. **`BLAKE2s-256` execution:** precompile `0x09` (`EIP-152`) implements 64-bit `BLAKE2f` (`BLAKE2b`), which cannot compute 32-bit `BLAKE2s`. Verifying the 23 segments runs `5,133,478` 64-byte compressions, counted by `sp1-host`'s `native-check` (§7): `4,896,947` in Merkle `hash_node` and `236,531` in the channel. At ~2,000 gas per compression in Solidity, that is **~10.27 billion gas**.
-   - The analytic count, leaf M31s / 16 + sibling hashes, gives `4,641,448`: the counted Merkle hashes are 5.5% more, and the channel is extra. The analytic figure charges 1/16 of a compression per leaf M31 and one per sibling hash. The verifier hashes every node it computes, and each hash pays whole 64-byte blocks: a node's partial last block costs a full compression, every FRI leaf (one 16-byte `QM31`) costs one, and a mixed-degree node hashes its two children and its own column values.
-2. **All 23 segments** (`296,513,201` B: STARK `size_estimate()` plus GKR bytes, ~85% non-zero):
+1. **`BLAKE2s-256` execution:** precompile `0x09` (`EIP-152`) implements 64-bit `BLAKE2f` (`BLAKE2b`), which cannot compute 32-bit `BLAKE2s`. Verifying the 23 segments runs `5,134,853` 64-byte compressions, counted by `sp1-host`'s `native-check` (§7): `4,898,316` in Merkle `hash_node` and `236,537` in the channel. At ~2,000 gas per compression in Solidity, that is **~10.27 billion gas**.
+   - The analytic count, leaf M31s / 16 + sibling hashes, gives `4,642,821`: the counted Merkle hashes are 5.5% more, and the channel is extra. The analytic figure charges 1/16 of a compression per leaf M31 and one per sibling hash. The verifier hashes every node it computes, and each hash pays whole 64-byte blocks: a node's partial last block costs a full compression, every FRI leaf (one 16-byte `QM31`) costs one, and a mixed-degree node hashes its two children and its own column values.
+2. **All 23 segments** (`296,597,260` B: STARK `size_estimate()` plus GKR bytes, ~85% non-zero):
    - Osaka: standard calldata is ~14.2 gas/byte, so ~4.21 billion gas. Adding ~10.27 billion of `BLAKE2s` execution gives ~14.48 billion, above the ~10.53 billion floor (~35.5 gas/byte). That is **at least ~863x** the `EIP-7825` cap.
    - Amsterdam: the 64 gas/byte floor alone is ~18.98 billion gas, **~1,131x** the cap.
    - Calldata floor alone under Osaka: ~10.53 billion gas, ~627x the cap.
-3. **One segment, `B0L0`** (`13,450,083` B): the Osaka calldata floor alone is ~477.5 million gas, ~28.5x the cap.
+3. **One segment, `B0L0`** (`13,272,887` B): the Osaka calldata floor alone is ~471.2 million gas, ~28.1x the cap.
 
 ## 4. Measured dev-mode settlement (Osaka)
 
@@ -190,12 +190,12 @@ Per-op PGU comes from tight loops over small working sets. sp1-sdk 6.10.0's gas 
 
 ## 7. TinyLlama segments in the SP1 executor (measured)
 
-All 23 segments of the §1 run, verified by the segment guest (`SPEC.md` §1.1) in the SP1 executor, measured with the guest before patch 0006. The current guest rejects these bundles' `B0L0` and `head` until they are re-proved with the token binding (`SPEC.md` §1.4), and the figures stand until the re-proved bundles are measured. This replaces #38's analytic extrapolation of the per-segment and total cycles and PGU; §6's unit costs stay.
+All 23 segments of the §1 run, re-proved with the token binding (`SPEC.md` §1.4), verified by the segment guest (`SPEC.md` §1.1) in the SP1 executor. This replaces #38's analytic extrapolation of the per-segment and total cycles and PGU; §6's unit costs stay.
 
 - **SP1:** sp1-sdk `6.10.0` (circuit version `v6.1.0`), `LightProver`, `calculate_gas(true)`, `CYCLE_LIMIT` `12,000,000,000`.
 - **Executor:** portable. sp1-core-executor 6.10.0 uses its native executor only on Linux x86_64 without the `profiling` feature (`build.rs`), so every macOS run is portable.
 - **Machine:** Apple M3 Max, 14 cores, 36 GiB, macOS 15.7.3.
-- **Program:** the segment guest before patch 0006, #43's x86_64 Docker build (the committed guest, with patch 0006, has another ELF and vkey): ELF sha256 `d8e6280fad7c667f5b07c18d891bf2444a1304046df2838b94161a77e6b52e28` (`sp1/segment-guest.elf.sha256`), vkey `bytes32` `0x0025dac01e6b93eabfce48c8400bcd4c7bd401f61d2d82dfabfe1e2ee3eea2e2` (`sp1/segment-guest.vkey`).
+- **Program:** the committed segment guest, with patch 0006, the `segment-guest-elf` artifact of CI's x86_64 Docker build (#43's recipe): ELF sha256 `5d1d11c0652e630aa2fb9bd33453911d0cb3d5ab43e82c0f054931936f85c502` (`sp1/segment-guest.elf.sha256`), vkey `bytes32` `0x000b2a4f91520c8bbdb1972b80e3098c456edcf8f9dd12d70c009149b30ed558` (`sp1/segment-guest.vkey`).
 - **SP1 options:** the defaults. `make sp1-execute` refuses to run if any variable `SP1CoreOpts::default()` reads is set (`MINIMAL_TRACE_CHUNK_THRESHOLD`, `GAS_TRACE_CHUNK_THRESHOLD`, `TRACE_CHUNK_SLOTS`, `GAS_TRACE_CHUNK_SLOTS`, `MEMORY_LIMIT`, `SHARD_SIZE`, `ELEMENT_THRESHOLD`, `HEIGHT_THRESHOLD`, `FULL_SIZE_SHARDS`): gas estimation treats each trace chunk as a shard, so the PGU depends on them.
 - **Command** (about 10 minutes; not in `make check` or CI, which have no bundles):
 
@@ -205,41 +205,41 @@ All 23 segments of the §1 run, verified by the segment guest (`SPEC.md` §1.1) 
 
   `ELF` is the Docker build: `make sp1-docker`'s output (the default) on an x86_64 host with the pinned image, or the `segment-guest-elf` artifact of the `sp1-workspace` CI job. `OUT` must be outside the repository or gitignored, and never the bundle directory or inside it. The target checks the 69 bundle files (`make bundles-check`), checks the ELF's sha256 and vkey against the committed ones, and runs `sp1-host execute` once per segment, each in its own process, so each peak RSS is that segment's. It checks every segment's 226 bytes of public values (`OUT/<tag>.public-values`) against native `check_segment`, and its `fixedHash` against `sp1/pins/tinyllama.fixed.sha256` (`PINS=write` writes that file). It prints the table below, then runs the controls. A segment that exits 1 or hits `CYCLE_LIMIT` stops the run.
 
-Every segment exits 0, its public values equal native `check_segment`'s, and its `fixedHash` equals its pin. Bytes `0..162` of the 23 public values, the segment claims, equal the fixture's (`crates/sash-evm-primitives/src/tinyllama_fixture.rs`); #46 checks that: `sp1-host fixture-from-bundles --public-values OUT --bundles BUNDLES --prompt-len 25 --out PATH` renders `TinyLlamaFixture.sol` from the 23 public values and the token vectors of `B0L0.fixed.json` and `head.fixed.json`, after checking the token hashes and the grid, and `PATH`, never under `contracts/src`, is compared with the committed file. Cycles (`report.total_instruction_count()`) and PGU (`report.gas()`) depend only on the ELF and the input, with the defaults above, and `make sp1-execute` reproduces them exactly. Peak RSS depends on the executor build and the machine: the same `head` run peaks at 5,836,177,408 bytes in a `profiling` build of `sp1-host`.
+Every segment exits 0, its public values equal native `check_segment`'s, and its `fixedHash` equals its pin. Bytes `0..162` of the 23 public values, the segment claims, equal the fixture's (`crates/sash-evm-primitives/src/tinyllama_fixture.rs`); #46 checks that: `sp1-host fixture-from-bundles --public-values OUT --bundles BUNDLES --prompt-len 25 --out PATH` renders `TinyLlamaFixture.sol` from the 23 public values and the token vectors of `B0L0.fixed.json` and `head.fixed.json`, after checking the token hashes and the grid, and `PATH`, never under `contracts/src`, is compared with the committed file. Cycles (`report.total_instruction_count()`) and PGU (`report.gas()`) depend only on the ELF and the input, with the defaults above, and `make sp1-execute` reproduces them exactly. Peak RSS depends on the executor build and the machine: `head` before patch 0006 peaked at 5,836,177,408 bytes in a `profiling` build of `sp1-host`.
 
 | Segment | Cycles | PGU | Stdin bytes | Peak RSS (bytes) | `hash_node` compressions | Channel compressions | BLAKE2s share | Decode `Fixed` + `Claims` (cycles) | Decode proof (cycles) | Decode share |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| `B0L0` | 2,071,629,039 | 1,937,178,087 | 14,318,984 | 4,997,529,600 | 227,781 | 10,106 | 24.56% | 62,333,235 | 119,899,130 | 8.80% |
-| `B0L1` | 1,919,763,450 | 1,787,206,880 | 12,858,390 | 5,198,364,672 | 203,036 | 9,776 | 23.71% | 62,084,080 | 107,860,214 | 8.85% |
-| `B0L2` | 1,912,034,441 | 1,780,940,400 | 12,900,561 | 5,176,098,816 | 202,226 | 9,774 | 23.72% | 62,098,723 | 106,322,852 | 8.81% |
-| `B0L3` | 1,891,932,263 | 1,762,258,479 | 12,777,330 | 5,138,759,680 | 198,254 | 9,770 | 23.52% | 62,048,873 | 102,635,282 | 8.70% |
-| `B0L4` | 1,888,664,794 | 1,758,736,539 | 12,738,291 | 5,209,079,808 | 197,298 | 9,766 | 23.45% | 62,064,793 | 102,376,245 | 8.71% |
-| `B0L5` | 1,876,653,979 | 1,747,002,797 | 12,506,128 | 5,195,726,848 | 194,008 | 9,770 | 23.23% | 62,099,509 | 100,926,897 | 8.69% |
-| `B0L6` | 1,879,306,142 | 1,749,705,703 | 12,558,072 | 5,157,322,752 | 194,158 | 9,766 | 23.21% | 62,083,444 | 100,945,926 | 8.67% |
-| `B0L7` | 1,894,973,221 | 1,765,523,689 | 12,805,031 | 5,147,082,752 | 198,885 | 9,770 | 23.55% | 62,069,325 | 102,989,517 | 8.71% |
-| `B0L8` | 1,895,453,178 | 1,765,137,124 | 12,699,707 | 5,168,660,480 | 198,430 | 9,772 | 23.50% | 62,106,794 | 103,791,116 | 8.75% |
-| `B0L9` | 1,882,329,315 | 1,753,423,383 | 12,722,568 | 5,192,712,192 | 196,190 | 9,768 | 23.40% | 62,083,575 | 100,842,786 | 8.66% |
-| `B0L10` | 1,879,848,647 | 1,750,885,173 | 12,689,128 | 5,206,212,608 | 195,433 | 9,768 | 23.35% | 62,080,301 | 100,433,288 | 8.65% |
-| `B0L11` | 1,891,468,499 | 1,761,770,186 | 12,714,592 | 5,195,710,464 | 197,526 | 9,770 | 23.44% | 62,048,666 | 102,506,199 | 8.70% |
-| `B0L12` | 1,869,526,469 | 1,739,552,445 | 12,487,194 | 5,191,041,024 | 192,269 | 9,768 | 23.12% | 62,086,383 | 99,153,629 | 8.62% |
-| `B0L13` | 1,879,756,410 | 1,749,356,935 | 12,589,470 | 5,202,706,432 | 194,629 | 9,770 | 23.26% | 62,102,942 | 101,201,009 | 8.69% |
-| `B0L14` | 1,886,790,798 | 1,757,238,334 | 12,731,427 | 5,183,340,544 | 196,843 | 9,770 | 23.42% | 62,078,467 | 102,083,044 | 8.70% |
-| `B0L15` | 1,881,315,103 | 1,751,332,830 | 12,564,216 | 5,212,225,536 | 194,782 | 9,770 | 23.26% | 62,042,909 | 101,110,139 | 8.67% |
-| `B0L16` | 1,890,673,727 | 1,760,790,089 | 12,773,562 | 5,202,771,968 | 197,933 | 9,770 | 23.50% | 62,086,471 | 102,346,568 | 8.70% |
-| `B0L17` | 1,871,592,528 | 1,742,641,113 | 12,557,644 | 5,241,946,112 | 193,515 | 9,768 | 23.23% | 62,094,720 | 99,764,773 | 8.65% |
-| `B0L18` | 1,880,137,954 | 1,749,758,692 | 12,528,379 | 5,189,140,480 | 194,310 | 9,770 | 23.22% | 62,088,869 | 101,005,287 | 8.67% |
-| `B0L19` | 1,881,985,927 | 1,753,048,776 | 12,760,629 | 5,168,726,016 | 196,800 | 9,768 | 23.48% | 62,126,528 | 101,178,686 | 8.68% |
-| `B0L20` | 1,893,167,685 | 1,763,486,029 | 12,800,757 | 5,172,822,016 | 198,508 | 9,770 | 23.53% | 62,071,031 | 102,684,109 | 8.70% |
-| `B0L21` | 1,888,456,659 | 1,759,504,388 | 12,843,320 | 5,197,447,168 | 198,080 | 9,768 | 23.54% | 62,090,991 | 101,624,183 | 8.67% |
-| `head` | 6,214,970,466 | 5,832,830,141 | 35,640,318 | 8,247,820,288 | 536,053 | 21,263 | 19.18% | 60,011,273 | 274,949,549 | 5.39% |
-| **All 23** | **47,922,430,694** | **44,679,308,212** | **316,565,698** | **8,247,820,288** (largest) | **4,896,947** | **236,531** | **22.91%** | **1,426,081,902** | **2,538,630,428** | **8.27%** |
+| `B0L0` | 2,064,639,140 | 1,930,782,126 | 14,141,959 | 5,000,691,712 | 225,007 | 10,109 | 24.36% | 62,346,827 | 118,808,389 | 8.77% |
+| `B0L1` | 1,919,771,751 | 1,787,215,051 | 12,858,390 | 5,164,089,344 | 203,036 | 9,776 | 23.71% | 62,084,080 | 107,860,214 | 8.85% |
+| `B0L2` | 1,912,042,029 | 1,780,947,645 | 12,900,561 | 5,165,350,912 | 202,226 | 9,774 | 23.72% | 62,098,723 | 106,322,852 | 8.81% |
+| `B0L3` | 1,891,940,765 | 1,762,266,468 | 12,777,330 | 5,107,957,760 | 198,254 | 9,770 | 23.52% | 62,048,873 | 102,635,282 | 8.70% |
+| `B0L4` | 1,888,670,401 | 1,758,741,664 | 12,738,291 | 5,199,937,536 | 197,298 | 9,766 | 23.45% | 62,064,793 | 102,376,245 | 8.71% |
+| `B0L5` | 1,876,662,526 | 1,747,011,143 | 12,506,128 | 5,200,347,136 | 194,008 | 9,770 | 23.23% | 62,099,509 | 100,926,897 | 8.69% |
+| `B0L6` | 1,879,311,443 | 1,749,710,731 | 12,558,072 | 5,212,209,152 | 194,158 | 9,766 | 23.21% | 62,083,444 | 100,945,926 | 8.67% |
+| `B0L7` | 1,894,981,631 | 1,765,531,621 | 12,805,031 | 5,195,169,792 | 198,885 | 9,770 | 23.55% | 62,069,325 | 102,989,517 | 8.71% |
+| `B0L8` | 1,895,461,399 | 1,765,144,894 | 12,699,707 | 5,185,929,216 | 198,430 | 9,772 | 23.50% | 62,106,794 | 103,791,116 | 8.75% |
+| `B0L9` | 1,882,337,455 | 1,753,431,063 | 12,722,568 | 5,204,885,504 | 196,190 | 9,768 | 23.40% | 62,083,575 | 100,842,786 | 8.66% |
+| `B0L10` | 1,879,855,596 | 1,750,891,740 | 12,689,128 | 5,177,982,976 | 195,433 | 9,768 | 23.35% | 62,080,301 | 100,433,288 | 8.65% |
+| `B0L11` | 1,891,476,295 | 1,761,777,514 | 12,714,592 | 5,177,196,544 | 197,526 | 9,770 | 23.44% | 62,048,666 | 102,506,199 | 8.70% |
+| `B0L12` | 1,869,534,796 | 1,739,563,319 | 12,487,194 | 5,213,437,952 | 192,269 | 9,768 | 23.12% | 62,086,383 | 99,153,629 | 8.62% |
+| `B0L13` | 1,879,764,339 | 1,749,364,873 | 12,589,470 | 5,200,297,984 | 194,629 | 9,770 | 23.26% | 62,102,942 | 101,201,009 | 8.69% |
+| `B0L14` | 1,886,798,881 | 1,757,245,949 | 12,731,427 | 5,189,877,760 | 196,843 | 9,770 | 23.42% | 62,078,467 | 102,083,044 | 8.70% |
+| `B0L15` | 1,881,322,705 | 1,751,340,242 | 12,564,216 | 5,218,287,616 | 194,782 | 9,770 | 23.26% | 62,042,909 | 101,110,139 | 8.67% |
+| `B0L16` | 1,890,682,005 | 1,760,797,842 | 12,773,562 | 5,185,978,368 | 197,933 | 9,770 | 23.50% | 62,086,471 | 102,346,568 | 8.70% |
+| `B0L17` | 1,871,600,112 | 1,742,649,312 | 12,557,644 | 5,261,328,384 | 193,515 | 9,768 | 23.23% | 62,094,720 | 99,764,773 | 8.65% |
+| `B0L18` | 1,880,146,163 | 1,749,766,529 | 12,528,379 | 5,181,554,688 | 194,310 | 9,770 | 23.22% | 62,088,869 | 101,005,287 | 8.67% |
+| `B0L19` | 1,881,993,693 | 1,753,056,032 | 12,760,629 | 5,205,229,568 | 196,800 | 9,768 | 23.48% | 62,126,528 | 101,178,686 | 8.68% |
+| `B0L20` | 1,893,176,304 | 1,763,494,151 | 12,800,757 | 5,193,908,224 | 198,508 | 9,770 | 23.53% | 62,071,031 | 102,684,109 | 8.70% |
+| `B0L21` | 1,888,464,862 | 1,759,512,084 | 12,843,320 | 5,162,237,952 | 198,080 | 9,768 | 23.54% | 62,090,991 | 101,624,183 | 8.67% |
+| `head` | 6,229,618,154 | 5,852,895,192 | 35,901,653 | 8,319,729,664 | 540,196 | 21,266 | 19.28% | 60,017,864 | 276,275,668 | 5.40% |
+| **All 23** | **47,930,252,445** | **44,693,137,185** | **316,650,008** | **8,319,729,664** (largest) | **4,898,316** | **236,537** | **22.92%** | **1,426,102,085** | **2,538,865,806** | **8.27%** |
 
 - **Stdin bytes:** the three buffers, `fixed.json` and `claims.json` as is and the proof re-encoded as `bincode` (`SPEC.md` §1.1).
 - **BLAKE2s share:** the compressions `native-check` counts, times 2,139 cycles per compression (§6.1, `blake2s_compress`), over the segment's cycles. SP1 has no BLAKE2s precompile, so no syscall count gives it. `native-check` runs the same check natively, in a host build with stwo's `count-ops` feature (`sp1/patches/0005`): a counting `Blake2s256` adds `max(1, ⌈n / 64⌉)` compressions per hash of `n` bytes, at finalize. `hash_node` is the Merkle hasher, the channel is `Blake2sHasherGeneric` (mixes, draws and `mix_root`). The guest never enables the feature.
 - **Decode share:** the cycles to decode the three buffers exactly as `check_segment` does (`Fixed` and `Claims` from JSON, the proof from `bincode`), in the `decode_fixed_claims` and `decode_proof` cycle-tracker regions of `stwo-bench`'s `decode_segment` operation (`decode-share`), over the segment's cycles. The segment guest has no regions, which would change its ELF and vkey. `stwo-bench` is the local build (`succinct` toolchain, rustc `1.96.0-dev`), not a committed program.
-- **Over all 23 segments:** BLAKE2s is 22.9% of the cycles, decoding 8.3%: 3.0% for `Fixed` and `Claims`, 5.3% for the proofs. `Fixed` and `Claims` are 3.0% of the bundle bytes (23,156,855 of 761,015,496 B) and decode at ~62 cycles per byte, the proofs at ~8.7 per `bincode` byte (293,408,843 B). The rest, ~69%, is OODS constraint evaluation, DEEP quotients, FRI, GKR, the claims checks and the bookkeeping around them.
+- **Over all 23 segments:** BLAKE2s is 22.9% of the cycles, decoding 8.3%: 3.0% for `Fixed` and `Claims`, 5.3% for the proofs. `Fixed` and `Claims` are 3.0% of the bundle bytes (23,157,213 of 761,159,331 B) and decode at ~62 cycles per byte, the proofs at ~8.7 per `bincode` byte (293,492,795 B). The rest, ~69%, is OODS constraint evaluation, DEEP quotients, FRI, GKR, the claims checks and the bookkeeping around them.
 
-**Profiler cross-check.** `sp1-host` built with sp1-sdk's `profiling` feature, run under `TRACE_FILE` with `TRACE_SAMPLE_RATE=1000` (one sample every 1,000 cycles; the default of 1 makes the trace far too large), then `sp1-host trace-share` counts the samples whose call stack holds `<blake2::Blake2sVarCore>::compress`:
+**Profiler cross-check.** Measured with the guest and the bundles before patch 0006 (`B0L10`'s cycles have since changed by 0.0004%, `head`'s by 0.24% and its compressions by 0.7%; not re-run). `sp1-host` built with sp1-sdk's `profiling` feature, run under `TRACE_FILE` with `TRACE_SAMPLE_RATE=1000` (one sample every 1,000 cycles; the default of 1 makes the trace far too large), then `sp1-host trace-share` counts the samples whose call stack holds `<blake2::Blake2sVarCore>::compress`:
 
 ```bash
 cd sp1 && cargo build --release --locked -p sp1-host --features profiling --bin sp1-host
@@ -254,30 +254,30 @@ target/release/sp1-host trace-share --trace <tag>.trace.json
 
 The two agree within 0.13 points: the bare compression's 2,139 cycles include a little loop and call overhead that the profiler counts outside `compress`.
 
-**Controls on the real bundles.** `make sp1-execute` then writes seven modified copies under `OUT/controls/`, never in the bundle directory, and runs each natively and in the executor. Both sides give the same outcome. The two G9 forgeries (`SPEC.md` §2.1) are not measured yet: the guest that runs them has patch 0006, under which these bundles' `B0L0` and `head` reject until they are re-proved with it (`SPEC.md` §1.4).
+**Controls on the real bundles.** `make sp1-execute` then writes seven modified copies under `OUT/controls/`, never in the bundle directory, and runs each natively and in the executor. Both sides give the same outcome. The two G9 forgeries (`SPEC.md` §2.1) find the honest vector's Horner image under patch 0006's `w` on both segments (`solved under the TokensMixed transcript's w`), so they are the attack on these proofs, and both reject. The same edit solved under upstream `eb95bfa`'s `w`, the review's proof of concept, rejects too (`NotAccepted` natively, exit 1 in the executor, at 201,342,414 and 370,793,675 cycles): upstream's `w` no longer gives the claimed Horner image on the re-proved bundles. Before patch 0006 the guest accepted that forgery on both (#69).
 
 | Control | Segment and file | Native and executor | Executor cycles |
 |---|---|---|---:|
-| `queried_values[0][0]` + 1 mod P (the proof still decodes) | `B0L10` proof | exit 1, `NotAccepted` | 1,053,335,031 |
-| `ao_out[0]` + 1 mod P (still decodable) | `B0L10` claims | exit 1, `NotAccepted` | 541,917,369 |
+| `queried_values[0][0]` + 1 mod P (the proof still decodes) | `B0L10` proof | exit 1, `NotAccepted` | 1,053,341,980 |
+| `ao_out[0]` + 1 mod P (still decodable) | `B0L10` claims | exit 1, `NotAccepted` | 541,924,327 |
 | `tok_in[0]` + P | `B0L0` fixed | exit 1, `TokenIdOutOfField` | 3,939,888 |
 | `tok_out[0]` + P | `head` fixed | exit 1, `TokenIdOutOfField` | 12,112,996 |
-| `model`'s last hex digit changed (no rule reads it) | `B0L10` fixed | exit 0, the unmodified public values but for `fixedHash`, `86c43bf7…89f08a5` against the pin `fa81937c…e19faf47`; the `manifestRootsHash` check rejects it (control 21, `SPEC.md` §2.1) | 1,879,910,406 |
-| `tok_in[25]` = 450, `tok_in[1..=4]` solved to keep the Horner sum under the segment's own `w` | `B0L0` fixed | exit 1, `NotAccepted` | — |
-| `tok_out[24]` = 450, `tok_out[0..=3]` solved to keep the Horner sum under the segment's own `w` | `head` fixed | exit 1, `NotAccepted` | — |
+| `model`'s last hex digit changed (no rule reads it) | `B0L10` fixed | exit 0, the unmodified public values but for `fixedHash`, `86c43bf7…89f08a5` against the pin `fa81937c…e19faf47`; the `manifestRootsHash` check rejects it (control 21, `SPEC.md` §2.1) | 1,879,917,355 |
+| `tok_in[25]` = 450, `tok_in[1..=4]` solved to keep the Horner sum under the segment's own `w` | `B0L0` fixed | exit 1, `NotAccepted` | 201,342,507 |
+| `tok_out[24]` = 450, `tok_out[0..=3]` solved to keep the Horner sum under the segment's own `w` | `head` fixed | exit 1, `NotAccepted` | 370,793,635 |
 
 **Against the per-request limits** (one request per segment) **and in GPU time:**
 
 | | `B0L0` | `B0L10` | `head` | All 23 |
 |---|---:|---:|---:|---:|
-| PGU / 1e12-PGU cap (#38's figure, unverified: sp1-sdk 6.10.0 defines no PGU cap, only the two limits below; §8.4 leaves it unassessed) | 0.19% | 0.18% | 0.58% | 4.47% (23 requests) |
+| PGU / 1e12-PGU cap (#38's figure, unverified: sp1-sdk 6.10.0 defines no PGU cap, only the two limits below; §8.4 leaves it unassessed) | 0.19% | 0.18% | 0.59% | 4.47% (23 requests) |
 | Cycles / sp1-sdk's 1e12-cycle `MAINNET_DEFAULT_CYCLE_LIMIT` | 0.21% | 0.19% | 0.62% | — |
-| PGU / sp1-sdk's 1e9-PGU `DEFAULT_GAS_LIMIT` | 193.72% | 175.09% | 583.28% | — |
-| GPU-hours at 2M PGU/s per GPU (unverified; §8 measures 8.0–8.3M PGU/s on one RTX PRO 6000, 1.49–1.55 GPU-hours for all 23) | 0.269 | 0.243 | 0.810 | 6.205 |
+| PGU / sp1-sdk's 1e9-PGU `DEFAULT_GAS_LIMIT` | 193.08% | 175.09% | 585.29% | — |
+| GPU-hours at 2M PGU/s per GPU (unverified; §8 measures 8.0–8.3M PGU/s on one RTX PRO 6000, 1.49–1.55 GPU-hours for all 23) | 0.268 | 0.243 | 0.813 | 6.207 |
 
 - sp1-sdk 6.10.0's limits (`network/mod.rs`) apply to a request that skips simulation and sets none (`get_execution_limits` in `network/prover.rs`). Every segment's PGU exceeds the 1e9 `DEFAULT_GAS_LIMIT`, so such a request must set its gas limit.
 - The GPU rate derives from Succinct's Hypercube figure (an Ethereum block of about 400M PGU proved in under 12 s on 16 RTX 5090s). §8 replaces it with measured proofs of `B0L10` and `head`.
-- #38 estimated the 23 segments at 3.75–4.92e10 cycles (3.45–4.51e10 PGU) from #41's synthetic runs. The measured 4.79e10 cycles (4.47e10 PGU) is near the top of that range. `head`, estimated at 3.32–5.73e9 cycles, measures 6.21e9, half of `CYCLE_LIMIT`.
+- #38 estimated the 23 segments at 3.75–4.92e10 cycles (3.45–4.51e10 PGU) from #41's synthetic runs. The measured 4.79e10 cycles (4.47e10 PGU) is near the top of that range. `head`, estimated at 3.32–5.73e9 cycles, measures 6.23e9, half of `CYCLE_LIMIT`.
 
 ## 8. Proving two TinyLlama segments on a GPU (measured) and the M3 go/no-go
 
@@ -285,8 +285,10 @@ Each figure is labelled measured or estimated. Estimates are computed from the m
 
 `B0L10` (a typical segment) and `head` (the largest) proved to SP1 compressed proofs, the mode M3's aggregator consumes, on one rented NVIDIA GPU. This replaces §7's unverified 2M PGU/s per GPU.
 
+**Measured before patch 0006.** These proofs were made with the guest and the bundles before the token binding (#69), and no GPU run has been made since. On the re-proved bundles the committed guest's executor figures (§7) differ from those this section uses by +0.0004% in cycles and PGU for `B0L10`, +0.24% in cycles and +0.34% in PGU for `head`, and +0.016% in cycles and +0.031% in PGU over the 23 segments. Proving time scales with PGU (§8.2), so the figures below still apply within that margin, about 2.5 s on `head`'s 721.6 s. The cycles, PGU and Σ PGU quoted below are the ones the proofs were made with.
+
 - **SP1:** sp1-sdk `6.10.0` with its `cuda` feature (`ProverClient::builder().cuda()`), which starts SP1's prebuilt `sp1-gpu-server` `v6.10.0` (release asset `sp1_gpu_server_v6.10.0_x86_64.tar.gz`, sha256 `20ee4b96fa6e5a2ce8a9da523ee42b75c698658ae1d4366e57b52bdd642f1bdb` on 2026-10-28; it links `libcudart.so.12`). Options are the defaults; the server sizes shards from the card's memory (`sp1-gpu/crates/prover_components/src/builder.rs:35-52`).
-- **Program:** the committed segment guest, #43's Docker build (ELF sha256 `d8e6280f…6b52e28`, vkey `0x0025dac0…3eea2e2`, §7).
+- **Program:** the segment guest before patch 0006, #43's Docker build: ELF sha256 `d8e6280fad7c667f5b07c18d891bf2444a1304046df2838b94161a77e6b52e28`, vkey `bytes32` `0x0025dac01e6b93eabfce48c8400bcd4c7bd401f61d2d82dfabfe1e2ee3eea2e2` (the committed guest, §7, has another ELF and vkey; `sp1-host prove` checks the committed ones).
 - **Host:** Hugging Face Jobs flavor `rtx-pro-6000`, listed as 1× NVIDIA RTX PRO 6000 (96 GB), 23 vCPU, 256 GB RAM, $0.045833 per minute, on 2026-10-28:
   - GPU: NVIDIA RTX PRO 6000 Blackwell Server Edition, compute capability 12.0, 97,887 MiB, power limit 600 W; driver 580.178.04 (CUDA 13.0); container image `nvidia/cuda:12.8.1-base-ubuntu24.04` (CUDA 12.8 runtime);
   - CPU and RAM: the container sees the host's 2× Intel Xeon Platinum 8559C (96 cores, 192 threads) and 1,999 GB under KVM; the flavor allots 23 vCPU and 256 GB. Linux 6.12.103 (Amazon Linux 2023 kernel), x86_64;
@@ -298,7 +300,7 @@ Each figure is labelled measured or estimated. Estimates are computed from the m
   target/release/sp1-host prove --elf <segment-guest> --bundle ../runs/tinyllama --tag B0L10 --out <dir>/B0L10.proof.bin
   ```
 
-  `sp1-host prove` checks everything it can on the CPU before it starts the CUDA client: an `--out` named `<tag>.proof.bin` under the checkout's `runs/` or outside the checkout, never in the bundle directory; the ELF's sha256 against `sp1/segment-guest.elf.sha256`; its vkey, from a CPU setup, against `sp1/segment-guest.vkey`; and an executor run on the input, which must exit 0 with the `fixedHash` in `sp1/pins/tinyllama.fixed.sha256`. It then builds the CUDA client (which downloads `sp1-gpu-server` into `~/.sp1/bin` on first use and starts it; timed apart, so neither the download nor the start counts as setup or proving), sets the key up and checks the GPU key's vkey again, proves in compressed mode, verifies the proof, compares its public values with the executor's byte for byte and its `fixedHash` with the pin, then writes the proof. It prints each step's time, the proof's size and sha256, and `VmHWM` of `sp1-gpu-server`, the process that proves. GPU memory is sampled every second with `nvidia-smi --query-gpu=memory.used`. The bundles were checked against `sp1/pins/tinyllama.sha256` on the host first, and the bundles and proofs were deleted from it afterwards.
+  `sp1-host prove` checks everything it can on the CPU before it starts the CUDA client: an `--out` named `<tag>.proof.bin` under the checkout's `runs/` or outside the checkout, never in the bundle directory; the ELF's sha256 against `sp1/segment-guest.elf.sha256`; its vkey, from a CPU setup, against `sp1/segment-guest.vkey`; and an executor run on the input, which must exit 0 with the `fixedHash` in `sp1/pins/tinyllama.fixed.sha256`. It then builds the CUDA client (which downloads `sp1-gpu-server` into `~/.sp1/bin` on first use and starts it; timed apart, so neither the download nor the start counts as setup or proving), sets the key up and checks the GPU key's vkey again, proves in compressed mode, verifies the proof, compares its public values with the executor's byte for byte and its `fixedHash` with the pin, then writes the proof. It prints each step's time, the proof's size and sha256, and `VmHWM` of `sp1-gpu-server`, the process that proves. GPU memory is sampled every second with `nvidia-smi --query-gpu=memory.used`. The bundles were checked against `sp1/pins/tinyllama.sha256` as it stood before patch 0006 on the host first, and the bundles and proofs were deleted from it afterwards.
 
 ### 8.1 Measured
 
@@ -306,7 +308,7 @@ Run 2, with run 1 in brackets.
 
 | | `B0L10` | `head` |
 |---|---:|---:|
-| Cycles; PGU (§7, reproduced by `prove`'s executor run) | 1,879,848,647; 1,750,885,173 | 6,214,970,466; 5,832,830,141 |
+| Cycles; PGU (§7 before patch 0006, reproduced by `prove`'s executor run) | 1,879,848,647; 1,750,885,173 | 6,214,970,466; 5,832,830,141 |
 | Stdin bytes | 12,689,128 | 35,640,318 |
 | Executor run on the CPU, native executor (s) | 23.1 [23.3] | 64.7 [65.0] |
 | Executor peak RSS, native executor (child process) (B) | 4,474,855,424 [4,474,544,128] | 4,725,551,104 [4,725,215,232] |
@@ -331,7 +333,7 @@ Run 2, with run 1 in brackets.
 
 ### 8.2 Extrapolation to the 23 segments (estimate)
 
-Proving time scales with PGU at each segment's measured rate: all 23 segments take Σ PGU × (prove time / PGU). Σ PGU is 44,679,308,212 (§7), 25.518 × `B0L10`'s and 7.660 × `head`'s. The two rates differ by 3.1% in run 2 (120.05 and 123.71 s per 1e9 PGU) and 1.3% in run 1, so each column gives one end of the range:
+Proving time scales with PGU at each segment's measured rate: all 23 segments take Σ PGU × (prove time / PGU). Σ PGU is 44,679,308,212 (§7 before patch 0006; 44,693,137,185 now, +0.031%), 25.518 × `B0L10`'s and 7.660 × `head`'s. The two rates differ by 3.1% in run 2 (120.05 and 123.71 s per 1e9 PGU) and 1.3% in run 1, so each column gives one end of the range:
 
 | | At `B0L10`'s rate | At `head`'s rate |
 |---|---:|---:|
@@ -340,7 +342,7 @@ Proving time scales with PGU at each segment's measured rate: all 23 segments ta
 | $ per inference, proving only: that time × $0.045833/min | **$4.10** [$4.20] | **$4.22** [$4.25] |
 | Wall time on 23 GPUs in parallel: the slowest segment, `head` (3.331 × `B0L10`'s PGU) (s) | 700 [718] | 721.6 [726.9] (measured) |
 
-Over both runs and both rates: 5,364–5,568 s and $4.10–4.25 per inference on one GPU. §7's 6.205 GPU-hours, at an unverified 2M PGU/s, was about 4× too high: one RTX PRO 6000 proves 8.0–8.3M PGU/s. PGU counts the work that SP1's prover network bills; the GPU's time per PGU may still vary with a segment's mix of chips, which the two segments sample.
+Over both runs and both rates: 5,364–5,568 s and $4.10–4.25 per inference on one GPU. §7's 6.207 GPU-hours, at an unverified 2M PGU/s, was about 4× too high: one RTX PRO 6000 proves 8.0–8.3M PGU/s. PGU counts the work that SP1's prover network bills; the GPU's time per PGU may still vary with a segment's mix of chips, which the two segments sample.
 
 **Aggregator (estimate; M3 measures it).** One guest verifies the 23 compressed proofs with `verify_sp1_proof` and commits the 32-byte `publicDigest`, as SP1's aggregation example does (sp1 `v6.10.0` `examples/aggregation`). Its RISC-V work is small: 23 × 226 bytes of public values, the vkey checks and a few sha256 hashes. Each `verify_sp1_proof` is a deferred proof, checked by the recursion program like one node of a compress tree, so the aggregator's proof is one recursion layer over 23 proofs plus a short core execution. The server did not log how many core shards `B0L10`'s own compress tree folds, so no bound follows from it. Working figure: one `B0L10` proof, about 210 s and $0.16 on this GPU, which is a scale, not a bound.
 
@@ -350,17 +352,17 @@ Over both runs and both rates: 5,364–5,568 s and $4.10–4.25 per inference on
 
 Both routes priced per inference on Hugging Face Jobs, each by its own method:
 
-- **SP1:** two measured proofs, extrapolated to the 23 segments by PGU (§8.2). As a cross-check, the BLAKE2s compressions alone, §3's 5,133,478 at §6.1's 2,117 PGU each (10,867,572,926 PGU, 24.3% of §7's Σ PGU), priced at the same measured rates.
-- **S-two:** unit costs (`docs/STARK-NATIVE-ROUTE.md`) scaled by §1's counts and §3's 5,133,478 BLAKE2s compressions.
+- **SP1:** two measured proofs, extrapolated to the 23 segments by PGU (§8.2). As a cross-check, the BLAKE2s compressions alone, §3's 5,134,853 at §6.1's 2,117 PGU each (10,870,483,801 PGU, 24.3% of §7's Σ PGU), priced at the same measured rates.
+- **S-two:** unit costs (`docs/STARK-NATIVE-ROUTE.md`) scaled by §1's counts and §3's 5,134,853 BLAKE2s compressions.
 
 | Per inference | SP1 GPU (§8.2), run 2 | S-two Cairo (`docs/STARK-NATIVE-ROUTE.md`, EPYC on `cpu-performance` at $0.031667/min) | SASH proving the run itself (#34) |
 |---|---|---|---|
 | Status | 2 segments measured, 21 extrapolated by PGU | Estimated: unit costs measured, no SASH verifier built | Measured |
 | What it covers | The whole segment guest: decoding, `verify_composed` and the guest's rules | BLAKE2s, QM31 mul-adds, felt ingestion and the fixed cost; the rest only through the calibration scaling | Proving the 23 segments on CPU |
-| BLAKE2s compressions alone (5,133,478), estimate | 1,305–1,345 s, $1.00–1.03: 10,867,572,926 PGU (§6.1's 2,117 per compression) at the measured rates | 1,109 s, $0.59: the EPYC's BLAKE2s fit | — |
-| Time | 5,364–5,527 s on 1 GPU; 722 s on 23 GPUs, plus the aggregator and the wrap | 5,289–5,319 s modelled, 8,447 s scaled, on one 32-vCPU machine | about 31 min, build and verify included |
+| BLAKE2s compressions alone (5,134,853), estimate | 1,305–1,345 s, $1.00–1.03: 10,870,483,801 PGU (§6.1's 2,117 per compression) at the measured rates | 1,109 s, $0.59: the EPYC's BLAKE2s fit | — |
+| Time | 5,364–5,527 s on 1 GPU; 722 s on 23 GPUs, plus the aggregator and the wrap | 5,290–5,321 s modelled, 8,449 s scaled, on one 32-vCPU machine | about 31 min, build and verify included |
 | Cost | $4.10–4.22 ($4.10–4.25 over both runs) | $2.79–2.81 modelled, $4.46 scaled | about $0.31 |
-| `head` | 721.6 s, $0.55 (measured) | 612–614 s modelled, 976 s scaled ($0.32–0.52); needs ~437 GiB, so likely split | — |
+| `head` | 721.6 s, $0.55 (measured) | 616–618 s modelled, 982 s scaled ($0.33–0.52); needs ~439 GiB, so likely split | — |
 | Security | SASH's ~100 conjectured bits inside; outer proof SP1's, then BN254 (`SECURITY.md`) | stwo-cairo's default: 96 bits, 70 queries, 26 PoW bits | ~100 conjectured bits |
 
 - **SP1 against S-two:** SP1's measured $4.10–4.25 is 0.92–0.95× S-two's scaled $4.46 and 1.5× its modelled $2.79–2.81. On BLAKE2s alone, where S-two has native opcodes and SP1 no precompile, SP1 costs 1.7× as much ($1.00–1.03 against $0.59).
@@ -373,7 +375,7 @@ Both routes priced per inference on Hugging Face Jobs, each by its own method:
 
 | | Criterion | Figure | Proposed threshold | Status |
 |---|---|---|---|---|
-| F1 | Every segment's §7 figures within half of SP1's limits | `head`, the largest: 6.21e9 cycles, 0.62% of sp1-sdk 6.10.0's 1e12-cycle `MAINNET_DEFAULT_CYCLE_LIMIT` (`network/mod.rs`); the network's 1e12-PGU request cap is not assessed: it is #38's figure, unverified, and sp1-sdk 6.10.0 defines no PGU cap (its 1e9-PGU `DEFAULT_GAS_LIMIT` is a default a request overrides, §7); 35,640,318 stdin bytes, 0.21% of the 16 GiB input region (`SP1_ZKVM_INPUT_REGION_SIZE` default `1 << 34`, sp1 `crates/zkvm/entrypoint/build.rs`); native executor child peak RSS 4,725,551,104 B (§8.1), 18.3% of its 24 GiB `DEFAULT_MEMORY_LIMIT` | ≤ 50% of each limit | Passes for cycles, input and RSS; PGU cap not assessed |
+| F1 | Every segment's §7 figures within half of SP1's limits | `head`, the largest: 6.23e9 cycles, 0.62% of sp1-sdk 6.10.0's 1e12-cycle `MAINNET_DEFAULT_CYCLE_LIMIT` (`network/mod.rs`); the network's 1e12-PGU request cap is not assessed: it is #38's figure, unverified, and sp1-sdk 6.10.0 defines no PGU cap (its 1e9-PGU `DEFAULT_GAS_LIMIT` is a default a request overrides, §7); 35,901,653 stdin bytes, 0.21% of the 16 GiB input region (`SP1_ZKVM_INPUT_REGION_SIZE` default `1 << 34`, sp1 `crates/zkvm/entrypoint/build.rs`); native executor child peak RSS 4,725,551,104 B (§8.1), 18.3% of its 24 GiB `DEFAULT_MEMORY_LIMIT` | ≤ 50% of each limit | Passes for cycles, input and RSS; PGU cap not assessed |
 | F2 | `B0L10` and `head` prove without running out of memory | Both prove and verify, twice; peak 26,541 MiB of the GPU's 97,887 MiB, `sp1-gpu-server` `VmHWM` 25,671,472 kB of the 256 GB allotted | Both prove and verify | Passes |
 | C1 | $ per inference | $4.10–4.25, proving the 23 segments (estimate from two measured proofs), plus the aggregator, about $0.16 (estimate), and the wrap (M3) | ≤ $5, the order of the S-two route's scaled estimate ($4.46) | Meets it, if the wrap costs under about $0.60 |
 | C2 | Wall time per inference, 23 segments in parallel, aggregator and wrap included | `head`'s 721.6 s (measured) + the aggregator, about 210 s (estimate) + the wrap (M3): about 15.5 min plus the wrap | ≤ 1 h, about twice SASH's own 31 min | Meets it, if the wrap takes under about 44 min |

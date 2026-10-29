@@ -271,8 +271,8 @@ Everything but time is the same on both machines. The rest is AIR evaluation, ch
 
 ### Extrapolation to TinyLlama (estimate)
 
-From `docs/EVM-GAS-MODEL.md` §1 (65,967,346 leaf M31s, 519,784 OODS values, 501,235 columns, 518,489 internal hashes) and §3 (5,133,478 BLAKE2s compressions). Assumed multipliers:
-- **BLAKE2s compressions** as SASH's verifier runs them, Merkle `hash_node` plus channel, counted natively (§3, §7): 5,133,478 for all 23 segments and 557,316 for `head`. That is 10.6% and 6.0% above the analytic leaf M31s / 16 + internal hashes (4,641,448 and 525,665).
+From `docs/EVM-GAS-MODEL.md` §1 (65,987,266 leaf M31s, 519,784 OODS values, 501,235 columns, 518,617 internal hashes) and §3 (5,134,853 BLAKE2s compressions). Assumed multipliers:
+- **BLAKE2s compressions** as SASH's verifier runs them, Merkle `hash_node` plus channel, counted natively (§3, §7): 5,134,853 for all 23 segments and 561,462 for `head`. That is 10.6% and 6.0% above the analytic leaf M31s / 16 + internal hashes (4,642,821 and 529,799).
 - **QM31 mul-adds** = 100 query positions × (OODS values + two-sample columns), with two-sample columns = OODS values − columns: one per query position and (column, sample) pair, as `accumulate_row_quotients` (`verifier_core/src/pcs/quotients.cairo:263`) does. SASH proves with 100 queries. A periodicity sample is added to every column sampled at two points (`build_samples_with_randomness_and_periodicity`, which the pinned Cairo verifier mirrors at `quotients.cairo:79-100`), and no column has more than two. This is #38's formula; with the corrected 501,235 columns it gives 53,833,300 for all 23 segments and 7,063,600 for `head` (#38 used 53,837,100, from 501,197 columns).
 - **Ingested felts** = leaf M31s + 4 × OODS values + 8 × internal hashes. Each costs one M31 ingestion, including the 32-bit hash words.
 - **Costs add linearly.** Each segment is its own proof, so it pays once the largest of the three fixed costs.
@@ -281,11 +281,11 @@ Steps and trace cells don't depend on the machine; the times use the EPYC's fits
 
 | Workload | BLAKE2s | QM31 mul-adds | Ingested felts | Steps | Trace cells | Time, fit: BLAKE2s / QM31 / ingestion / fixed (s), EPYC | Time, modelled ops (s), EPYC | Time, scaled by the calibration (s), EPYC | M3 Max: modelled ops; scaled (s) |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| Per inference (23 proofs) | 5,133,478 | 53,833,300 | 72,194,394 | 1,729,841,699 | 2.05 × 10^11 unpadded | 1,109 / 695 / 3,344 / 171 | 5,289–5,319 (~89 min) | 8,447 (~141 min) | 4,673–5,155; 9,307 |
-| `head`, the largest segment | 557,316 | 7,063,600 | 8,533,469 | 209,380,280 | 3.31 × 10^10 padded (2.34 × 10^10 unpadded) | 120 / 91 / 395 / 7 | 612–614 | 976 | 535–591; 1,065 |
+| Per inference (23 proofs) | 5,134,853 | 53,833,300 | 72,215,338 | 1,730,216,997 | 2.05 × 10^11 unpadded | 1,109 / 695 / 3,345 / 171 | 5,290–5,321 (~89 min) | 8,449 (~141 min) | 4,674–5,157; 9,309 |
+| `head`, the largest segment | 561,462 | 7,063,600 | 8,598,754 | 210,548,169 | 3.31 × 10^10 padded (2.35 × 10^10 unpadded) | 121 / 91 / 398 / 7 | 616–618 | 982 | 538–595; 1,072 |
 
 - **The modelled-ops time is the fit and the marginal slopes between the two largest N.** On the EPYC they agree within 1%. The fits imply 325k steps/s per inference and 341k for `head`, below the calibration's 396k.
-- **Time per trace cell doesn't carry over between op mixes.** Multiplying the cells by the 12.6 ns per padded cell of the EPYC's largest proof gives 2,583 s per inference and 417 s for `head`. That proof is BLAKE2s at 2^18, and per marginal cell ingestion costs 25 ns on the EPYC, against 11–13 ns for BLAKE2s and QM31. On the M3 Max the largest proof was the calibration, at 25.1 ns per cell, which gives 5,147 s per inference and 830 s for `head`, above its fit and marginal times. The per-inference cells are unpadded because the model doesn't have each segment's op counts.
+- **Time per trace cell doesn't carry over between op mixes.** Multiplying the cells by the 12.6 ns per padded cell of the EPYC's largest proof gives 2,583 s per inference and 417 s for `head`. That proof is BLAKE2s at 2^18, and per marginal cell ingestion costs 25 ns on the EPYC, against 11–13 ns for BLAKE2s and QM31. On the M3 Max the largest proof was the calibration, at 25.1 ns per cell, which gives 5,148 s per inference and 830 s for `head`, above its fit and marginal times. The per-inference cells are unpadded because the model doesn't have each segment's op counts.
 - **The scaled column** multiplies the fit-based time by the calibration's measured / modelled time: 1.59 on the EPYC, 1.99 on the M3 Max. It stands in for the work the three ops leave out.
 - **Ingestion dominates,** at 63% of the EPYC's fit-based time per inference, against 21% for BLAKE2s, 13% for QM31 and 3% for the fixed costs. On the M3 Max the split is 45%, 39% and 14%. About half of the EPYC's ingestion cost is `run_and_prove` reading the JSON argument file, so a prover that loads its arguments faster would cut it.
 
@@ -293,21 +293,21 @@ Checks for `head`:
 
 | Check | Modelled ops only | Scaled by the calibration | Bound |
 |---|---:|---:|---|
-| Cairo memory, execution plus ingested arguments | 176,159,284 addresses (2^27.39) | 525,230,379 (2^28.97) | `LOG_MEMORY_ADDRESS_BOUND = 29` (`crates/common/src/memory.rs:2`): 536,870,912 |
-| Largest relation total uses, `MemoryAddressToId` | 1,097,106,467 (0.51 P) | 2,006,323,382 (0.93 P) | below P (`crates/cairo-air/src/verifier.rs:63-66`) |
-| Steps | 209,380,280 (2^27.64) | 516,168,207 (2^28.94) | |
-| Largest component | log size 26: `add_opcode_small` (51.4M rows), `blake_g` (44.6M), `assert_eq_opcode_double_deref` (34.7M), `jnz_opcode_taken` (33.8M) | | |
-| Memory tables | `memory_id_to_small` full at 2^24 values; 77.2M big values in three `memory_id_to_big` tables (2^25, 2^25 and 10.1M rows) | | |
-| Peak memory, modelled ops only | ~437 GiB RSS (EPYC fit); ~318 GiB footprint (M3 Max fit) | | 247 GiB on the EPYC, 36 GiB on the M3 Max |
+| Cairo memory, execution plus ingested arguments | 177,127,172 addresses (2^27.40) | 528,116,200 (2^28.98) | `LOG_MEMORY_ADDRESS_BOUND = 29` (`crates/common/src/memory.rs:2`): 536,870,912 |
+| Largest relation total uses, `MemoryAddressToId` | 1,103,623,870 (0.51 P) | 2,018,242,023 (0.94 P) | below P (`crates/cairo-air/src/verifier.rs:63-66`) |
+| Steps | 210,548,169 (2^27.65) | 519,047,309 (2^28.95) | |
+| Largest component | log size 26: `add_opcode_small` (51.7M rows), `blake_g` (44.9M), `assert_eq_opcode_double_deref` (35.0M), `jnz_opcode_taken` (34.0M) | | |
+| Memory tables | `memory_id_to_small` full at 2^24 values; 77.7M big values in three `memory_id_to_big` tables (2^25, 2^25 and 10.6M rows) | | |
+| Peak memory, modelled ops only | ~439 GiB RSS (EPYC fit); ~320 GiB footprint (M3 Max fit) | | 247 GiB on the EPYC, 36 GiB on the M3 Max |
 
 - **What the estimate covers.**
   - The modelled column counts hashing, quotient accumulation and ingestion only. It excludes AIR evaluation, the out-of-domain evaluation of SASH's 20k–68k-column constraints that a real SASH verifier adds, and the mixed-degree Merkle tree walk. It also excludes the GKR verification, channel draws and FRI folding.
   - It assumes per-op costs stay linear from the measured sizes (at most 2^25 rows, `blake_g` in the EPYC's BLAKE2s 2^18 proof) up to 2^26 rows. FFT and commitment costs grow as n log n.
-- **The modelled ops pass both checks** with a factor of 3.0 to spare on memory addresses and 2.0 on relation uses.
-- **Scaled by the calibration, `head` has no margin left:** 0.98 of the memory-address bound and 0.93 P. A SASH verifier spends more on AIR evaluation than the Cairo verifier does, so a single `head` proof would probably cross a bound. Its verification would likely need splitting across several proofs, each paying the fixed cost again.
-- **`head` fits neither machine.** Its modelled ops alone come to ~437 GiB of peak RSS on the EPYC fit, 1.8x the 247 GiB it has, and ~318 GiB of footprint on the M3 Max fit, about 9x its RAM. Both fits come from proofs of at most 80 GiB (EPYC) and 27 GiB (M3 Max). The per-inference time is what the EPYC's cores would take with enough memory: an estimate, not a run.
+- **The modelled ops pass both checks** with a factor of 3.0 to spare on memory addresses and 1.9 on relation uses.
+- **Scaled by the calibration, `head` has no margin left:** 0.98 of the memory-address bound and 0.94 P. A SASH verifier spends more on AIR evaluation than the Cairo verifier does, so a single `head` proof would probably cross a bound. Its verification would likely need splitting across several proofs, each paying the fixed cost again.
+- **`head` fits neither machine.** Its modelled ops alone come to ~439 GiB of peak RSS on the EPYC fit, 1.8x the 247 GiB it has, and ~320 GiB of footprint on the M3 Max fit, about 9x its RAM. Both fits come from proofs of at most 80 GiB (EPYC) and 27 GiB (M3 Max). The per-inference time is what the EPYC's cores would take with enough memory: an estimate, not a run.
 - **A 256 GB machine doesn't change the conclusion that `head` likely needs splitting.** The bounds that force the split don't depend on the machine: memory addresses and relation uses come out the same on both. And the memory to prove `head` in one piece is above 256 GB even for the modelled ops alone.
-- **Trace-length bound, unchecked context.** arXiv 2606.04311 (https://arxiv.org/pdf/2606.04311) reports a 2^29 + 1 trace-length bound for the S-two AIR. The `head` estimate, 2^27.64 steps (2^28.94 scaled) with components at 2^26, would sit below it.
+- **Trace-length bound, unchecked context.** arXiv 2606.04311 (https://arxiv.org/pdf/2606.04311) reports a 2^29 + 1 trace-length bound for the S-two AIR. The `head` estimate, 2^27.65 steps (2^28.95 scaled) with components at 2^26, would sit below it.
 
 ### Security parameters differ
 
@@ -330,12 +330,12 @@ stwo-cairo's default proves at 96 bits with 70 queries and `pow_bits 26`. SASH's
 | Per inference | SP1 (§7), `bincode` proof: measured | S-two (extrapolation above): estimated |
 |---|---|---|
 | What the figures cover | The whole segment guest: decoding, the verifier build of `verify_composed` (OODS evaluation, FRI, the channel and GKR included) and the guest's rules | BLAKE2s compressions, QM31 mul-adds, ingestion, fixed cost per proof |
-| All 23 segments | 4.79e10 cycles (4.47e10 PGU) | 1.73e9 steps, 2.05e11 unpadded cells; 5,289–5,319 s (EPYC), 4,673–5,155 s (M3 Max) |
-| All 23 segments, with the work the model leaves out | — (nothing left out) | 8,447 s (EPYC), 9,307 s (M3 Max), scaled by the stwo-cairo verifier calibration, which checks a Cairo AIR proof, not a SASH one |
-| `head` | 6.21e9 cycles (5.83e9 PGU) | 2.09e8 steps, 3.31e10 padded cells; 612–614 s (EPYC) |
-| `head`, with the work the model leaves out | — | 976 s (EPYC); no margin left on the memory-address bound and ~437 GiB of peak RSS, so it likely needs splitting |
+| All 23 segments | 4.79e10 cycles (4.47e10 PGU) | 1.73e9 steps, 2.05e11 unpadded cells; 5,290–5,321 s (EPYC), 4,674–5,157 s (M3 Max) |
+| All 23 segments, with the work the model leaves out | — (nothing left out) | 8,449 s (EPYC), 9,309 s (M3 Max), scaled by the stwo-cairo verifier calibration, which checks a Cairo AIR proof, not a SASH one |
+| `head` | 6.23e9 cycles (5.85e9 PGU) | 2.11e8 steps, 3.31e10 padded cells; 616–618 s (EPYC) |
+| `head`, with the work the model leaves out | — | 982 s (EPYC); no margin left on the memory-address bound and ~439 GiB of peak RSS, so it likely needs splitting |
 
-S-two's figures cover OODS constraint evaluation, FRI, the channel and GKR only through the calibration scaling. Both routes count the same 5,133,478 BLAKE2s compressions, which SP1 spends 22.9% of its cycles on.
+S-two's figures cover OODS constraint evaluation, FRI, the channel and GKR only through the calibration scaling. Both routes count the same 5,134,853 BLAKE2s compressions, which SP1 spends 22.9% of its cycles on.
 
 ## Implications for the roadmap
 
