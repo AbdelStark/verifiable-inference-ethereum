@@ -5,7 +5,7 @@
 ## 1. What an accepted proof guarantees
 
 When `VerifiableInferenceSettlement` accepts a run in `VerifierKind.ZKVM_GROTH16` mode (never `DEV_TRANSCRIPT_ONLY`, whose events prove nothing about SASH execution), and once the M2 and M3 guests exist and meet [SPEC.md](SPEC.md) §1:
-1. Every segment $i \in \{0, \dots, 22\}$ committed the exact `(preRoot[i], modelRoot[i])` enrolled in `SashModelRegistry` for `modelId`.
+1. Every segment $i \in \{0, \dots, 22\}$ committed the exact `(preRoot[i], modelRoot[i], fixedHash[i])` enrolled in `SashModelRegistry` for `modelId`, where `fixedHash[i]` is the hash of segment $i$'s whole `Fixed` statement ([SPEC.md](SPEC.md) §1.1): its params, `sizes`, `layer`, `block` and `model`, which the verifier build checks only in part or not at all.
 2. Every segment passed the segment guest's rules ([SPEC.md](SPEC.md) §1.1): the verifier build of SASH's `verify_composed` with `Verdict::accepts()` (`log_blowup = 1`, `n_queries = 100`, `pow_bits = 0`), every token id `< P`, no unbound or lax gadget, sound dequant specs and no open requantize/dequantize seam. Upstream `accepts()` enforces only the first of these; the rest are guest rules.
 3. All 22 inter-segment residual-stream Merkle roots chain without gap (`outRoot[L] == inRoot[L+1]`), and `head` carries no dangling output boundary (`outRoot[22] == 0`).
 4. `tokIn` and `tokOut` are the exact vectors SASH's `embed_tok_ok` (segment 0) and `head_tok_ok` (`head`) checks accepted, with every id `< P`: their sha256 hashes are part of the `publicDigest` the segment proof attests ([SPEC.md](SPEC.md) §1, the statement the M2 and M3 guests must meet).
@@ -15,7 +15,7 @@ Two assumptions come with the guest:
 - **`pre_root` comes from enrollment.** The guest does not re-derive the shape root (tree 0); it accepts the `pre_root` the statement names, and the manifest pins it. Its correctness rests on enrollment (§3).
 - **The verifier build matches upstream.** The guest runs a verifier-only build of `verify_composed` at `eb95bfa`, differing from upstream only by the change classes [SPEC.md](SPEC.md) §1.1 lists, reproducible as a patch series and, from M2, checked by a differential test against upstream's verifier.
 
-The manifest is also meant to pin each segment's `fixedHash` (the hash of its whole `Fixed` statement, [SPEC.md](SPEC.md) §1.1). That binding is planned and not yet enforced on-chain.
+The manifest pins each segment's `fixedHash`, and `SashGridVerifier` enforces it on-chain: `fixedHash` is in each segment claim and in `manifestRootsHash` ([SPEC.md](SPEC.md) §1.3), so a proof against another `Fixed` with the same two roots fails with `ManifestRootMismatch`. The guest compares it with no pin; it commits the hash it computed.
 
 ## 2. Cryptographic assumption shift across layers
 
@@ -31,7 +31,7 @@ Effective classical soundness of the combined pipeline is bounded above by $\min
 
 - **No zero-knowledge (privacy) guarantee:** SASH uses `LOG_BLOWUP = 1` without random trace blinding, and settlement exposes `promptIds` and `answerIds` in calldata. Do not submit confidential prompts or proprietary weights expecting cryptographic hiding.
 - **Quantized relation only:** SASH proves its integer/lookup relation (`y-attnout-w12`), not IEEE-754 floating-point execution.
-- **Manifest enrollment trust:** On-chain verification proves execution against the enrolled `(preRoot, modelRoot)` manifest. Enrollment must use the published calibration: the manifest that upstream `zk-prover model-roots --out` writes and that `zk-prover boundary-grid --verify --verify-calibration` consumes. Relying parties must verify offline that those roots were derived deterministically from the intended `model.safetensors` SHA-256 and that calibration. The segment guest does not re-derive the shape root, so each `preRoot` must be re-derived offline (`zk-prover expect-root --shape-only` or `zk-prover model-roots`) before trusting an enrolled manifest.
+- **Manifest enrollment trust:** On-chain verification proves execution against the enrolled `(preRoot, modelRoot, fixedHash)` manifest. Enrollment must use the published calibration: the manifest that upstream `zk-prover model-roots --out` writes and that `zk-prover boundary-grid --verify --verify-calibration` consumes. Relying parties must verify offline that those roots were derived deterministically from the intended `model.safetensors` SHA-256 and that calibration. The segment guest does not re-derive the shape root, so each `preRoot` must be re-derived offline (`zk-prover expect-root --shape-only` or `zk-prover model-roots`) before trusting an enrolled manifest. Likewise, relying parties must recompute each segment's `fixedHash` from its `Fixed` ([SPEC.md](SPEC.md) §1.1) before trusting an enrolled manifest.
 
 ## 4. `DevTranscriptSegmentVerifier` isolation
 

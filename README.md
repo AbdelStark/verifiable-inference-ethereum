@@ -13,12 +13,12 @@ Mainnet and Hoodi run Osaka, which binds this project; Amsterdam is tracked alon
    - M3: an aggregator guest verifies the 23 segment proofs and commits `publicDigest`; an SP1 v6 BN254 wrap (Groth16 or PLONK, chosen at M3 start) makes it verifiable on-chain through `Sp1SashSegmentVerifier.sol` (~270k gas, estimated).
 2. **Native Solidity SASH grid settlement (`contracts/src/`, present):**
    Enforces on-chain in pure Solidity:
-   - Enrolled 23-segment `(pre_root, model_root)` manifest membership (`SashModelRegistry.sol`),
+   - Enrolled 23-segment `(preRoot, modelRoot, fixedHash)` manifest membership (`SashModelRegistry.sol`),
    - All 22 inter-layer residual-stream Merkle root links (`out_root[L] == in_root[L+1]`),
    - A sha256 `publicDigest` over the segment claims and the `tok_in` / `tok_out` vectors, which the segment proof must attest, so the tokens are the ones SASH's own `embed_tok` / `head_tok` checks used ([SPEC.md](SPEC.md) §1),
-   - Public prompt prefix matching, autoregressive teacher-forcing loop closure (`tok_in[P+j] == tok_out[P-1+j]`), and EOS (`2`) termination (`SashGridVerifier.sol`, ~37k gas measured, [docs/EVM-GAS-MODEL.md](docs/EVM-GAS-MODEL.md) §4).
+   - Public prompt prefix matching, autoregressive teacher-forcing loop closure (`tok_in[P+j] == tok_out[P-1+j]`), and EOS (`2`) termination (`SashGridVerifier.sol`, ~40k gas measured, [docs/EVM-GAS-MODEL.md](docs/EVM-GAS-MODEL.md) §4).
 
-Aggregated single-transaction settlement is estimated at **~474k gas** (**~2.8%** of the `EIP-7825` cap) with a Groth16 wrap, from the measured dev-mode settlement plus an estimated SP1 verifier; M3 measures it ([docs/EVM-GAS-MODEL.md](docs/EVM-GAS-MODEL.md) §5).
+Aggregated single-transaction settlement is estimated at **~490k gas** (**~2.9%** of the `EIP-7825` cap) with a Groth16 wrap, from the measured dev-mode settlement plus an estimated SP1 verifier; M3 measures it ([docs/EVM-GAS-MODEL.md](docs/EVM-GAS-MODEL.md) §5).
 
 ## Exact claim boundary
 
@@ -62,7 +62,7 @@ make forge-test
 make anvil-demo
 ```
 
-`make anvil-demo` starts `anvil --hardfork osaka --enable-tx-gas-limit` (chain `31337`; port `8577`, or `ANVIL_PORT`), mines `DeployDevAnvil.s.sol`'s five transactions from anvil's first dev account, checks the receipts (status, `EIP-7825` gas limit, the `InferenceVerified` event with the `SPEC.md` §1.4 `runId`, and `verifyAndSettle`'s gas against its snapshot), prints their gas and stops the node. `make check` runs it too.
+`make anvil-demo` starts `anvil --hardfork osaka --enable-tx-gas-limit` (chain `31337`; port `8577`, or `ANVIL_PORT`), mines `DeployDevAnvil.s.sol`'s five transactions from anvil's first dev account, checks the receipts (status, `EIP-7825` gas limit, the `InferenceVerified` event with the `SPEC.md` §1.4 `runId`, `verifyAndSettle`'s gas against its snapshot, and its execution gas, from `trace_transaction`, against `settle_execution_gas` in the script, since the settle transaction pays the `EIP-7623` calldata floor), prints their gas and stops the node. `make check` runs it too.
 
 ### 3. Deploy to Hoodi (`560048`) (M4)
 

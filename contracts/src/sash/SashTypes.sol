@@ -23,6 +23,7 @@ library SashTypes {
         bytes32 modelRoot;
         bytes32 residualInRoot;
         bytes32 residualOutRoot;
+        bytes32 fixedHash;
     }
 
     error ZeroOwner();

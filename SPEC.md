@@ -1,13 +1,13 @@
 # Protocol and Contract Specification (`SPEC.md`)
 
-Version: `0.3.0` (2026-10-27)
+Version: `0.4.0` (2026-10-29)
 Pinned upstream SASH revision: `sg-ai-safety-hub/zk-inference-prover @ eb95bfa887299d1637550228d42086c27cbb2b3b`
 Stwo as run by SASH: the vendored `nitroo/` copy in `zk-inference-prover @ eb95bfa`. It equals `AntChainOpenLabs/NitrooZK-stwo @ 41c2a05bdb1fc3e3762bc7804108e8bc269bb6fc` for the field, channel, Merkle and FRI primitives, and differs in `nitroo/crates/stwo/src/core/pcs/verifier.rs`, `nitroo/crates/stwo/src/core/verifier.rs`, `nitroo/crates/stwo/src/core/air/components.rs` and `nitroo/crates/constraint-framework`.
 Files patched against `eb95bfa` for the segment guests' verifier build (§1.1), by `sp1/patches/`: `nitroo/crates/stwo/build.rs`, `nitroo/crates/constraint-framework/src/lib.rs`, `nitroo/crates/stwo/src/core/mod.rs`, `nitroo/crates/stwo/src/core/lookups/{mod,gkr_verifier,sumcheck,utils}.rs` (new), `nitroo/crates/stwo/src/prover/lookups/{gkr_verifier,sumcheck,utils}.rs`, `prover/src/gkr_key_tile.rs`, `prover/src/gkrlink.rs`, and for the `zk-prover` cfg-split `prover/Cargo.toml`, `prover/build.rs`, `prover/src/bf16.rs`, `prover/src/boundary.rs`, `prover/src/common.rs`, `prover/src/compose.rs`, `prover/src/encoding.rs`, `prover/src/gadgets/argmax/mod.rs`, `prover/src/gadgets/attention/air.rs`, `prover/src/gadgets/attention/mod.rs`, `prover/src/gadgets/attention/trace.rs`, `prover/src/gadgets/attention/witness.rs`, `prover/src/gadgets/attn_out/air.rs`, `prover/src/gadgets/attn_out/claims.rs`, `prover/src/gadgets/attn_out/mod.rs`, `prover/src/gadgets/attn_out/trace.rs`, `prover/src/gadgets/dequant/claims.rs`, `prover/src/gadgets/dequant/mod.rs`, `prover/src/gadgets/dequant/trace.rs`, `prover/src/gadgets/embed/mod.rs`, `prover/src/gadgets/freivalds/claims.rs`, `prover/src/gadgets/freivalds/mod.rs`, `prover/src/gadgets/freivalds/trace.rs`, `prover/src/gadgets/requant/mod.rs`, `prover/src/gadgets/requant/tables.rs`, `prover/src/gadgets/residual_stream/mod.rs`, `prover/src/gadgets/residual_stream/witness.rs`, `prover/src/gadgets/rope/mod.rs`, `prover/src/gadgets/rope/witness.rs`, `prover/src/layer.rs`, `prover/src/lib.rs`, `prover/src/relations.rs`, `prover/src/util.rs`, for the `verify_composed` split `prover/src/compose.rs`, and for the `count-ops` counter `nitroo/crates/stwo/Cargo.toml`, `nitroo/crates/stwo/src/core/vcs/{blake2_hash,blake2_merkle,mod}.rs` and `nitroo/crates/stwo/src/core/vcs/count_ops.rs` (new).
 
 ## 1. Proved statement and settlement digests
 
-This section is the requirement the M2 segment guests and the M3 aggregator guest must meet. The segment guest (`sp1/segment-guest`) implements §1.1; the aggregator guest does not exist yet. The contracts implement §1.3 and §2 as written. Binding each segment's `fixedHash` (§1.1) into the segment claim, `manifestRootsHash` and `publicDigest` is a planned M2 change to §1.3, not implemented yet.
+This section is the requirement the M2 segment guests and the M3 aggregator guest must meet. The segment guest (`sp1/segment-guest`) implements §1.1; the aggregator guest does not exist yet. The contracts implement §1.3 and §2 as written.
 
 ### 1.1 Segment guests (M2)
 
@@ -45,7 +45,7 @@ These formats come from measurements (`docs/EVM-GAS-MODEL.md` §6.2). Decoding `
 
 Relation draws, challenge counts and the GKR instance list come only from the `Plan` of the parsed `params`, never from the proof.
 
-**`fixedHash`.** Decided: the guest commits the hash of the whole `Fixed` statement, and the manifest pins it. `fixedHash = sha256(serde_json::to_vec(&Fixed { tok_in: vec![], tok_out: vec![], ..parsed }))`, over the parsed struct, never the input bytes (serde drops unknown fields). It covers all of `Fixed`, not only `params`: `sizes_ok` skips tree 0, the verifier build never reads `layer` or `model`, and `block` is compared only with `rope.pos0` (`nn_pos_ok`, which passes when either is absent). The guest never reads a pin or a hash from its input, so one guest program serves every model.
+**`fixedHash`.** Decided: the guest commits the hash of the whole `Fixed` statement, and the manifest pins it. `fixedHash = sha256(serde_json::to_vec(&Fixed { tok_in: vec![], tok_out: vec![], ..parsed }))`, over the parsed struct, never the input bytes (serde drops unknown fields). It covers all of `Fixed`, not only `params`: `sizes_ok` skips tree 0, the verifier build never reads `layer` or `model`, and `block` is compared only with `rope.pos0` (`nn_pos_ok`, which passes when either is absent). The guest never reads a pin or a hash from its input, so one guest program serves every model: `fixedHash` is the last field of the segment claim, and `manifestRootsHash` (§1.3) compares it with the enrolled pin on-chain.
 
 **Segment public values.** After rule 7, the guest commits 226 bytes (`SegmentPublicValues` in `crates/sash-evm-primitives/src/segment.rs` encodes and decodes them) with `sp1_zkvm::io::commit_slice` (never `commit`, which is bincode, and never `sp1-zkvm`'s `blake3` feature: the aggregator verifies each segment proof with `verify_sp1_proof(vkey, sha256(publicValues))`, so the public-values digest must be sha256).
 
@@ -61,7 +61,7 @@ Relation draws, challenge counts and the GKR instance list come only from the `P
 | 194 | 32 | `tokOutHash` | `tokenHash(Fixed.tok_out)` on the segment that composes the argmax (`head`); else 32 zero bytes |
 
 - Roots are the 32 raw bytes of the `Blake2sHash`, not its hex string.
-- Bytes `0..130` are the §1.3 segment claim. Once the planned `fixedHash` binding lands, bytes `0..162` are the claim.
+- Bytes `0..162` are the §1.3 segment claim.
 - The K/V (`Axis::Token`) boundary-side roots (commitments 6 and up) are not output. That is sound only because `S = 32` is the single token block `B0`; a multi-block run needs them.
 
 ### 1.2 Aggregator guest (M3) and settlement
@@ -77,9 +77,9 @@ The aggregator verifies all `N` segment proofs and commits `publicDigest` (§1.3
 All hashes are `sha256`. `be16` / `be32` are big-endian `uint16` / `uint32`. sha256 is used rather than keccak256: keccak256 would save only an estimated ~2k gas per settlement.
 
 - **Token ids:** `tokenHash(ids) = sha256(word(ids[0]) || ... || word(ids[k-1]))`, where `word(id)` is the 32-byte big-endian encoding of the `uint32` id (28 zero bytes, then `be32(id)`). This is Solidity's `sha256(abi.encodePacked(uint32[]))`. The same encoding gives `tokInHash = tokenHash(tokIn)`, `tokOutHash = tokenHash(tokOut)`, `promptHash = tokenHash(promptIds)` and `answerHash = tokenHash(answerIds)`.
-- **Segment claim** (`130` bytes): `claim(i) = be16(segmentIndex) || preRoot || modelRoot || residualInRoot || residualOutRoot`.
-- **`manifestRootsHash`** (`64 * N` bytes hashed): `sha256(preRoot[0] || modelRoot[0] || ... || preRoot[N-1] || modelRoot[N-1])`.
-- **`publicDigest`** (`100 + 130 * N` bytes hashed): `sha256(modelId || be32(N) || claim(0) || ... || claim(N-1) || tokInHash || tokOutHash)`.
+- **Segment claim** (`162` bytes): `claim(i) = be16(segmentIndex) || preRoot || modelRoot || residualInRoot || residualOutRoot || fixedHash`, the first 162 bytes of segment `i`'s public values (§1.1).
+- **`manifestRootsHash`** (`96 * N` bytes hashed): `sha256(preRoot[0] || modelRoot[0] || fixedHash[0] || ... || preRoot[N-1] || modelRoot[N-1] || fixedHash[N-1])`.
+- **`publicDigest`** (`100 + 162 * N` bytes hashed): `sha256(modelId || be32(N) || claim(0) || ... || claim(N-1) || tokInHash || tokOutHash)`.
 - **`runId`:** `sha256(modelId || publicDigest || promptHash || answerHash)`.
 - **`modelId`** (fixture convention): `sha256("<model>@<revision>:<profile>")`.
 
@@ -88,13 +88,13 @@ All hashes are `sha256`. `be16` / `be32` are big-endian `uint16` / `uint32`. sha
 Taken from an unpublished SASH run whose 23 proof bundles the segment guest verifies in the SP1 executor (`make sp1-execute`, `docs/EVM-GAS-MODEL.md` §7); `sp1/pins/tinyllama.fixed.sha256` pins each segment's `fixedHash`. The run is `AbdelStark/hallmark`'s TinyLlama case: its recipe (`make e2e-llm` at hallmark `675c99af66067d129dac30d6acc6612f4e392e68`) regenerates the 69 bundle files byte for byte, and `sp1/pins/tinyllama.sha256` pins them (`make bundles-check`). The case: `TinyLlama/TinyLlama-1.1B-Chat-v1.0 @ fe8a4ea1ffedaf415f4da2f062534de366a451e6`, profile `y-attnout-w12`, `N = 23`, `S = 32` (`25` prompt + `8` answer tokens ending at EOS `2`), prompt `"Name the capital of France in one short sentence."`, response `"The capital of France is Paris."`. `contracts/src/sash/TinyLlamaFixture.sol` is generated from `crates/sash-evm-primitives/src/tinyllama_fixture.rs` (`make vectors`), and regenerated byte for byte from the 23 bundles: `make sp1-fixture-check` renders it from the public values the segment guest commits on them (`sp1-host fixture-from-bundles`). That comparison does not cover `modelId`, `EOS_TOKEN_ID` or the prompt and response text, which come from enrollment, not from the proofs, and which `fixture-from-bundles` takes from `tinyllama_fixture.rs`.
 
 - `modelId` = `sha256("TinyLlama/TinyLlama-1.1B-Chat-v1.0@fe8a4ea1ffedaf415f4da2f062534de366a451e6:y-attnout-w12")` = `0x3def3a0832d3d82a82283200010c182132ac7d9eec681b772a95834f29e43c2a`
-- `manifestRootsHash` = `0xfd8ecd8c79795b3a79e426d60a912d0a8a160188539c9b12dd3803b249c55b26`
+- `manifestRootsHash` = `0x5537541600ba4323d8f27606150c5583e689ca527590d33cd3d3b20bb04de646`
 - `tokInHash` = `0x3e683ee8603b85a4f5407e1af5f20a437ddadc9c098acc6aac357d533d3f32cb`
 - `tokOutHash` = `0x44c6f339d896d66ea25d0ca6e15214f596ef5c701db79be94232be51d29b6b1e`
-- `publicDigest` = `0x8c27cadf1bc21512bbb76eb63b23699b9af32d18b92d7cdf5a90a489b8000c6b`
+- `publicDigest` = `0xcf52e19e82f82680f0098ab435b52e22512f3d634bd7a947d32abc76d067b3ef`
 - `promptHash` = `0xb4d5730f21772191057fb4600dc73dfdf0350fab6996c7b12d1d1ca7b83b9ec1`
 - `answerHash` = `0xaed36ba9347820959ae88d81e8c45a733e404b199fb3c12a463e2301253934c8`
-- `runId` = `0x0f614a4f82d3c3656dc9b15b897a5b07f621b312f5e37ae58c42b7391223e430`
+- `runId` = `0x058d7f0512ac5fa539c1c21941f2bde128e85cedb4106adcff30e601d41d6b28`
 
 ## 2. Solidity contract interfaces and negative controls
 
@@ -106,7 +106,7 @@ Taken from an unpublished SASH run whose 23 proof bundles the segment guest veri
 
 Each control runs only in the suites it lists, and MUST fail there with the listed error: a revert in Foundry, a `GridError` in Rust, a `Reject` variant in the segment guest.
 
-- **Grid-level controls** (1–5, 10–13, 16) run in both suites. Foundry submits each with a dev proof for its own `publicDigest`, so the revert comes from the grid check, not the proof check.
+- **Grid-level controls** (1–5, 10–13, 16, 21) run in both suites. Foundry submits each with a dev proof for its own `publicDigest`, so the revert comes from the grid check, not the proof check.
 - **Settlement-level controls** (6, 7, 17–20, F) run in Foundry only. They exercise the segment verifier, verifier gating or replay protection, which have no Rust counterpart.
 - **Guest-level controls** (G1–G8, the second table) run natively and in the SP1 executor (M2). Each makes the segment check return the listed `Reject` (§1.1) and the guest exit 1 with a panic message naming it. Native tests are in `sp1/sash-segment-check`: unit tests (`src/tests.rs`, on constructed statements, binding tables, dequant `Spec`s and `Verdict`s) and bundle tests (`tests/bundles.rs`, mutations of the synthetic corpus' positive bundles, run in the `sash` CI job). The executor tests (`sp1/sp1-host/tests/segment_guest.rs`, run in the `sp1` or `sp1-cached` CI job) run the segment guest on every corpus bundle and every bundle mutation of `tests/bundles.rs`; the unit tests' constructed controls and G8, which no bundle reaches, run natively only. `make sp1-execute` (`sp1-host controls`) also runs G2 and G7 on modified copies of the real TinyLlama bundles, natively and in the executor: `tok_in[0] + P` on `B0L0` and `tok_out[0] + P` on `head` (G2), and a queried value of `B0L10`'s proof and an `ao_out` value of its claims changed (G7).
 - Numbers 8, 9, 14 and 15 are retired and not reused.
@@ -129,6 +129,7 @@ Each control runs only in the suites it lists, and MUST fail there with the list
 | 18 | against `StubSp1Gateway` (checks the vkey and the proof bytes): a proof for a wrong `programVKey`; an adapter pinned to a wrong `programVKey`, with a proof valid for the gateway's | — | `StubSp1Gateway.BadSp1Proof()` | Foundry | `testNegative18_WrongSp1VKeyProofReverts` |
 | 19 | dev verifier with `allowDevVerifier == false`; dev verifier on Sepolia (`11155111`) | — | `DevVerifierForbidden()`; `DevChainOnly(11155111)` | Foundry | `testNegative19_DevVerifierBlockedOnSepoliaAndWhenDisallowed` |
 | 20 | the same run settled twice | — | `RunAlreadySettled(runId)` | Foundry | `testNegative20_DuplicateRunReplayReverts` |
+| 21 | `segments[22].fixedHash` low bit flipped | `ManifestRootMismatch` | `ManifestRootMismatch(rootsHash, manifestRootsHash)` | Rust, Foundry | `control_21_forged_fixed_hash` · `testNegative21_ForgedFixedHashReverts` |
 | F | fuzz: one of `modelId`, any `SegmentClaim` field, any element of `tokIn` / `tokOut` / `promptIds` / `answerIds`, or one proof byte XORed with a non-zero mask; original dev proof, never re-derived | — | any revert | Foundry | `testFuzzSingleFieldMutationReverts` (seed fixed under `[fuzz]` in `contracts/foundry.toml`) |
 
 | # | Mutation | `Reject` | Native tests (unit · bundle) | SP1 executor test |

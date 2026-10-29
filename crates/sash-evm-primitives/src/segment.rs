@@ -7,13 +7,13 @@
 pub const SEGMENT_PUBLIC_VALUES_LEN: usize = 226;
 
 /// Length of the §1.3 segment claim, the first bytes of the public values.
-pub const SEGMENT_CLAIM_LEN: usize = 130;
+pub const SEGMENT_CLAIM_LEN: usize = 162;
 
 /// One accepted segment's public values. Every hash and root is 32 raw bytes.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SegmentPublicValues {
-    // `segmentIndex`, `preRoot`, `modelRoot`, `residualInRoot`, `residualOutRoot`: bytes `0..130`,
-    // the §1.3 segment claim.
+    // `segmentIndex`, `preRoot`, `modelRoot`, `residualInRoot`, `residualOutRoot`, `fixedHash`:
+    // bytes `0..162`, the §1.3 segment claim.
     pub segment_index: u16,
     pub pre_root: [u8; 32],
     pub model_root: [u8; 32],
@@ -84,10 +84,9 @@ mod tests {
     use crate::tinyllama_fixture::*;
     use crate::token::compute_token_hash;
 
-    /// Public values carrying `claim`, with the three hashes after it.
+    /// Public values carrying `claim`, with the two token hashes after it.
     fn with_claim(
         claim: &SegmentClaim,
-        fixed_hash: [u8; 32],
         tok_in_hash: [u8; 32],
         tok_out_hash: [u8; 32],
     ) -> SegmentPublicValues {
@@ -97,21 +96,15 @@ mod tests {
             model_root: claim.model_root,
             residual_in_root: claim.residual_in_root,
             residual_out_root: claim.residual_out_root,
-            fixed_hash,
+            fixed_hash: claim.fixed_hash,
             tok_in_hash,
             tok_out_hash,
         }
     }
 
-    /// No `fixedHash` is in the fixture yet; a stand-in that differs from every other field.
-    fn stand_in_fixed_hash(tag: &str) -> [u8; 32] {
-        Sha256::digest(format!("fixed statement of {tag}")).into()
-    }
-
     fn b0l0() -> SegmentPublicValues {
         with_claim(
             &tinyllama_segments()[0],
-            stand_in_fixed_hash("B0L0"),
             compute_token_hash(&TINYLLAMA_TOK_IN),
             [0; 32],
         )
@@ -120,7 +113,6 @@ mod tests {
     fn head() -> SegmentPublicValues {
         with_claim(
             &tinyllama_segments()[22],
-            stand_in_fixed_hash("head"),
             [0; 32],
             compute_token_hash(&TINYLLAMA_TOK_OUT),
         )
@@ -162,7 +154,7 @@ mod tests {
         assert_eq!(SegmentPublicValues::decode(&e22), Ok(head));
     }
 
-    /// Bytes `0..130` are the §1.3 segment claim: the 23 TinyLlama claims cut from their public
+    /// Bytes `0..162` are the §1.3 segment claim: the 23 TinyLlama claims cut from their public
     /// values give `SPEC.md` §1.4's `publicDigest`.
     #[test]
     fn claim_bytes_give_the_spec_public_digest() {
@@ -170,14 +162,14 @@ mod tests {
         h.update(tinyllama_model_id());
         h.update(23u32.to_be_bytes());
         for claim in tinyllama_segments() {
-            let v = with_claim(&claim, [0xff; 32], [0xff; 32], [0xff; 32]);
+            let v = with_claim(&claim, [0xff; 32], [0xff; 32]);
             h.update(&v.encode()[..SEGMENT_CLAIM_LEN]);
         }
         h.update(compute_token_hash(&TINYLLAMA_TOK_IN));
         h.update(compute_token_hash(&TINYLLAMA_TOK_OUT));
         assert_eq!(
             hex::encode(h.finalize()),
-            "8c27cadf1bc21512bbb76eb63b23699b9af32d18b92d7cdf5a90a489b8000c6b"
+            "cf52e19e82f82680f0098ab435b52e22512f3d634bd7a947d32abc76d067b3ef"
         );
     }
 
