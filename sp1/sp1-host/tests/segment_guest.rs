@@ -39,13 +39,32 @@ fn rejects_with(name: &str, run: &Execution, variant: &str) {
     eprintln!("{name}: exit 1, {variant}, {} cycles", run.cycles);
 }
 
-/// The corpus bundles that pass rules 1 to 7: block 0 with a 128-key prefix (`SPEC.md` §2.1 G10).
-/// The guest verifies them and rejects them at the last rule.
+/// The corpus bundles that pass rules 1 to 7 and publish no token vector: block 0 with a 128-key
+/// prefix (`SPEC.md` §2.1 G10). The guest verifies them and rejects them at the last rule.
 #[test]
 #[ignore = "needs the synthetic corpus in SASH_SYNTHETIC_CORPUS (sp1 or sp1-cached CI job)"]
 fn prefix_bundles_reject() {
     for tag in ["sound_aligned", "aligned_gkr5"] {
         rejects_with(tag, &run(&Bundle::load(tag)), "NotSingleBlock");
+    }
+}
+
+/// The bundles that publish a token vector (`sp1/patches/0007`), whose forgeries are G9's mutations:
+/// the guest verifies them, token binding included, and rejects them at the last rule (`SPEC.md`
+/// §2.1 G9, G10). A guest whose verifier dropped patch 0006's mix would reject them at rule 6.
+#[test]
+#[ignore = "needs the synthetic corpus in SASH_SYNTHETIC_CORPUS (sp1 or sp1-cached CI job)"]
+fn token_bundles_verify() {
+    for tag in ["embed", "head_argmax"] {
+        let run = run(&Bundle::load(tag));
+        rejects_with(tag, &run, "NotSingleBlock");
+        // The guest's `{reject:?}` line, before its panic: block 0 with a 128-key prefix.
+        assert!(
+            run.stderr
+                .contains("NotSingleBlock { block: Some(0), prefix: 128 }"),
+            "{tag}: stderr: {}",
+            run.stderr
+        );
     }
 }
 

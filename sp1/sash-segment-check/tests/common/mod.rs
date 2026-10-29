@@ -10,10 +10,12 @@ use std::sync::OnceLock;
 use std::{env, fs};
 
 use sash_evm_primitives::tinyllama_fixture::TINYLLAMA_TOK_IN;
+use sash_segment_check::forge::{Transcript, Vector, forge};
 use sash_segment_check::{P, Reject, SegmentPublicValues, check_segment};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use zk_prover::common::Proof;
+use zk_prover::compose::{Claims, Fixed};
 
 /// The corpus directory, from `SASH_SYNTHETIC_CORPUS`. Unset is a failure, never a skip. Its files
 /// are checked against `sp1/testdata/synthetic.sha256` once per test binary.
@@ -52,9 +54,11 @@ pub fn oracle_records() -> &'static BTreeMap<String, Value> {
     })
 }
 
-pub const BUNDLES: [&str; 8] = [
+pub const BUNDLES: [&str; 10] = [
     "sound_aligned",
     "aligned_gkr5",
+    "embed",
+    "head_argmax",
     "sound_gkrfive",
     "skip_residual_stream",
     "skip_layer_boundary",
@@ -139,8 +143,8 @@ impl Outcome {
     }
 }
 
-/// A mutation of a bundle that passes rules 1 to 7 (`sound_aligned`, `aligned_gkr5`) that stays
-/// structurally valid, and the variant `check_segment` must return for it.
+/// A mutation of a bundle that passes rules 1 to 7 (`sound_aligned`, `aligned_gkr5`, `embed`,
+/// `head_argmax`) that stays structurally valid, and the variant `check_segment` must return for it.
 pub struct Mutation {
     pub name: &'static str,
     pub base: &'static str,
@@ -162,7 +166,23 @@ fn flip_hex_digit(v: &mut Value) {
     *v = json!(format!("{}{last}", &s[..s.len() - 1]));
 }
 
-pub const MUTATIONS: [Mutation; 19] = [
+/// G9 (`SPEC.md` §2.1): the published `vector` forged so that its Horner sum under the `w` the
+/// bundle was proved with stays the claimed one (`sash_segment_check::forge`). The corpus is proved
+/// with patch 0006, so that `w` must be the one drawn after the honest vectors are mixed.
+fn forge_vector(b: &mut Bundle, vector: Vector) {
+    let fixed: Fixed = serde_json::from_slice(&b.fixed).unwrap();
+    let claims: Claims = serde_json::from_slice(&b.claims).unwrap();
+    let proof: Proof = serde_json::from_slice(&b.proof).unwrap();
+    let forged = forge(&fixed, &claims, &proof, vector)
+        .unwrap_or_else(|e| panic!("G9 forgery of {}: {e}", vector.key()));
+    assert!(
+        matches!(forged.transcript, Transcript::TokensMixed),
+        "the corpus bundle's w is upstream's: its prover did not mix the token vectors"
+    );
+    b.edit_fixed(|f| f[vector.key()] = json!(forged.ids));
+}
+
+pub const MUTATIONS: [Mutation; 21] = [
     Mutation {
         name: "merkle_hash_flipped",
         base: "sound_aligned",
@@ -308,6 +328,20 @@ pub const MUTATIONS: [Mutation; 19] = [
         base: "sound_aligned",
         apply: |b| b.edit_fixed(|f| f["layer"] = json!(2)),
         expect: "NotSingleBlock",
+    },
+    Mutation {
+        // G9: `tok_in[25]` = 450 and `tok_in[1..=4]` solved under the bundle's own `w`.
+        name: "embed_tok_in_horner_forged",
+        base: "embed",
+        apply: |b| forge_vector(b, Vector::TokIn),
+        expect: "NotAccepted",
+    },
+    Mutation {
+        // G9: `tok_out[24]` = 450 and `tok_out[0..=3]` solved under the bundle's own `w`.
+        name: "head_argmax_tok_out_horner_forged",
+        base: "head_argmax",
+        apply: |b| forge_vector(b, Vector::TokOut),
+        expect: "NotAccepted",
     },
     Mutation {
         name: "aligned_gkr5_pre_root_changed",

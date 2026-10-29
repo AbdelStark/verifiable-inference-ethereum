@@ -123,6 +123,24 @@ fn tinyllama_token_raised_by_p() {
     );
 }
 
+/// `SPEC.md` §1.1's transcript words (patch 0006): `len(tok_in) || tok_in || len(tok_out) || tok_out`
+/// as exact `u32`s, nothing when both vectors are empty. An id `P + k` stays distinct from `k`, and
+/// moving an id from one vector to the other changes the words.
+#[test]
+fn token_transcript_words_bind_both_vectors_exactly() {
+    use zk_prover::compose::token_transcript_words as words;
+    assert_eq!(words(&[], &[]), None);
+    assert_eq!(words(&[5, 6], &[7]), Some(vec![2, 5, 6, 1, 7]));
+    assert_eq!(words(&[], &[9]), Some(vec![0, 1, 9]));
+    assert_ne!(words(&[P + 3], &[]), words(&[3], &[]));
+    assert_ne!(words(&[5, 6], &[7]), words(&[5], &[6, 7]));
+    let tinyllama = words(&TINYLLAMA_TOK_IN, &TINYLLAMA_TOK_OUT).unwrap();
+    assert_eq!(tinyllama.len(), 2 + 2 * 32);
+    assert_eq!((tinyllama[0], tinyllama[33]), (32, 32));
+    assert_eq!(tinyllama[1..33], TINYLLAMA_TOK_IN);
+    assert_eq!(tinyllama[34..], TINYLLAMA_TOK_OUT);
+}
+
 #[test]
 fn security_params_drifted() {
     let drifts: [fn(&mut Fixed); 3] = [

@@ -1,5 +1,6 @@
-//! The extracted verifier against upstream's (`sp1/sash-oracle`: upstream `verify_composed`, default
-//! features, no calibration), on every corpus bundle and every mutation of `common::MUTATIONS`. Run
+//! The extracted verifier against upstream's (`sp1/sash-oracle`: upstream `verify_composed` with only
+//! patch 0006, default features, no calibration), on every corpus bundle and every mutation of
+//! `common::MUTATIONS`, so that the extraction (patches 0001-0005) is checked to keep the verdict. Run
 //! in the `sash` CI job and by `make sash-synthetic`, with `SASH_SYNTHETIC_CORPUS` and, for the
 //! live oracle, `SASH_ORACLE` (the built `sash-oracle` binary).
 
@@ -146,6 +147,8 @@ fn check_segment_agrees_with_the_oracle() {
     let want: BTreeSet<String> = [
         "sound_aligned",
         "aligned_gkr5",
+        "embed",
+        "head_argmax",
         "layer_1_to_2",
         "sound_gkrfive",
         "skip_residual_stream",

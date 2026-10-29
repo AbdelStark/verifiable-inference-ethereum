@@ -1,0 +1,139 @@
+Mix the published token vectors into the Fiat-Shamir transcript.
+
+Part of the SASH eb95bfa build that verifiable-inference-ethereum proves and
+verifies with (SPEC.md §1.1). Unlike patches 0001-0005 it changes behaviour, on
+both sides: the prover that makes the bundles and the verifier that checks them.
+Upstream source is Apache-2.0; this patch modifies it (Apache-2.0 §4(b)).
+
+Upstream never mixes `Fixed.tok_in` or `Fixed.tok_out` into the channel.
+`embed_tok_ok` and `head_tok_ok` compare their Horner sums under
+`w_residual_stream` with `claims.embed_tok` and `claims.head_tok`, but `w` is
+drawn from a transcript the published vectors never entered. Anyone holding a
+valid bundle can replay the transcript to `w`, change any token positions and
+solve one QM31 equation (four linear equations over M31) for four slack
+positions: the claims and every commitment stay as they were and the verifier
+accepts the forged vectors.
+
+- prover/src/compose.rs: `pub fn token_transcript_words(tok_in, tok_out)`
+  returns `len(tok_in) || tok_in || len(tok_out) || tok_out` as exact `u32`
+  words, or `None` when both vectors are empty. `verify_composed` (here
+  `verify_composed_parsed`) mixes the words of `fixed.tok_in` and
+  `fixed.tok_out` with `mix_u32s` right after committing tree 2 and before
+  `Rels::draw`, so every relation element and `w_residual_stream` depend on
+  them. The prover computes the two vectors it publishes before its first
+  relation draw, mixes the same words at the same position, and publishes the
+  same two vectors in `Fixed`.
+- prover/src/common.rs: `Op::MixU32s(Vec<u32>)` and `Session::mix_u32s`,
+  which mixes and records the words, and the arm that replays them in
+  `prove_raw`'s internal verification.
+
+A chunk that publishes neither vector mixes nothing, so its transcript, its
+proof and every digest upstream pins for it stay byte-identical. Only a chunk
+with the embedding or the argmax proves differently, and only a verifier with
+this patch accepts its proof.
+
+--- a/prover/src/common.rs
++++ b/prover/src/common.rs
+@@ -164,6 +164,8 @@
+     Felts(usize),
+     /// public values mixed into the transcript before the components are built
+     Mix(Vec<SecureField>),
++    /// exact `u32` words mixed into the transcript, i.e. `channel.mix_u32s`
++    MixU32s(Vec<u32>),
+ }
+ 
+ /// B7b (README 26): the crate's prover backend, for the tree cache and the
+@@ -408,6 +410,12 @@
+         self.ops.push(Op::Mix(vals.to_vec()));
+     }
+ 
++    /// Mix exact `u32` words into the transcript, recorded for replay.
++    pub fn mix_u32s(&mut self, words: &[u32]) {
++        self.channel.mix_u32s(words);
++        self.ops.push(Op::MixU32s(words.to_vec()));
++    }
++
+     /// Prove and hand the proof back for an *external* verifier -- the composed
+     /// proof's accept path is the serialized public-input check, never this
+     /// session's internal replay.
+@@ -500,6 +508,7 @@
+                     let _ = vchannel.draw_secure_felts(*n);
+                 }
+                 Op::Mix(vals) => vchannel.mix_felts(vals),
++                Op::MixU32s(words) => vchannel.mix_u32s(words),
+             }
+         }
+         let vres = verify(components, &mut vchannel, &mut vcs, proof);
+--- a/prover/src/compose.rs
++++ b/prover/src/compose.rs
+@@ -5797,6 +5797,15 @@
+         sess.commit(base_all.iter().map(|c| c.host().clone()).collect());
+     }
+     crate::util::add_phase("wall/commit_base", phase_t.elapsed().as_secs_f64());
++    // the token vectors `Fixed` publishes, mixed where `verify_composed` mixes
++    // them: after the base tree, before the first relation is drawn
++    let tok_in = emb_component.as_ref().map(|r| r.token_ids()).unwrap_or_default();
++    let tok_out = am_component.as_ref()
++        .map(|r| r.token_ids(p.mats[plan.argmax_mat().expect("the head matmul")].tokens))
++        .unwrap_or_default();
++    if let Some(words) = token_transcript_words(&tok_in, &tok_out) {
++        sess.mix_u32s(&words);
++    }
+     let widths = plan.widths.clone();
+     let rels = {
+         let exp = sess.draw_relation(ExpRel::draw);
+@@ -7119,10 +7128,8 @@
+         // and the tokens the argmax component emitted -- published so that a
+         // reader of two chunks can compare them position by position.  Each is
+         // pinned inside its own proof by the Horner claim beside it.
+-        tok_in: emb_component.as_ref().map(|r| r.token_ids()).unwrap_or_default(),
+-        tok_out: am_component.as_ref()
+-            .map(|r| r.token_ids(p.mats[plan.argmax_mat().expect("the head matmul")].tokens))
+-            .unwrap_or_default(),
++        tok_in,
++        tok_out,
+     };
+     Proved::Composed(Box::new(Composed {
+         proof,
+@@ -7419,6 +7426,28 @@
+     }
+ }
+ 
++/// The words the published token vectors enter the transcript as:
++/// `len(tok_in) || tok_in || len(tok_out) || tok_out`, each id as its exact
++/// `u32`, so an id `>= P` cannot alias its residue and no split of the ids
++/// between the two vectors collides with another.  The prover and
++/// `verify_composed` mix them after tree 2 and before the first relation is
++/// drawn, so `w_residual_stream`, under which `embed_tok` and `head_tok` are
++/// Horner images of these vectors, is drawn after the vectors are fixed.
++/// `None` when both are empty: a chunk that publishes neither vector (no
++/// embedding, no argmax) mixes nothing, and its transcript is unchanged.
++pub fn token_transcript_words(tok_in: &[u32], tok_out: &[u32]) -> Option<Vec<u32>> {
++    if tok_in.is_empty() && tok_out.is_empty() {
++        return None;
++    }
++    let len = |v: &[u32]| u32::try_from(v.len()).expect("a token vector longer than u32::MAX");
++    let mut words = Vec::with_capacity(2 + tok_in.len() + tok_out.len());
++    words.push(len(tok_in));
++    words.extend_from_slice(tok_in);
++    words.push(len(tok_out));
++    words.extend_from_slice(tok_out);
++    Some(words)
++}
++
+ /// The only accept path: three byte strings in, a verdict out.  Replays the
+ /// transcript, pins the preprocessed root, recomputes every power and boundary
+ /// multiplier from its own challenges, and runs stwo's verify -- no prover
+@@ -7506,6 +7535,12 @@
+     vcs.commit(proof.commitments[0], &fixed.sizes[0], &mut ch);
+     vcs.commit(proof.commitments[1], &fixed.sizes[1], &mut ch);
+     vcs.commit(proof.commitments[2], &fixed.sizes[2], &mut ch);
++    // the published token vectors, before any challenge: the Horner checks of
++    // `embed_tok_ok` and `head_tok_ok` below bind them only because
++    // `w_residual_stream` is drawn after this mix (`token_transcript_words`)
++    if let Some(words) = token_transcript_words(&fixed.tok_in, &fixed.tok_out) {
++        ch.mix_u32s(&words);
++    }
+     let rels = Rels::draw(&mut ch, &plan.widths, plan.residual_stream.as_ref().map(|g| g.uns.as_slice()),
+                           plan.emb.map(|l| l.arity()),
+                           plan.needs_rq_rels(), plan.q_tabs.len());

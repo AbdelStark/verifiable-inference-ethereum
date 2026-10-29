@@ -43,7 +43,7 @@ hex = "0.4.3"
 libc = "0.2.191"
 postcard = { workspace = true, optional = true }
 sash-evm-primitives.workspace = true
-sash-segment-check.workspace = true
+sash-segment-check = { workspace = true, features = ["forge"] }
 serde_json.workspace = true
 sha2 = "0.10.9"
 sp1-sdk = { workspace = true, features = ["cuda"] }

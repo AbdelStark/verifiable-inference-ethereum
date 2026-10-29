@@ -6,13 +6,15 @@ mod common;
 
 use common::{Bundle, MUTATIONS, Outcome, oracle_records};
 use sash_segment_check::{Reject, SegmentPublicValues, check_statement, check_verdict};
+use serde_json::Value;
 use sha2::{Digest, Sha256};
 use zk_prover::common::Proof;
 use zk_prover::compose::{Claims, Fixed, Verdict, verify_composed_parsed};
 
-/// The public values `check_verdict` gives the two bundles that pass rules 1 to 7, pinned.
+/// The public values `check_verdict` gives `sound_aligned` and `aligned_gkr5`, pinned.
 /// `derived_public_values` re-derives them without the segment check. `check_segment` rejects both
-/// at rule 8: they are block 0 with a 128-key prefix (`--ctx 128`).
+/// at rule 8, as it does `embed` and `head_argmax`: all four are block 0 with a 128-key prefix
+/// (`--ctx 128`).
 const SOUND_ALIGNED: &str = "0001a215b612fae4857872a1bd4411b90a4a82f5e44c345760717ef3ea2936cf76177bf74a44901bf3333e8fd63148615062be8f58546b902c5f687d0b479739154728211a225a72e4084c4e004cbf447936ee80ec6fb7ee807a68263101e01e6b2fe3af1f6b83609f513230b12f4b194b10d4fcfa1c08a8b253745f9e67edb0d942f3b0dd78edd308a62a56b952819cc91ca6dfbab3945da6b8036d2995d5deef7000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
 const ALIGNED_GKR5: &str = "0001aa02a375b333326a89a9650203c58340f56ae7443c83960661840f474daf366b7bf74a44901bf3333e8fd63148615062be8f58546b902c5f687d0b479739154728211a225a72e4084c4e004cbf447936ee80ec6fb7ee807a68263101e01e6b2fe3af1f6b83609f513230b12f4b194b10d4fcfa1c08a8b253745f9e67edb0d94218d5d7714086769726175164b6a7edc9a23da972f72512e02d4042cff7f5bdcb00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
 
@@ -20,25 +22,48 @@ const ALIGNED_GKR5: &str = "0001aa02a375b333326a89a9650203c58340f56ae7443c839606
 /// hand from:
 /// - `segmentIndex`, `preRoot`, `modelRoot`: `fixed.json`'s `layer`, `pre_root`, `model_root`;
 /// - `residualInRoot`, `residualOutRoot`: the `(layer, in)` and `(layer, out)` roots of upstream's
-///   `boundary_sides` in `sp1/testdata/synthetic.oracle.json`;
+///   `boundary_sides` in `sp1/testdata/synthetic.oracle.json`, the out root zero on the head;
 /// - `fixedHash`: sha256 of the parsed `Fixed`, `tok_in` and `tok_out` cleared, re-serialized;
-/// - `tokInHash`, `tokOutHash`: zero, since the oracle's binding table has neither the embedding
-///   (edge 15) nor the argmax (edge 16).
+/// - `tokInHash`, `tokOutHash`: `SPEC.md` §1.3's `tokenHash` of `tok_in` or `tok_out` where the
+///   oracle's binding table has the embedding (edge 15) or the argmax (edge 16), else zero.
 fn derived_public_values(tag: &str) -> String {
     let bundle = Bundle::load(tag);
     let fixed = bundle.fixed_json();
     let record = &oracle_records()[tag];
     let absent: Vec<u64> = serde_json::from_value(record["binding"]["absent"].clone()).unwrap();
-    assert!(absent.contains(&15) && absent.contains(&16));
-    assert!(fixed.get("tok_in").is_none() && fixed.get("tok_out").is_none());
+    // `word(id)`: 28 zero bytes, then the id big-endian.
+    let token_hash = |edge: u64, key: &str| -> String {
+        let ids = fixed.get(key).and_then(Value::as_array);
+        if absent.contains(&edge) {
+            assert!(ids.is_none(), "{tag}: {key} without edge {edge}");
+            return "00".repeat(32);
+        }
+        let ids = ids.unwrap_or_else(|| panic!("{tag}: edge {edge} without {key}"));
+        assert!(!ids.is_empty(), "{tag}: {key} is empty");
+        let mut h = Sha256::new();
+        for id in ids {
+            h.update([0u8; 28]);
+            h.update(u32::try_from(id.as_u64().unwrap()).unwrap().to_be_bytes());
+        }
+        hex::encode(h.finalize())
+    };
 
-    let layer_side = |role: &str| -> String {
+    let layer_side = |role: &str| -> Option<String> {
         let sides = record["verdict"]["boundary_sides"].as_array().unwrap();
-        let side = sides
+        sides
             .iter()
             .find(|s| s["axis"] == "layer" && s["role"] == role && s["group"].is_null())
-            .unwrap_or_else(|| panic!("{tag}: no (layer, {role}) side"));
-        side["root"].as_str().unwrap().to_string()
+            .map(|side| side["root"].as_str().unwrap().to_string())
+    };
+    // The head (the argmax, edge 16) commits no out side: 32 zero bytes.
+    let out_root = if absent.contains(&16) {
+        layer_side("out").unwrap_or_else(|| panic!("{tag}: no (layer, out) side"))
+    } else {
+        assert!(
+            layer_side("out").is_none(),
+            "{tag}: a head with an out side"
+        );
+        "00".repeat(32)
     };
     let parsed: Fixed = serde_json::from_slice(&bundle.fixed).unwrap();
     let cleared = Fixed {
@@ -53,11 +78,11 @@ fn derived_public_values(tag: &str) -> String {
         hex::encode(layer.to_be_bytes()),
         fixed["pre_root"].as_str().unwrap().to_string(),
         fixed["model_root"].as_str().unwrap().to_string(),
-        layer_side("in"),
-        layer_side("out"),
+        layer_side("in").unwrap_or_else(|| panic!("{tag}: no (layer, in) side")),
+        out_root,
         fixed_hash,
-        "00".repeat(32),
-        "00".repeat(32),
+        token_hash(15, "tok_in"),
+        token_hash(16, "tok_out"),
     ]
     .concat()
 }
@@ -74,12 +99,13 @@ fn verified(bundle: &Bundle) -> (Fixed, Result<SegmentPublicValues, Reject>) {
     (fixed, values)
 }
 
-/// Rules 1 to 7 hold and give the pinned public values; rule 8 rejects: block 0, prefix 128.
-fn passes_rules_1_to_7_then_not_single_block(tag: &str, pinned: &str) {
-    assert_eq!(derived_public_values(tag), pinned);
+/// Rules 1 to 7 hold, the verifier's included, and give the public values `derived_public_values`
+/// lays out; rule 8 is the first to reject: block 0, prefix 128. Returns those public values.
+fn passes_rules_1_to_7_then_not_single_block(tag: &str) -> String {
+    let derived = derived_public_values(tag);
     let bundle = Bundle::load(tag);
     let (fixed, values) = verified(&bundle);
-    assert_eq!(hex::encode(values.unwrap().encode()), pinned, "{tag}");
+    assert_eq!(hex::encode(values.unwrap().encode()), derived, "{tag}");
     assert_eq!((fixed.block, fixed.params.c), (Some(0), 128), "{tag}");
     match bundle.check() {
         Outcome::Reject(Reject::NotSingleBlock { block, prefix }) => {
@@ -87,18 +113,44 @@ fn passes_rules_1_to_7_then_not_single_block(tag: &str, pinned: &str) {
         }
         other => panic!("{tag}: expected NotSingleBlock, got {other:?}"),
     }
+    derived
 }
 
 #[test]
 #[ignore = "needs the synthetic corpus in SASH_SYNTHETIC_CORPUS (sash CI job)"]
 fn sound_aligned_is_not_single_block() {
-    passes_rules_1_to_7_then_not_single_block("sound_aligned", SOUND_ALIGNED);
+    assert_eq!(
+        passes_rules_1_to_7_then_not_single_block("sound_aligned"),
+        SOUND_ALIGNED
+    );
 }
 
 #[test]
 #[ignore = "needs the synthetic corpus in SASH_SYNTHETIC_CORPUS (sash CI job)"]
 fn aligned_gkr5_is_not_single_block() {
-    passes_rules_1_to_7_then_not_single_block("aligned_gkr5", ALIGNED_GKR5);
+    assert_eq!(
+        passes_rules_1_to_7_then_not_single_block("aligned_gkr5"),
+        ALIGNED_GKR5
+    );
+}
+
+/// The two bundles that publish a token vector (`sp1/patches/0007`), each with its gadget's edge
+/// bound: `embed` (layer 0, edge 15, `tok_in`) and `head_argmax` (the head, edge 16, `tok_out`).
+/// Their forgeries are G9's mutations. Both pass rules 1 to 7, so the verifier accepts them and
+/// `check_verdict` gives their token hashes, and only rule 8 rejects them: a verifier that dropped
+/// patch 0006's mix would draw another `w_residual_stream` and reject them at rule 6.
+#[test]
+#[ignore = "needs the synthetic corpus in SASH_SYNTHETIC_CORPUS (sash CI job)"]
+fn token_bundles_verify() {
+    for (tag, key) in [("embed", "tok_in"), ("head_argmax", "tok_out")] {
+        let fixed = Bundle::load(tag).fixed_json();
+        assert_eq!(
+            fixed[key].as_array().map(Vec::len),
+            Some(32),
+            "{tag}: {key}"
+        );
+        passes_rules_1_to_7_then_not_single_block(tag);
+    }
 }
 
 /// The bundles upstream composes with an `--unsound-*` flag, or `sound_gkrfive`'s narrow shape:

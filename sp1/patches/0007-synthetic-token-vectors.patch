@@ -1,0 +1,115 @@
+Build synthetic layers that publish token vectors: an embedding and an argmax.
+
+Part of the SASH eb95bfa build that verifiable-inference-ethereum proves its
+synthetic bundle corpus with (SPEC.md §1.1). Prover only: both changes sit in
+the CLI and in layer.rs's `prover`-gated `impl Layer`, so the verifier build the
+segment guest runs is unchanged. Upstream source is Apache-2.0; this patch
+modifies it (Apache-2.0 §4(b)).
+
+No upstream synthetic layer has an embedding table or an argmax key column:
+the synthetic head proves with --unsound-skip-argmax, and a layer-0 synthetic
+chunk with --unsound-skip-embedding. So no synthetic bundle publishes a token
+vector, and patch 0006's token binding, which only a chunk with a token vector
+exercises, cannot be tested on the corpus.
+
+- prover/src/layer.rs: `Layer::synth_embed(vocab)` gives a synthetic layer
+  with the wiring family a `(vocab, d)` embedding table and `tok_in`: position
+  `t` reads id `(3 + 7 t) mod vocab` (distinct ids are asserted), whose row is
+  the family's own input row `t`; every other row is zero.
+  `Layer::synth_argmax(round)` gives a synthetic head chunk `head_keys`, the
+  order key of the `lm_head` dequant's output under the plan's spec (`deq_ref`
+  reads only `variant` and `round`, as `synth_family` already relies on), and
+  `head_tok`, each row's first maximum: what a dump's `key_head.u16` and
+  `tok_head.i32` hold.
+- prover/src/cli.rs: the switches `--synth-embed` (with `--synth-embed-vocab`,
+  default 64) and `--synth-argmax`, after `--synth-head`, like it
+  witness-construction switches: without them a synthetic layer composes
+  exactly as it always did, and every digest upstream pins is unchanged.
+
+--- a/prover/src/cli.rs
++++ b/prover/src/cli.rs
+@@ -1075,6 +1075,15 @@
+         l.synth_head(src.seed, arg_scalar(args, "--residual-stream-a", 32usize), round,
+                      arg_scalar(args, "--synth-vocab", 256usize));
+     }
++    // verifiable-inference-ethereum (patch 0007): a synthetic embedding and a
++    // synthetic argmax, so that a synthetic bundle publishes token vectors.
++    // Witness-construction switches like `--synth-head`.
++    if flag(args, "--synth-embed") {
++        l.synth_embed(arg_scalar(args, "--synth-embed-vocab", 64usize));
++    }
++    if flag(args, "--synth-argmax") {
++        l.synth_argmax(Round::parse(&arg_strs(args, "--round", &["even"])[0]));
++    }
+     tighten_of(&mut l, args);
+     coord_of(&mut l, args);
+     (l, vname)
+--- a/prover/src/layer.rs
++++ b/prover/src/layer.rs
+@@ -1596,6 +1596,66 @@
+         self.synth_family(seed, a, round, vocab, None, None, None);
+     }
+ 
++    /// verifiable-inference-ethereum (patch 0007): a layer-0 chunk's embedding
++    /// on a synthetic layer, so that a synthetic bundle publishes a `tok_in`.
++    /// Position `t` reads id `(3 + 7 t) mod vocab`, and that row of the table is
++    /// the wiring family's own input row `t`; every other row is zero.  A
++    /// witness-construction switch like `--synth-head`: without it a synthetic
++    /// layer has no table and composes exactly as it always did.
++    pub fn synth_embed(&mut self, vocab: usize) {
++        use crate::encoding::canon;
++        let g = self.residual_stream.as_ref()
++            .expect("--synth-embed needs the wiring family (--synth-residual-stream)");
++        assert!(!g.head, "--synth-embed is a layer-0 chunk's, and this is a head chunk");
++        let (d, tokens) = (g.d, self.ao.s);
++        let ids: Vec<u32> = (0..tokens).map(|t| ((3 + 7 * t) % vocab) as u32).collect();
++        let mut seen = vec![false; vocab];
++        for id in &ids {
++            assert!(!std::mem::replace(&mut seen[*id as usize], true),
++                    "--synth-embed-vocab {vocab}: id {id} repeats over {tokens} positions");
++        }
++        let mut tab = vec![0u16; vocab * d];
++        for (t, id) in ids.iter().enumerate() {
++            let row = *id as usize * d;
++            for c in 0..d {
++                tab[row + c] = canon(g.xin[t * d + c]);
++            }
++        }
++        self.embed_tab = Some(tab);
++        self.tok_in = Some(ids);
++    }
++
++    /// verifiable-inference-ethereum (patch 0007): the head chunk's argmax on a
++    /// synthetic layer, so that a synthetic bundle publishes a `tok_out`.  The
++    /// key column is the order key of the `lm_head` dequant's own output, under
++    /// the spec the plan builds for it (`deq_ref` reads only `variant` and
++    /// `round`), and each row emits its first maximum -- exactly what a dump's
++    /// `key_head.u16` and `tok_head.i32` hold.  Runs after `--synth-head`.
++    pub fn synth_argmax(&mut self, round: bf16::Round) {
++        use crate::encoding::canon;
++        use crate::gadgets::argmax::order_key;
++        assert!(self.residual_stream.as_ref().is_some_and(|g| g.head),
++                "--synth-argmax needs the head chunk (--synth-head)");
++        let m = self.mats.iter().find(|m| m.name == "lm_head")
++            .expect("--synth-argmax needs the lm_head matmul");
++        let sp = Spec {
++            variant: m.variant, round, kmax: 0, per_row: 1, limb_bits: (16, 14),
++            q_bits: 0, rem_bits: 0, fold_alpha: 0,
++        };
++        let (tokens, vocab) = (m.tokens, m.n_out);
++        let keys: Vec<u16> = (0..tokens * vocab)
++            .map(|i| order_key(canon(deq_ref(m, &sp, i / vocab, i % vocab))) as u16)
++            .collect();
++        let tok: Vec<u32> = keys.chunks(vocab)
++            .map(|row| {
++                let mx = *row.iter().max().expect("a row of the vocabulary");
++                row.iter().position(|k| *k == mx).expect("the maximum") as u32
++            })
++            .collect();
++        self.head_keys = Some(keys);
++        self.head_tok = Some(tok);
++    }
++
+     /// Issue #17: the model tree's own control -- a whole-layer swap.
+     ///
+     /// The model tree carries the matmul weights, their weight scales, the norm

@@ -7,6 +7,10 @@ license.workspace = true
 authors.workspace = true
 publish.workspace = true
 
+[features]
+# G9's token forgeries (`forge`), for the controls: the native tests and sp1-host, never the guest.
+forge = []
+
 [dependencies]
 bincode.workspace = true
 hex = "0.4.3"
@@ -15,3 +19,7 @@ serde_json.workspace = true
 sha2 = "0.10.9"
 stwo.workspace = true
 zk-prover.workspace = true
+
+# The bundle tests' G9 mutations use `forge`.
+[dev-dependencies]
+sash-segment-check = { path = ".", features = ["forge"] }

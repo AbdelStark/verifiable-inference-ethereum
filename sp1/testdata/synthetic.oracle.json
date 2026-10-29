@@ -1936,5 +1936,467 @@
       ],
       "sums_cancel": true
     }
+  },
+  "embed": {
+    "accepts": true,
+    "binding": {
+      "absent": [
+        16
+      ],
+      "all_bound": true,
+      "edges": [
+        {
+          "edge": "residual stream into the first norm's reduction",
+          "n": 1,
+          "state": "bound"
+        },
+        {
+          "edge": "first norm's output into the q, k, v matmul inputs",
+          "n": 2,
+          "state": "bound"
+        },
+        {
+          "edge": "q, k, v outputs into the attention block",
+          "n": 3,
+          "state": "bound"
+        },
+        {
+          "edge": "attention scores and values into the attention output",
+          "n": 4,
+          "state": "bound"
+        },
+        {
+          "edge": "attention output into the o matmul input",
+          "n": 5,
+          "state": "bound"
+        },
+        {
+          "edge": "o output into the first residual add",
+          "n": 6,
+          "state": "bound"
+        },
+        {
+          "edge": "first residual add into the second norm's reduction",
+          "n": 7,
+          "state": "bound"
+        },
+        {
+          "edge": "second norm's output into the gate and up matmul inputs",
+          "n": 8,
+          "state": "bound"
+        },
+        {
+          "edge": "gate and up outputs into the SwiGLU product",
+          "n": 9,
+          "state": "bound"
+        },
+        {
+          "edge": "SwiGLU output into the down matmul input",
+          "n": 10,
+          "state": "bound"
+        },
+        {
+          "edge": "down output into the second residual add",
+          "n": 11,
+          "state": "bound"
+        },
+        {
+          "edge": "each matmul's input times the pinned weights into its accumulator",
+          "n": 12,
+          "state": "bound"
+        },
+        {
+          "edge": "residual stream out of this segment into the next layer's segment",
+          "n": 13,
+          "state": "bound"
+        },
+        {
+          "edge": "keys and values out of this token block into the next block",
+          "n": 14,
+          "state": "bound"
+        },
+        {
+          "edge": "embedding row into the first segment's residual stream",
+          "n": 15,
+          "state": "bound"
+        },
+        {
+          "edge": "logits into the emitted token",
+          "n": 16,
+          "state": "absent",
+          "why": "no lm_head matmul"
+        }
+      ],
+      "unbound": []
+    },
+    "fixedHash": "5e809eeded4e3c3688d56054bba4b05313ca1b1f707bc3ed7d7425a9bbfe6a58",
+    "verdict": {
+      "ao_q_ok": true,
+      "ao_q_open": false,
+      "av_ok": true,
+      "boundary_roots": [
+        "28211a225a72e4084c4e004cbf447936ee80ec6fb7ee807a68263101e01e6b2f",
+        "e3af1f6b83609f513230b12f4b194b10d4fcfa1c08a8b253745f9e67edb0d942",
+        "d1e2356e69f08f5b81d86f6e8c62ac4de90fc240cd9af624df5cd4347f57c138",
+        "6fc9506fac83ae02618d3f20a2699a0597d9fd5d392ff96e60cd3108c052da0a",
+        "cb600960a7b1f0465d776716f9814c3e49562561765db861c3de131025a55907",
+        "76811471c569f0300a92206aefa53a6b00dc713d120b0f05e01ea378aae3230f"
+      ],
+      "boundary_sides": [
+        {
+          "axis": "layer",
+          "group": null,
+          "role": "in",
+          "root": "28211a225a72e4084c4e004cbf447936ee80ec6fb7ee807a68263101e01e6b2f",
+          "tree": 4
+        },
+        {
+          "axis": "layer",
+          "group": null,
+          "role": "out",
+          "root": "e3af1f6b83609f513230b12f4b194b10d4fcfa1c08a8b253745f9e67edb0d942",
+          "tree": 5
+        },
+        {
+          "axis": "token",
+          "group": 0,
+          "role": "out",
+          "root": "d1e2356e69f08f5b81d86f6e8c62ac4de90fc240cd9af624df5cd4347f57c138",
+          "tree": 6
+        },
+        {
+          "axis": "token",
+          "group": 0,
+          "role": "in",
+          "root": "6fc9506fac83ae02618d3f20a2699a0597d9fd5d392ff96e60cd3108c052da0a",
+          "tree": 7
+        },
+        {
+          "axis": "token",
+          "group": 1,
+          "role": "out",
+          "root": "cb600960a7b1f0465d776716f9814c3e49562561765db861c3de131025a55907",
+          "tree": 8
+        },
+        {
+          "axis": "token",
+          "group": 1,
+          "role": "in",
+          "root": "76811471c569f0300a92206aefa53a6b00dc713d120b0f05e01ea378aae3230f",
+          "tree": 9
+        }
+      ],
+      "den_link_ok": true,
+      "den_ok": [
+        true,
+        true
+      ],
+      "deq_out_ok": [
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "deq_out_open": [],
+      "embed_ok": true,
+      "embed_tok_ok": true,
+      "error": null,
+      "freivalds_ok": [
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "head_binding_ok": true,
+      "head_tok_ok": true,
+      "model_root_ok": true,
+      "nn_in_ok": [
+        true,
+        true,
+        true
+      ],
+      "nn_open": false,
+      "nn_out_ok": [
+        true,
+        true,
+        true
+      ],
+      "nn_pos_ok": true,
+      "nn_q_ok": [
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "qk_ok": [
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "residual_stream_ok": [
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "root_ok": true,
+      "rq_in_ok": [
+        true,
+        true,
+        true
+      ],
+      "rq_out_ok": [
+        true,
+        true,
+        true
+      ],
+      "rq_scale_ok": [
+        true,
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "rq_scale_open": [],
+      "shape_root": null,
+      "shape_root_ok": null,
+      "sizes_ok": true,
+      "stark_ok": true,
+      "stream_in": [
+        1337904743,
+        1760585787,
+        1205080469,
+        224208237
+      ],
+      "stream_out": [
+        1521173232,
+        1397268958,
+        1868895858,
+        1733212356
+      ],
+      "sums_cancel": true
+    }
+  },
+  "head_argmax": {
+    "accepts": true,
+    "binding": {
+      "absent": [
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        14,
+        15
+      ],
+      "all_bound": true,
+      "edges": [
+        {
+          "edge": "residual stream into the first norm's reduction",
+          "n": 1,
+          "state": "bound",
+          "why": "the head chunk's final norm reads the residual its statement commits"
+        },
+        {
+          "edge": "first norm's output into the q, k, v matmul inputs",
+          "n": 2,
+          "state": "bound",
+          "why": "the final norm's output into the lm_head input"
+        },
+        {
+          "edge": "q, k, v outputs into the attention block",
+          "n": 3,
+          "state": "absent",
+          "why": "the head chunk has no attention and no MLP"
+        },
+        {
+          "edge": "attention scores and values into the attention output",
+          "n": 4,
+          "state": "absent",
+          "why": "the head chunk has no attention and no MLP"
+        },
+        {
+          "edge": "attention output into the o matmul input",
+          "n": 5,
+          "state": "absent",
+          "why": "the head chunk has no attention and no MLP"
+        },
+        {
+          "edge": "o output into the first residual add",
+          "n": 6,
+          "state": "absent",
+          "why": "the head chunk has no attention and no MLP"
+        },
+        {
+          "edge": "first residual add into the second norm's reduction",
+          "n": 7,
+          "state": "absent",
+          "why": "the head chunk has no attention and no MLP"
+        },
+        {
+          "edge": "second norm's output into the gate and up matmul inputs",
+          "n": 8,
+          "state": "absent",
+          "why": "the head chunk has no attention and no MLP"
+        },
+        {
+          "edge": "gate and up outputs into the SwiGLU product",
+          "n": 9,
+          "state": "absent",
+          "why": "the head chunk has no attention and no MLP"
+        },
+        {
+          "edge": "SwiGLU output into the down matmul input",
+          "n": 10,
+          "state": "absent",
+          "why": "the head chunk has no attention and no MLP"
+        },
+        {
+          "edge": "down output into the second residual add",
+          "n": 11,
+          "state": "absent",
+          "why": "the head chunk has no attention and no MLP"
+        },
+        {
+          "edge": "each matmul's input times the pinned weights into its accumulator",
+          "n": 12,
+          "state": "bound"
+        },
+        {
+          "edge": "residual stream out of this segment into the next layer's segment",
+          "n": 13,
+          "state": "bound",
+          "why": "the head commits its residual-in side only; nothing leaves it along the layer axis"
+        },
+        {
+          "edge": "keys and values out of this token block into the next block",
+          "n": 14,
+          "state": "absent",
+          "why": "the head chunk has no attention and no MLP"
+        },
+        {
+          "edge": "embedding row into the first segment's residual stream",
+          "n": 15,
+          "state": "absent",
+          "why": "layer 22 is not the first"
+        },
+        {
+          "edge": "logits into the emitted token",
+          "n": 16,
+          "state": "bound"
+        }
+      ],
+      "unbound": []
+    },
+    "fixedHash": "a475d0416b696a5925f8df392952358b098c30e21660620db695ee1a4c2546fd",
+    "verdict": {
+      "ao_q_ok": true,
+      "ao_q_open": false,
+      "av_ok": true,
+      "boundary_roots": [
+        "b08e7614dc0ca80c4b4b121bddbc285248d38d16cb637e1ab133e425d842b63a"
+      ],
+      "boundary_sides": [
+        {
+          "axis": "layer",
+          "group": null,
+          "role": "in",
+          "root": "b08e7614dc0ca80c4b4b121bddbc285248d38d16cb637e1ab133e425d842b63a",
+          "tree": 4
+        }
+      ],
+      "den_link_ok": true,
+      "den_ok": [
+        true,
+        true
+      ],
+      "deq_out_ok": [],
+      "deq_out_open": [],
+      "embed_ok": true,
+      "embed_tok_ok": true,
+      "error": null,
+      "freivalds_ok": [
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "head_binding_ok": true,
+      "head_tok_ok": true,
+      "model_root_ok": true,
+      "nn_in_ok": [],
+      "nn_open": false,
+      "nn_out_ok": [],
+      "nn_pos_ok": true,
+      "nn_q_ok": [],
+      "qk_ok": [
+        true,
+        true
+      ],
+      "residual_stream_ok": [
+        true,
+        true,
+        true
+      ],
+      "root_ok": true,
+      "rq_in_ok": [
+        true
+      ],
+      "rq_out_ok": [
+        true
+      ],
+      "rq_scale_ok": [
+        true
+      ],
+      "rq_scale_open": [],
+      "shape_root": null,
+      "shape_root_ok": null,
+      "sizes_ok": true,
+      "stark_ok": true,
+      "stream_in": [
+        1929306420,
+        2139683800,
+        658285670,
+        1692512446
+      ],
+      "stream_out": [
+        64959038,
+        160906107,
+        2024560167,
+        326427479
+      ],
+      "sums_cancel": true
+    }
   }
 }
