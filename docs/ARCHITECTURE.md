@@ -4,17 +4,20 @@
 
 ```text
 +-------------------------------------------------------------------------+
-| GPU Prover Host (SASH zk-inference-prover @ eb95bfa)                    |
+| GPU Prover Host (SASH zk-inference-prover @ eb95bfa + patch 0006,       |
+|   which mixes the published token vectors into the transcript)          |
 |   Model: TinyLlama-1.1B-Chat-v1.0 (fe8a4ea, profile y-attnout-w12)      |
 |   Outputs 23 segment bundles: B0L0 .. B0L21 + head (761 MB JSON in the  |
-|   unpublished run; all 23 verify in the M2 guest, EVM-GAS-MODEL.md §7)  |
+|   unpublished run, proved without patch 0006: the 21 without token      |
+|   vectors verify in the M2 guest, B0L0 and head need re-proving)        |
 +------------------------------------+------------------------------------+
                                      |
                                      v
 +-------------------------------------------------------------------------+
 | Off-Chain Proof Compression (planned: M2 guests, M3 aggregator + wrap)  |
 |   - M2: SP1 v6 riscv64im guest per segment runs a verifier-only build   |
-|     of verify_composed; rejects token ids >= P; commits fixedHash       |
+|     of verify_composed (+ patch 0006); rejects token ids >= P;          |
+|     commits fixedHash                                                   |
 |   - M3: aggregator verifies 23 proofs, commits publicDigest             |
 |   - M3: SP1 v6 BN254 wrap (Groth16 or PLONK, chosen at M3 start)        |
 +------------------------------------+------------------------------------+

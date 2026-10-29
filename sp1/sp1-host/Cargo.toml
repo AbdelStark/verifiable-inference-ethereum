@@ -11,10 +11,10 @@ publish.workspace = true
 # Cycle-tracker regions need sp1-sdk's profiling executor, which is slower; only the stwo-bench test
 # and the unit-costs and decode-share commands (docs/EVM-GAS-MODEL.md §6, §7) turn it on, with the
 # commands' dependencies.
-profiling = ["sp1-sdk/profiling", "dep:postcard", "dep:stwo"]
+profiling = ["sp1-sdk/profiling", "dep:postcard"]
 # Counts BLAKE2s compressions in nitroo's Stwo (sp1/patches/0005): native host builds only, for the
 # native-check command; never a guest.
-count-ops = ["dep:stwo", "stwo/count-ops"]
+count-ops = ["stwo/count-ops"]
 
 [[bin]]
 name = "unit-costs"
@@ -47,7 +47,7 @@ sash-segment-check.workspace = true
 serde_json.workspace = true
 sha2 = "0.10.9"
 sp1-sdk = { workspace = true, features = ["cuda"] }
-stwo = { workspace = true, optional = true }
+stwo.workspace = true
 tokio = { version = "1", features = ["rt-multi-thread", "sync"] }
 zk-prover.workspace = true
 

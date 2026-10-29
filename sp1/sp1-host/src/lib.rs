@@ -1,9 +1,11 @@
 //! Host side of the SP1 guests: the segment guest's input encoding and executor run (`SPEC.md`
-//! §1.1), and stwo-bench's; the TinyLlama controls, proof sizes and `prove`'s checks
+//! §1.1), and stwo-bench's; the TinyLlama controls and their token forgeries, proof sizes and
+//! `prove`'s checks
 //! (`docs/EVM-GAS-MODEL.md`); the fixture rendered from the segments' public values.
 
 pub mod controls;
 pub mod fixture;
+pub mod forge;
 pub mod prove;
 pub mod sizes;
 pub mod trace;

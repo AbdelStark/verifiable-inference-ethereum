@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Checks the synthetic bundle corpus in sp1/testdata/synthetic (gitignored) with upstream's oracle
-# (sp1/sash-oracle, already built: SASH_ORACLE, default target/sash/release/sash-oracle): each
+# Checks the synthetic bundle corpus in sp1/testdata/synthetic (gitignored) with the oracle
+# (sp1/sash-oracle: upstream with patch 0006 only, already built: SASH_ORACLE, default
+# target/sash/release/sash-oracle): each
 # bundle's accepts(), unbound edges and pinned proof.json digest; then the corpus files and the
 # oracle's output against the committed records; then runs the segment check's bundle and
 # differential tests (sp1/sash-segment-check, SPEC.md §1.1) on the corpus against the oracle.

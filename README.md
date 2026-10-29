@@ -15,7 +15,7 @@ Mainnet and Hoodi run Osaka, which binds this project; Amsterdam is tracked alon
    Enforces on-chain in pure Solidity:
    - Enrolled 23-segment `(preRoot, modelRoot, fixedHash)` manifest membership (`SashModelRegistry.sol`),
    - All 22 inter-layer residual-stream Merkle root links (`out_root[L] == in_root[L+1]`),
-   - A sha256 `publicDigest` over the segment claims and the `tok_in` / `tok_out` vectors, which the segment proof must attest, so the tokens are the ones SASH's own `embed_tok` / `head_tok` checks used ([SPEC.md](SPEC.md) §1),
+   - A sha256 `publicDigest` over the segment claims and the `tok_in` / `tok_out` vectors, which the segment proof must attest, so the tokens are the ones SASH's own `embed_tok` / `head_tok` checks used; those checks bind the vectors only with SASH patch 0006, which mixes them into the Fiat-Shamir transcript (upstream `eb95bfa` does not: [SECURITY.md](SECURITY.md) §5, [SPEC.md](SPEC.md) §1),
    - Public prompt prefix matching, autoregressive teacher-forcing loop closure (`tok_in[P+j] == tok_out[P-1+j]`), and EOS (`2`) termination (`SashGridVerifier.sol`, ~40k gas measured, [docs/EVM-GAS-MODEL.md](docs/EVM-GAS-MODEL.md) §4).
 
 Aggregated single-transaction settlement is estimated at **~490k gas** (**~2.9%** of the `EIP-7825` cap) with a Groth16 wrap, from the measured dev-mode settlement plus an estimated SP1 verifier; M3 measures it ([docs/EVM-GAS-MODEL.md](docs/EVM-GAS-MODEL.md) §5).

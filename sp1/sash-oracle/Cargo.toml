@@ -1,6 +1,8 @@
-# Upstream SASH's verifier, unmodified in behaviour (default features, prover included), as the
-# reference for the guest's differential tests. Its own workspace: it builds on SASH's nightly
-# toolchain and links the CUDA runtime, which the sp1/ workspace must not.
+# Upstream SASH's verifier with only the patches that change behaviour (sp1/vendor/sash-oracle,
+# SPEC.md §1.1: patch 0006), default features, prover included, as the reference for the guest's
+# differential tests: it never sees the verifier extraction (patches 0001-0005), whose verdict those
+# tests check is preserved. Its own workspace: it builds on SASH's nightly toolchain and links the CUDA
+# runtime, which the sp1/ workspace must not.
 [workspace]
 
 [package]
@@ -14,7 +16,7 @@ description = "Prints upstream SASH verify_composed's verdict and binding table 
 [dependencies]
 serde_json = "1"
 sha2 = "0.10"
-zk-prover = { path = "../vendor/sash/prover" }
+zk-prover = { path = "../vendor/sash-oracle/prover" }
 
 [profile.release]
 opt-level = 3

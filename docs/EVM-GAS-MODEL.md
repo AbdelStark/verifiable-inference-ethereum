@@ -254,7 +254,7 @@ target/release/sp1-host trace-share --trace <tag>.trace.json
 
 The two agree within 0.13 points: the bare compression's 2,139 cycles include a little loop and call overhead that the profiler counts outside `compress`.
 
-**Controls on the real bundles.** `make sp1-execute` then writes five modified copies under `OUT/controls/`, never in the bundle directory, and runs each natively and in the executor. Both sides give the same outcome:
+**Controls on the real bundles.** `make sp1-execute` then writes nine modified copies under `OUT/controls/`, never in the bundle directory, and runs each natively and in the executor. Both sides give the same outcome. The four G9 forgeries (`SPEC.md` §2.1) are not measured yet: the guest that runs them has patch 0006, under which these bundles' `B0L0` and `head` reject until they are re-proved with it (`SPEC.md` §1.4).
 
 | Control | Segment and file | Native and executor | Executor cycles |
 |---|---|---|---:|
@@ -263,6 +263,10 @@ The two agree within 0.13 points: the bare compression's 2,139 cycles include a 
 | `tok_in[0]` + P | `B0L0` fixed | exit 1, `TokenIdOutOfField` | 3,939,888 |
 | `tok_out[0]` + P | `head` fixed | exit 1, `TokenIdOutOfField` | 12,112,996 |
 | `model`'s last hex digit changed (no rule reads it) | `B0L10` fixed | exit 0, the unmodified public values but for `fixedHash`, `86c43bf7…89f08a5` against the pin `fa81937c…e19faf47`; the `manifestRootsHash` check rejects it (control 21, `SPEC.md` §2.1) | 1,879,910,406 |
+| `tok_in[25]` = 450, `tok_in[1..=4]` solved to keep the Horner sum under upstream's `w` | `B0L0` fixed | exit 1, `NotAccepted` | — |
+| the same under the `w` drawn after the honest vectors | `B0L0` fixed | exit 1, `NotAccepted` | — |
+| `tok_out[24]` = 450, `tok_out[0..=3]` solved to keep the Horner sum under upstream's `w` | `head` fixed | exit 1, `NotAccepted` | — |
+| the same under the `w` drawn after the honest vectors | `head` fixed | exit 1, `NotAccepted` | — |
 
 **Against the per-request limits** (one request per segment) **and in GPU time:**
 

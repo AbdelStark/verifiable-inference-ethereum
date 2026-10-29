@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Builds upstream SASH's prover (default features: SIMD backend, prover on) from the vendored tree,
-# runs upstream's test suite (its pinned synthetic digests included), builds upstream's oracle
-# (sp1/sash-oracle) and generates the synthetic bundle corpus into the gitignored
+# Builds upstream SASH's prover (default features: SIMD backend, prover on) from the vendored tree
+# (vendor/sash: every patch, 0006's token binding included), runs upstream's test suite (its pinned
+# synthetic digests included), builds the oracle (sp1/sash-oracle, on vendor/sash-oracle: upstream
+# with patch 0006 only) and generates the synthetic bundle corpus into the gitignored
 # sp1/testdata/synthetic/. Then checks it with sash-corpus-check.sh: the oracle's verdict for each
 # bundle, the committed records (sp1/testdata/synthetic.sha256 and synthetic.oracle.json; see there
 # for the fresh records every run writes and SASH_SYNTHETIC_BOOTSTRAP), and the segment check's
