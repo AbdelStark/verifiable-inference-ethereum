@@ -1,7 +1,7 @@
 name: CI
 
-# Pushes to main and the weekly schedule run every job, and the sash job in full: they never restore
-# the synthetic corpus cache, and they save it for PRs. A PR runs sash and the SP1 jobs only when it
+# Pushes to main, the weekly schedule and a manual run (workflow_dispatch, on any branch) run every
+# job, and the sash job in full: they never restore the synthetic corpus cache, and they save it for PRs. A PR runs sash and the SP1 jobs only when it
 # changes what they build or run (the changes job); otherwise they report "skipped", which satisfies
 # a required check. On a PR, the changes job looks up sp1/scripts/corpus-key.sh's key, a hash of every
 # file the corpus and the built oracle come from, in the cache (entries saved on main, or by an earlier
@@ -13,6 +13,8 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Runs a branch's main path before merge: `gh workflow run ci.yml --ref <branch>`.
+  workflow_dispatch:
   schedule:
     # Mondays 05:17 UTC: drift the corpus key cannot see (runner image, NVIDIA's apt repository).
     - cron: "17 5 * * 1"
@@ -293,9 +295,9 @@ jobs:
 
   # The segment guest on the published TinyLlama bundles (sp1/scripts/tinyllama-bundles.sh), with the
   # Docker-built ELF from sp1-workspace in this run. A PR runs B0L0, B0L10 and head and the controls,
-  # which use only those three; pushes to main and the schedule run all 23, the controls and the
-  # fixture byte-identity check. One segment execution at a time: the native executor keeps guest
-  # memory in /dev/shm.
+  # which use only those three; pushes to main, the schedule and a manual run take the main path: all
+  # 23, the controls and the fixture byte-identity check. One segment execution at a time: the native
+  # executor keeps guest memory in /dev/shm.
   sp1-bundles:
     name: SP1 segment guest on the published TinyLlama bundles
     needs: [changes, sp1-workspace]
@@ -338,8 +340,9 @@ jobs:
       # rest at the pinned dataset commit, and fails unless runs/tinyllama holds exactly the 69 pinned files.
       - name: Download the TinyLlama bundles from their public Hugging Face dataset and check them against sp1/pins/tinyllama.sha256
         run: sp1/scripts/tinyllama-bundles.sh "$BUNDLES"
-      - name: Save the TinyLlama bundles
-        if: steps.bundles.outputs.cache-hit != 'true'
+      # main only (pushes and the schedule): PRs restore main's entry, so no PR stores its own 738 MB copy.
+      - name: Save the TinyLlama bundles (main)
+        if: steps.bundles.outputs.cache-hit != 'true' && github.ref == 'refs/heads/main'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: runs/tinyllama
@@ -363,13 +366,13 @@ jobs:
           OUT: ${{ runner.temp }}/sp1-execute
           SEGMENTS: B0L0 B0L10 head
         run: sp1/scripts/sp1-execute.sh
-      - name: Segment guest in the executor on all 23 segments, against native check_segment and the fixedHash pins, and the real-bundle controls (SPEC.md §2.1 G2, G7, G9, G10) (main, schedule)
+      - name: Segment guest in the executor on all 23 segments, against native check_segment and the fixedHash pins, and the real-bundle controls (SPEC.md §2.1 G2, G7, G9, G10) (main, schedule, manual)
         if: github.event_name != 'pull_request'
         env:
           ELF: ${{ runner.temp }}/segment-guest-elf/segment-guest
           OUT: ${{ runner.temp }}/sp1-execute
         run: sp1/scripts/sp1-execute.sh
-      - name: TinyLlamaFixture.sol rendered from the 23 segments' executor public values is byte-identical to the committed one (main, schedule)
+      - name: TinyLlamaFixture.sol rendered from the 23 segments' executor public values is byte-identical to the committed one (main, schedule, manual)
         if: github.event_name != 'pull_request'
         env:
           ELF: ${{ runner.temp }}/segment-guest-elf/segment-guest

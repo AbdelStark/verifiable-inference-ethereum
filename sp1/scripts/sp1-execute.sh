@@ -13,7 +13,7 @@
 # tags, in any order, which must include the controls' B0L0, B0L10 and head (the sp1-bundles CI job's
 # PR path); PINS=write needs all 23.
 #
-# `make check` runs it on B0L0, B0L10 and head when make sp1-docker's ELF and the bundles are present;
+# `make check` runs it on all 23 when make sp1-docker's ELF and the bundles are present;
 # the sp1-bundles CI job runs it. Needs SP1 v6.10.0 and protoc.
 set -euo pipefail
 

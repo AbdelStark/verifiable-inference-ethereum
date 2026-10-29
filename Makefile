@@ -2,7 +2,7 @@
 
 help:
 	@echo "Targets:"
-	@echo "  make check       - Run Rust format, clippy, unit/negative tests, vector sync, Foundry format, lint, tests and anvil settlement (if forge is installed), the SP1 workspace checks (if cargo-prove is installed), and the segment guest on B0L0, B0L10 and head (if make sp1-docker's ELF and the bundles are present)"
+	@echo "  make check       - Run Rust format, clippy, unit/negative tests, vector sync, Foundry format, lint, tests and anvil settlement (if forge is installed), the SP1 workspace checks (if cargo-prove is installed), and the segment guest on the 23 TinyLlama segments with the fixture check (if make sp1-docker's ELF and the bundles are present)"
 	@echo "  make rust-check  - Run cargo fmt --check, then clippy -D warnings and cargo test --workspace with --locked"
 	@echo "  make vectors     - Regenerate contracts/src/sash/TinyLlamaFixture.sol from the Rust TinyLlama fixture"
 	@echo "  make forge-test  - Check Solidity format, build against foundry.lock, lint, run the Foundry suite with gas report, and check the gas snapshots against the index"
@@ -59,11 +59,12 @@ check: rust-check
 	else \
 		echo "NOTE: the reproducible guest build needs an x86_64 host with cargo-prove and the $(SP1_IMAGE) image; it runs in CI."; \
 	fi
-	@# The sp1-bundles CI job's PR path, on bundles already in BUNDLES (make bundles-download) with make sp1-docker's ELF.
+	@# The sp1-bundles CI job's main path, on bundles already in BUNDLES (make bundles-download) with make sp1-docker's ELF.
 	@if command -v cargo-prove >/dev/null 2>&1 && [ -f "$(ELF)" ] && [ -d "$(BUNDLES)" ]; then \
 		out="$$(mktemp -d)"; \
-		$(MAKE) sp1-execute BUNDLES="$(BUNDLES)" OUT="$$out" SEGMENTS="B0L0 B0L10 head"; rc=$$?; \
+		$(MAKE) sp1-execute BUNDLES="$(BUNDLES)" OUT="$$out"; rc=$$?; \
 		rm -rf "$$out"; [ $$rc = 0 ] || exit $$rc; \
+		$(MAKE) sp1-fixture-check BUNDLES="$(BUNDLES)" || exit 1; \
 	else \
 		echo "NOTE: the segment guest on the TinyLlama bundles needs cargo-prove, make sp1-docker's ELF and the bundles in $(BUNDLES) (make bundles-download); it runs in CI."; \
 	fi

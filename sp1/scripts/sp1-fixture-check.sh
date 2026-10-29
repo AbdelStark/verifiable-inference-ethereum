@@ -13,8 +13,9 @@
 # The comparison does not cover modelId, EOS_TOKEN_ID or the prompt/response text: fixture-from-bundles
 # fills them from tinyllama_fixture.rs, since they come from enrollment, not from the proofs.
 #
-# Not in `make check`; the sp1-bundles CI job runs it on pushes to main and the weekly schedule. Needs
-# SP1 v6.10.0 and protoc.
+# `make check` runs it after sp1-execute when make sp1-docker's ELF and the bundles are present; the
+# sp1-bundles CI job runs it on pushes to main, the weekly schedule and a manual run. Needs SP1
+# v6.10.0 and protoc.
 set -euo pipefail
 
 cd "$(dirname "$0")/../.."
