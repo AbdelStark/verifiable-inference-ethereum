@@ -190,7 +190,7 @@ Per-op PGU comes from tight loops over small working sets. sp1-sdk 6.10.0's gas 
 
 ## 7. TinyLlama segments in the SP1 executor (measured)
 
-All 23 segments of the §1 run, verified by the segment guest (`SPEC.md` §1.1) in the SP1 executor. This replaces #38's analytic extrapolation of the per-segment and total cycles and PGU; §6's unit costs stay.
+All 23 segments of the §1 run, verified by the segment guest (`SPEC.md` §1.1) in the SP1 executor, measured with the guest before patch 0006. The current guest rejects these bundles' `B0L0` and `head` until they are re-proved with the token binding (`SPEC.md` §1.4), and the figures stand until the re-proved bundles are measured. This replaces #38's analytic extrapolation of the per-segment and total cycles and PGU; §6's unit costs stay.
 
 - **SP1:** sp1-sdk `6.10.0` (circuit version `v6.1.0`), `LightProver`, `calculate_gas(true)`, `CYCLE_LIMIT` `12,000,000,000`.
 - **Executor:** portable. sp1-core-executor 6.10.0 uses its native executor only on Linux x86_64 without the `profiling` feature (`build.rs`), so every macOS run is portable.
@@ -254,7 +254,7 @@ target/release/sp1-host trace-share --trace <tag>.trace.json
 
 The two agree within 0.13 points: the bare compression's 2,139 cycles include a little loop and call overhead that the profiler counts outside `compress`.
 
-**Controls on the real bundles.** `make sp1-execute` then writes nine modified copies under `OUT/controls/`, never in the bundle directory, and runs each natively and in the executor. Both sides give the same outcome. The four G9 forgeries (`SPEC.md` §2.1) are not measured yet: the guest that runs them has patch 0006, under which these bundles' `B0L0` and `head` reject until they are re-proved with it (`SPEC.md` §1.4).
+**Controls on the real bundles.** `make sp1-execute` then writes seven modified copies under `OUT/controls/`, never in the bundle directory, and runs each natively and in the executor. Both sides give the same outcome. The two G9 forgeries (`SPEC.md` §2.1) are not measured yet: the guest that runs them has patch 0006, under which these bundles' `B0L0` and `head` reject until they are re-proved with it (`SPEC.md` §1.4).
 
 | Control | Segment and file | Native and executor | Executor cycles |
 |---|---|---|---:|
@@ -263,10 +263,8 @@ The two agree within 0.13 points: the bare compression's 2,139 cycles include a 
 | `tok_in[0]` + P | `B0L0` fixed | exit 1, `TokenIdOutOfField` | 3,939,888 |
 | `tok_out[0]` + P | `head` fixed | exit 1, `TokenIdOutOfField` | 12,112,996 |
 | `model`'s last hex digit changed (no rule reads it) | `B0L10` fixed | exit 0, the unmodified public values but for `fixedHash`, `86c43bf7…89f08a5` against the pin `fa81937c…e19faf47`; the `manifestRootsHash` check rejects it (control 21, `SPEC.md` §2.1) | 1,879,910,406 |
-| `tok_in[25]` = 450, `tok_in[1..=4]` solved to keep the Horner sum under upstream's `w` | `B0L0` fixed | exit 1, `NotAccepted` | — |
-| the same under the `w` drawn after the honest vectors | `B0L0` fixed | exit 1, `NotAccepted` | — |
-| `tok_out[24]` = 450, `tok_out[0..=3]` solved to keep the Horner sum under upstream's `w` | `head` fixed | exit 1, `NotAccepted` | — |
-| the same under the `w` drawn after the honest vectors | `head` fixed | exit 1, `NotAccepted` | — |
+| `tok_in[25]` = 450, `tok_in[1..=4]` solved to keep the Horner sum under the segment's own `w` | `B0L0` fixed | exit 1, `NotAccepted` | — |
+| `tok_out[24]` = 450, `tok_out[0..=3]` solved to keep the Horner sum under the segment's own `w` | `head` fixed | exit 1, `NotAccepted` | — |
 
 **Against the per-request limits** (one request per segment) **and in GPU time:**
 

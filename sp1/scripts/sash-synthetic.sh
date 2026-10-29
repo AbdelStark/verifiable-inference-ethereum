@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Builds upstream SASH's prover (default features: SIMD backend, prover on) from the vendored tree
-# (vendor/sash: every patch, 0006's token binding included), runs upstream's test suite (its pinned
+# Builds SASH's prover (default features: SIMD backend, prover on) from the vendored tree
+# (vendor/sash: every patch, 0006's token binding and 0007's synthetic token vectors included), runs upstream's test suite (its pinned
 # synthetic digests included), builds the oracle (sp1/sash-oracle, on vendor/sash-oracle: upstream
 # with patch 0006 only) and generates the synthetic bundle corpus into the gitignored
 # sp1/testdata/synthetic/. Then checks it with sash-corpus-check.sh: the oracle's verdict for each
@@ -57,6 +57,9 @@ compose skip_layer_boundary "${aligned[@]}" --unsound-skip-layer-boundary --laye
 compose skip_kv_boundary "${aligned[@]}" --unsound-skip-kv-boundary --layer 1 --block 0
 compose skip_embedding "${aligned[@]}" --unsound-skip-embedding --layer 0 --block 0
 compose head "${narrow[@]}" --synth-head --synth-vocab 256 --unsound-skip-argmax --layer 22 --block 0
+# The two bundles that publish a token vector (patch 0007's synthetic embedding and argmax), for G9.
+compose embed "${aligned[@]}" --synth-embed --layer 0 --block 0
+compose head_argmax "${narrow[@]}" --synth-head --synth-vocab 256 --synth-argmax --layer 22 --block 0
 rm -f "$corpus"/*.compose.out
 
 SASH_ORACLE="$oracle" scripts/sash-corpus-check.sh

@@ -6,12 +6,12 @@ use std::fs;
 use std::path::Path;
 
 use sash_segment_check::check_segment;
+use sash_segment_check::forge::{Vector, forge};
 use serde_json::{Value, json};
 use sp1_sdk::blocking::prelude::*;
 use zk_prover::common::Proof;
-use zk_prover::compose::Fixed;
+use zk_prover::compose::{Claims, Fixed};
 
-use crate::forge::{Transcript, Vector, forged_vector};
 use crate::{Execution, SegmentInput, execute};
 
 /// `P = 2^31 - 1`, the M31 modulus (`SPEC.md` §1.1 rule 1).
@@ -51,6 +51,7 @@ impl File {
 /// The unmodified segment, parsed, for the edits that derive their change from it.
 pub struct Original {
     pub fixed: Fixed,
+    pub claims: Claims,
     pub proof: Proof,
 }
 
@@ -72,25 +73,20 @@ fn plus_p(v: &mut Value) {
 }
 
 /// G9: `tok_in[25]` (`B0L0`) or `tok_out[24]` (`head`) set to 450, with four slack positions solved
-/// so that the Horner sum under the `w` that `transcript` replays is unchanged (`crate::forge`).
-fn forge(f: &mut Value, original: &Original, vector: Vector, transcript: Transcript) {
-    let (key, change, slack) = match vector {
-        Vector::TokIn => ("tok_in", (25, 450), [1, 2, 3, 4]),
-        Vector::TokOut => ("tok_out", (24, 450), [0, 1, 2, 3]),
-    };
-    let forged = forged_vector(
-        &original.fixed,
-        &original.proof,
-        vector,
-        transcript,
-        change,
-        slack,
-    )
-    .unwrap_or_else(|e| panic!("G9 forgery of {key}: {e}"));
-    f[key] = json!(forged);
+/// so that the Horner sum under the `w` the segment was proved with is unchanged
+/// (`sash_segment_check::forge`). Panics if neither transcript reproduces the claims.
+fn forge_vector(f: &mut Value, original: &Original, vector: Vector) {
+    let forged = forge(&original.fixed, &original.claims, &original.proof, vector)
+        .unwrap_or_else(|e| panic!("G9 forgery of {}: {e}", vector.key()));
+    eprintln!(
+        "G9 forgery of {}: solved under the {:?} transcript's w",
+        vector.key(),
+        forged.transcript
+    );
+    f[vector.key()] = json!(forged.ids);
 }
 
-pub const CONTROLS: [Control; 9] = [
+pub const CONTROLS: [Control; 7] = [
     Control {
         name: "proof_queried_value",
         tag: "B0L10",
@@ -127,32 +123,16 @@ pub const CONTROLS: [Control; 9] = [
         name: "tok_in_horner_forged",
         tag: "B0L0",
         file: File::Fixed,
-        what: "`tok_in[25]` = 450, `tok_in[1..=4]` solved to keep the Horner sum under upstream's `w`",
-        edit: |f, o| forge(f, o, Vector::TokIn, Transcript::Upstream),
-        expect: Expect::Reject("NotAccepted"),
-    },
-    Control {
-        name: "tok_in_horner_forged_mixed",
-        tag: "B0L0",
-        file: File::Fixed,
-        what: "`tok_in[25]` = 450, `tok_in[1..=4]` solved to keep the Horner sum under the `w` drawn after the honest vectors",
-        edit: |f, o| forge(f, o, Vector::TokIn, Transcript::TokensMixed),
+        what: "`tok_in[25]` = 450, `tok_in[1..=4]` solved to keep the Horner sum under the segment's own `w`",
+        edit: |f, o| forge_vector(f, o, Vector::TokIn),
         expect: Expect::Reject("NotAccepted"),
     },
     Control {
         name: "tok_out_horner_forged",
         tag: "head",
         file: File::Fixed,
-        what: "`tok_out[24]` = 450, `tok_out[0..=3]` solved to keep the Horner sum under upstream's `w`",
-        edit: |f, o| forge(f, o, Vector::TokOut, Transcript::Upstream),
-        expect: Expect::Reject("NotAccepted"),
-    },
-    Control {
-        name: "tok_out_horner_forged_mixed",
-        tag: "head",
-        file: File::Fixed,
-        what: "`tok_out[24]` = 450, `tok_out[0..=3]` solved to keep the Horner sum under the `w` drawn after the honest vectors",
-        edit: |f, o| forge(f, o, Vector::TokOut, Transcript::TokensMixed),
+        what: "`tok_out[24]` = 450, `tok_out[0..=3]` solved to keep the Horner sum under the segment's own `w`",
+        edit: |f, o| forge_vector(f, o, Vector::TokOut),
         expect: Expect::Reject("NotAccepted"),
     },
     Control {
@@ -184,6 +164,7 @@ impl Control {
         };
         let original = Original {
             fixed: serde_json::from_slice(parse(0)?).map_err(|e| format!("fixed.json: {e}"))?,
+            claims: serde_json::from_slice(parse(1)?).map_err(|e| format!("claims.json: {e}"))?,
             proof: serde_json::from_slice(parse(2)?).map_err(|e| format!("proof.json: {e}"))?,
         };
         for (file, name, bytes) in files {

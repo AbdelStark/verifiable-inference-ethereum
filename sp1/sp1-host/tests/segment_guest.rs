@@ -64,6 +64,15 @@ fn aligned_gkr5_accepts() {
     accepts_as_native("aligned_gkr5", &Bundle::load("aligned_gkr5"));
 }
 
+/// The bundles that publish a token vector (`sp1/patches/0007`), whose forgeries are G9's mutations.
+#[test]
+#[ignore = "needs the synthetic corpus in SASH_SYNTHETIC_CORPUS (sp1 or sp1-cached CI job)"]
+fn token_bundles_accept() {
+    for tag in ["embed", "head_argmax"] {
+        accepts_as_native(tag, &Bundle::load(tag));
+    }
+}
+
 /// The corpus bundles with an unbound edge (`SPEC.md` §2.1 G5).
 #[test]
 #[ignore = "needs the synthetic corpus in SASH_SYNTHETIC_CORPUS (sp1 or sp1-cached CI job)"]

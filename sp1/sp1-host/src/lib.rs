@@ -5,7 +5,6 @@
 
 pub mod controls;
 pub mod fixture;
-pub mod forge;
 pub mod prove;
 pub mod sizes;
 pub mod trace;

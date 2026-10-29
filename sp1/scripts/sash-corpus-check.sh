@@ -56,6 +56,8 @@ expect skip_layer_boundary '[13]' ''
 expect skip_kv_boundary '[14]' ''
 expect skip_embedding '[15]' ''
 expect head '[16]' e3f31c1d4aeae77e
+expect embed '[]' ''
+expect head_argmax '[]' ''
 
 jq -s 'add' "$corpus/.oracle.jsonl" >testdata/synthetic.oracle.json.fresh
 rm -f "$corpus/.oracle.jsonl"

@@ -93,6 +93,10 @@ The files the patches modify:
     prover/src/common.rs
     prover/src/compose.rs
 
+  sp1/patches/0007-synthetic-token-vectors.patch:
+    prover/src/cli.rs
+    prover/src/layer.rs
+
 SASH's NOTICE (Apache-2.0 §4(d)), carried with its source:
 
   zk-prover

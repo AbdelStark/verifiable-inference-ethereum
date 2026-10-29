@@ -1,8 +1,14 @@
-//! G9's forgeries (`SPEC.md` §2.1): a published token vector changed at one position, with four
-//! slack positions solved so that its Horner image under the replayed `w_residual_stream` stays the
-//! claimed one. `embed_tok_ok` and `head_tok_ok` compare only that image, so a verifier whose
-//! transcript never absorbs the vectors accepts such a forgery; SASH with `sp1/patches/0006` mixes
-//! them before `w` is drawn (`SPEC.md` §1.1), so a changed vector draws another `w`.
+//! G9's forgeries (`SPEC.md` §2.1), behind the `forge` feature: never in the guest. A published
+//! token vector is changed at one position, with four slack positions solved so that its Horner
+//! image under `w_residual_stream` stays the one the claims carry. `embed_tok_ok` and `head_tok_ok`
+//! compare only that image, so a verifier whose transcript never absorbs the vectors accepts such a
+//! forgery; SASH with `sp1/patches/0006` mixes them before `w` is drawn (`SPEC.md` §1.1), so a
+//! changed vector draws another `w`.
+//!
+//! [`forge`] solves under the `w` the proof was made with, found by replaying both transcripts and
+//! keeping the one whose `w` gives the claims' Horner image of the honest vector, and refuses a
+//! segment where neither does. So a control built on it is the attack on that segment, never a
+//! vector that would fail under every verifier.
 
 use stwo::core::channel::{Blake2sM31Channel, Channel};
 use stwo::core::fields::FieldExpOps;
@@ -11,11 +17,10 @@ use stwo::core::fields::qm31::SecureField;
 use stwo::core::pcs::CommitmentSchemeVerifier;
 use stwo::core::vcs::blake2_merkle::Blake2sM31MerkleChannel;
 use zk_prover::common::Proof;
-use zk_prover::compose::{Fixed, Plan, Rels};
+use zk_prover::compose::{Claims, Fixed, Plan, Rels, unqm};
 use zk_prover::util::pcs_config;
 
-/// `P = 2^31 - 1`, the M31 modulus.
-const P: u32 = (1 << 31) - 1;
+use crate::P;
 
 /// The transcript the forger replays to `w_residual_stream` on the unmodified segment.
 #[derive(Clone, Copy, Debug)]
@@ -165,21 +170,62 @@ pub fn horner_preserving(
     Ok(out)
 }
 
-/// The forged vector for `vector` of the unmodified segment `fixed` / `proof`, under the `w` that
-/// `transcript` gives.
-pub fn forged_vector(
+impl Vector {
+    /// The published vector's key in `fixed.json`.
+    pub fn key(self) -> &'static str {
+        match self {
+            Vector::TokIn => "tok_in",
+            Vector::TokOut => "tok_out",
+        }
+    }
+
+    /// G9's edit: `tok_in[25]` (slack `1..=4`) or `tok_out[24]` (slack `0..=3`) set to 450.
+    pub fn g9_edit(self) -> ((usize, u32), [usize; 4]) {
+        match self {
+            Vector::TokIn => ((25, 450), [1, 2, 3, 4]),
+            Vector::TokOut => ((24, 450), [0, 1, 2, 3]),
+        }
+    }
+}
+
+/// A forged vector and the transcript whose `w` it keeps the Horner image under.
+#[derive(Clone, Debug)]
+pub struct Forgery {
+    pub ids: Vec<u32>,
+    pub transcript: Transcript,
+}
+
+/// G9's forgery of `vector` on the unmodified segment `fixed` / `claims` / `proof`: the edit of
+/// [`Vector::g9_edit`], solved under the `w` the proof was made with. That `w` is the one, of the two
+/// transcripts' (patch 0006's first), under which the honest vector's Horner sum is the claims'
+/// `embed_tok` or `head_tok`; a segment where neither transcript gives it is refused.
+pub fn forge(
     fixed: &Fixed,
+    claims: &Claims,
     proof: &Proof,
     vector: Vector,
-    transcript: Transcript,
-    change: (usize, u32),
-    slack: [usize; 4],
-) -> Result<Vec<u32>, String> {
-    let w = replayed_w(fixed, proof, transcript)?;
-    match vector {
-        Vector::TokIn => horner_preserving(&fixed.tok_in, w, true, change, slack),
-        Vector::TokOut => horner_preserving(&fixed.tok_out, w, false, change, slack),
+) -> Result<Forgery, String> {
+    let (ids, claimed, ascending) = match vector {
+        Vector::TokIn => (&fixed.tok_in, claims.embed_tok.first(), true),
+        Vector::TokOut => (&fixed.tok_out, claims.head_tok.first(), false),
+    };
+    let key = vector.key();
+    let claimed =
+        unqm(*claimed.ok_or_else(|| format!("the claims carry no Horner image of {key}"))?);
+    if ids.is_empty() {
+        return Err(format!("the statement publishes no {key}"));
     }
+    let (change, slack) = vector.g9_edit();
+    for transcript in [Transcript::TokensMixed, Transcript::Upstream] {
+        let w = replayed_w(fixed, proof, transcript)?;
+        if horner(ids, w, ascending) == claimed {
+            let ids = horner_preserving(ids, w, ascending, change, slack)?;
+            return Ok(Forgery { ids, transcript });
+        }
+    }
+    Err(format!(
+        "neither transcript's w gives the claimed Horner image of the honest {key}"
+    ))
 }
 
 #[cfg(test)]

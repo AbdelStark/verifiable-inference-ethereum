@@ -6,6 +6,7 @@ mod common;
 
 use common::{Bundle, MUTATIONS, Outcome, oracle_records};
 use sash_segment_check::{Reject, check_statement, check_verdict};
+use serde_json::Value;
 use sha2::{Digest, Sha256};
 use zk_prover::common::Proof;
 use zk_prover::compose::{Claims, Fixed, Verdict, verify_composed_parsed};
@@ -18,25 +19,48 @@ const ALIGNED_GKR5: &str = "0001aa02a375b333326a89a9650203c58340f56ae7443c839606
 /// The public values `SPEC.md` §1.1's table gives for a positive bundle, laid out by hand from:
 /// - `segmentIndex`, `preRoot`, `modelRoot`: `fixed.json`'s `layer`, `pre_root`, `model_root`;
 /// - `residualInRoot`, `residualOutRoot`: the `(layer, in)` and `(layer, out)` roots of upstream's
-///   `boundary_sides` in `sp1/testdata/synthetic.oracle.json`;
+///   `boundary_sides` in `sp1/testdata/synthetic.oracle.json`, the out root zero on the head;
 /// - `fixedHash`: sha256 of the parsed `Fixed`, `tok_in` and `tok_out` cleared, re-serialized;
-/// - `tokInHash`, `tokOutHash`: zero, since the oracle's binding table has neither the embedding
-///   (edge 15) nor the argmax (edge 16).
+/// - `tokInHash`, `tokOutHash`: `SPEC.md` §1.3's `tokenHash` of `tok_in` or `tok_out` where the
+///   oracle's binding table has the embedding (edge 15) or the argmax (edge 16), else zero.
 fn derived_public_values(tag: &str) -> String {
     let bundle = Bundle::load(tag);
     let fixed = bundle.fixed_json();
     let record = &oracle_records()[tag];
     let absent: Vec<u64> = serde_json::from_value(record["binding"]["absent"].clone()).unwrap();
-    assert!(absent.contains(&15) && absent.contains(&16));
-    assert!(fixed.get("tok_in").is_none() && fixed.get("tok_out").is_none());
+    // `word(id)`: 28 zero bytes, then the id big-endian.
+    let token_hash = |edge: u64, key: &str| -> String {
+        let ids = fixed.get(key).and_then(Value::as_array);
+        if absent.contains(&edge) {
+            assert!(ids.is_none(), "{tag}: {key} without edge {edge}");
+            return "00".repeat(32);
+        }
+        let ids = ids.unwrap_or_else(|| panic!("{tag}: edge {edge} without {key}"));
+        assert!(!ids.is_empty(), "{tag}: {key} is empty");
+        let mut h = Sha256::new();
+        for id in ids {
+            h.update([0u8; 28]);
+            h.update(u32::try_from(id.as_u64().unwrap()).unwrap().to_be_bytes());
+        }
+        hex::encode(h.finalize())
+    };
 
-    let layer_side = |role: &str| -> String {
+    let layer_side = |role: &str| -> Option<String> {
         let sides = record["verdict"]["boundary_sides"].as_array().unwrap();
-        let side = sides
+        sides
             .iter()
             .find(|s| s["axis"] == "layer" && s["role"] == role && s["group"].is_null())
-            .unwrap_or_else(|| panic!("{tag}: no (layer, {role}) side"));
-        side["root"].as_str().unwrap().to_string()
+            .map(|side| side["root"].as_str().unwrap().to_string())
+    };
+    // The head (the argmax, edge 16) commits no out side: 32 zero bytes.
+    let out_root = if absent.contains(&16) {
+        layer_side("out").unwrap_or_else(|| panic!("{tag}: no (layer, out) side"))
+    } else {
+        assert!(
+            layer_side("out").is_none(),
+            "{tag}: a head with an out side"
+        );
+        "00".repeat(32)
     };
     let parsed: Fixed = serde_json::from_slice(&bundle.fixed).unwrap();
     let cleared = Fixed {
@@ -51,11 +75,11 @@ fn derived_public_values(tag: &str) -> String {
         hex::encode(layer.to_be_bytes()),
         fixed["pre_root"].as_str().unwrap().to_string(),
         fixed["model_root"].as_str().unwrap().to_string(),
-        layer_side("in"),
-        layer_side("out"),
+        layer_side("in").unwrap_or_else(|| panic!("{tag}: no (layer, in) side")),
+        out_root,
         fixed_hash,
-        "00".repeat(32),
-        "00".repeat(32),
+        token_hash(15, "tok_in"),
+        token_hash(16, "tok_out"),
     ]
     .concat()
 }
@@ -79,6 +103,23 @@ fn sound_aligned_accepts() {
 fn aligned_gkr5_accepts() {
     assert_eq!(derived_public_values("aligned_gkr5"), ALIGNED_GKR5);
     assert_eq!(accept("aligned_gkr5"), ALIGNED_GKR5);
+}
+
+/// The two bundles that publish a token vector (`sp1/patches/0007`), each with its gadget's edge
+/// bound: `embed` (layer 0, edge 15, `tok_in`) and `head_argmax` (the head, edge 16, `tok_out`).
+/// Their forgeries are G9's mutations.
+#[test]
+#[ignore = "needs the synthetic corpus in SASH_SYNTHETIC_CORPUS (sash CI job)"]
+fn token_bundles_accept() {
+    for (tag, key) in [("embed", "tok_in"), ("head_argmax", "tok_out")] {
+        let fixed = Bundle::load(tag).fixed_json();
+        assert_eq!(
+            fixed[key].as_array().map(Vec::len),
+            Some(32),
+            "{tag}: {key}"
+        );
+        assert_eq!(accept(tag), derived_public_values(tag), "{tag}");
+    }
 }
 
 /// The bundles upstream composes with an `--unsound-*` flag, or `sound_gkrfive`'s narrow shape:
