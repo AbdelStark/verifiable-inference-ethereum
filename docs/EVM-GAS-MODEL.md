@@ -195,7 +195,7 @@ All 23 segments of the §1 run, verified by the segment guest (`SPEC.md` §1.1) 
 - **SP1:** sp1-sdk `6.10.0` (circuit version `v6.1.0`), `LightProver`, `calculate_gas(true)`, `CYCLE_LIMIT` `12,000,000,000`.
 - **Executor:** portable. sp1-core-executor 6.10.0 uses its native executor only on Linux x86_64 without the `profiling` feature (`build.rs`), so every macOS run is portable.
 - **Machine:** Apple M3 Max, 14 cores, 36 GiB, macOS 15.7.3.
-- **Program:** the committed segment guest, #43's x86_64 Docker build: ELF sha256 `d8e6280fad7c667f5b07c18d891bf2444a1304046df2838b94161a77e6b52e28` (`sp1/segment-guest.elf.sha256`), vkey `bytes32` `0x0025dac01e6b93eabfce48c8400bcd4c7bd401f61d2d82dfabfe1e2ee3eea2e2` (`sp1/segment-guest.vkey`).
+- **Program:** the segment guest before rule 8 (`SPEC.md` §1.1), #43's x86_64 Docker build: ELF sha256 `d8e6280fad7c667f5b07c18d891bf2444a1304046df2838b94161a77e6b52e28`, vkey `bytes32` `0x0025dac01e6b93eabfce48c8400bcd4c7bd401f61d2d82dfabfe1e2ee3eea2e2`. The committed guest (`sp1/segment-guest.elf.sha256`, `sp1/segment-guest.vkey`) adds rule 8, which reads only the statement, after verification; these figures have not been re-measured on it.
 - **SP1 options:** the defaults. `make sp1-execute` refuses to run if any variable `SP1CoreOpts::default()` reads is set (`MINIMAL_TRACE_CHUNK_THRESHOLD`, `GAS_TRACE_CHUNK_THRESHOLD`, `TRACE_CHUNK_SLOTS`, `GAS_TRACE_CHUNK_SLOTS`, `MEMORY_LIMIT`, `SHARD_SIZE`, `ELEMENT_THRESHOLD`, `HEIGHT_THRESHOLD`, `FULL_SIZE_SHARDS`): gas estimation treats each trace chunk as a shard, so the PGU depends on them.
 - **Command** (about 10 minutes; not in `make check` or CI, which have no bundles):
 
@@ -266,7 +266,7 @@ The two agree within 0.13 points: the bare compression's 2,139 cycles include a 
 | `block` removed (`nn_pos_ok` holds without it) | `B0L10` fixed | exit 1, `NotSingleBlock` | 1,880,280,426 (local build) |
 | `block` 0 to 1 (the head has no rotation, so `nn_pos_ok` holds) | `head` fixed | exit 1, `NotSingleBlock` | 6,216,215,546 (local build) |
 
-The two `NotSingleBlock` rows (rule 8) ran on a local `cargo prove build` of the segment guest, not the committed Docker build the other rows use; their cycles change with the ELF.
+The two `NotSingleBlock` rows (rule 8) ran on a local `cargo prove build` of the segment guest with rule 8, not on a Docker build. The other rows ran on #43's Docker build before rule 8 (§7, Program). Cycles change with the ELF.
 
 **Against the per-request limits** (one request per segment) **and in GPU time:**
 
@@ -288,7 +288,7 @@ Each figure is labelled measured or estimated. Estimates are computed from the m
 `B0L10` (a typical segment) and `head` (the largest) proved to SP1 compressed proofs, the mode M3's aggregator consumes, on one rented NVIDIA GPU. This replaces §7's unverified 2M PGU/s per GPU.
 
 - **SP1:** sp1-sdk `6.10.0` with its `cuda` feature (`ProverClient::builder().cuda()`), which starts SP1's prebuilt `sp1-gpu-server` `v6.10.0` (release asset `sp1_gpu_server_v6.10.0_x86_64.tar.gz`, sha256 `20ee4b96fa6e5a2ce8a9da523ee42b75c698658ae1d4366e57b52bdd642f1bdb` on 2026-10-28; it links `libcudart.so.12`). Options are the defaults; the server sizes shards from the card's memory (`sp1-gpu/crates/prover_components/src/builder.rs:35-52`).
-- **Program:** the committed segment guest, #43's Docker build (ELF sha256 `d8e6280f…6b52e28`, vkey `0x0025dac0…3eea2e2`, §7).
+- **Program:** the segment guest before rule 8, #43's Docker build (ELF sha256 `d8e6280f…6b52e28`, vkey `0x0025dac0…3eea2e2`, §7).
 - **Host:** Hugging Face Jobs flavor `rtx-pro-6000`, listed as 1× NVIDIA RTX PRO 6000 (96 GB), 23 vCPU, 256 GB RAM, $0.045833 per minute, on 2026-10-28:
   - GPU: NVIDIA RTX PRO 6000 Blackwell Server Edition, compute capability 12.0, 97,887 MiB, power limit 600 W; driver 580.178.04 (CUDA 13.0); container image `nvidia/cuda:12.8.1-base-ubuntu24.04` (CUDA 12.8 runtime);
   - CPU and RAM: the container sees the host's 2× Intel Xeon Platinum 8559C (96 cores, 192 threads) and 1,999 GB under KVM; the flavor allots 23 vCPU and 256 GB. Linux 6.12.103 (Amazon Linux 2023 kernel), x86_64;
