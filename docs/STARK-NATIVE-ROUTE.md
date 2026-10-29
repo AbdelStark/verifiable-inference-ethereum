@@ -17,10 +17,10 @@ The question raised in review: SASH already produces Circle STARK proofs, so why
 
 ## Why SASH proofs can't settle on Ethereum directly
 
-The EIP facts below are verified; the sizes and gas multiples are estimates from an unpublished run (`docs/EVM-GAS-MODEL.md` §1, §3):
+The EIP facts below are verified; the sizes and gas multiples are estimates from the published TinyLlama run (`docs/EVM-GAS-MODEL.md` §1, §3):
 - **No BLAKE2s on the EVM.** The precompile at `0x09` (`EIP-152`) is only the BLAKE2b `F` compression function, over 64-bit words. SASH hashes with 32-bit BLAKE2s.
 - **One segment is bigger than a block.** One segment proof (`B0L0`) is about 13.45 MB by stwo's in-memory `size_estimate()` plus its GKR bytes (its JSON fixed, claims and proof files are 34.8 MB), above the Osaka block size limit of `EIP-7934` (about 8 MiB). Its calldata floor alone is about 28.5x the `EIP-7825` per-transaction cap.
-- **All 23 segments need at least ~800x the cap** under Osaka (`docs/EVM-GAS-MODEL.md` §3). These figures are estimates from the sizes of an unpublished run.
+- **All 23 segments need at least ~800x the cap** under Osaka (`docs/EVM-GAS-MODEL.md` §3). These figures are estimates from the sizes of the published TinyLlama run.
 - **Any route must recurse off-chain first.** SASH proofs have to become one small proof before they reach L1.
 
 ## SASH's proof format, at `eb95bfa`

@@ -1,16 +1,20 @@
 #!/usr/bin/env bash
-# make sp1-execute: runs the Docker-built segment guest on all 23 TinyLlama segments in the SP1
-# executor, one process per segment, checks each against native check_segment and its fixedHash pin,
-# prints one row per segment and the totals (docs/EVM-GAS-MODEL.md §7), then runs the controls on
-# modified copies of the bundles under OUT/controls.
+# make sp1-execute: runs the Docker-built segment guest on the TinyLlama segments (all 23 by default)
+# in the SP1 executor, one process per segment, checks each against native check_segment and its
+# fixedHash pin, prints one row per segment and the totals (docs/EVM-GAS-MODEL.md §7), then runs the
+# controls on modified copies of the bundles under OUT/controls.
 #
-# BUNDLES: the 69 bundle files (checked by `make bundles-check` first). OUT: where the per-segment
-# outputs go (outside the repository or gitignored); #44 and #47 read OUT/<tag>.public-values.
-# ELF: the segment guest from `make sp1-docker`, or copied from a host with the pinned image; a local
-# non-Docker build depends on the installed toolchain, so its figures belong to no committed program.
-# PINS=write writes sp1/pins/tinyllama.fixed.sha256 instead of checking it.
+# BUNDLES: the 69 bundle files (`make bundles-download`, checked by `make bundles-check` first). OUT:
+# where the per-segment outputs go (outside the repository or gitignored); #44 and #47 read
+# OUT/<tag>.public-values. ELF: the segment guest from `make sp1-docker`, the `segment-guest-elf` CI
+# artifact, or copied from a host with the pinned image; a local non-Docker build depends on the
+# installed toolchain, so its figures belong to no committed program. PINS=write writes
+# sp1/pins/tinyllama.fixed.sha256 instead of checking it. SEGMENTS: a space-separated subset of the
+# tags, in any order, which must include the controls' B0L0, B0L10 and head (the sp1-bundles CI job's
+# PR path); PINS=write needs all 23.
 #
-# Not in `make check` or CI: the bundles are 761 MB and uncommitted. Needs SP1 v6.10.0 and protoc.
+# `make check` runs it on all 23 when make sp1-docker's ELF and the bundles are present;
+# the sp1-bundles CI job runs it. Needs SP1 v6.10.0 and protoc.
 set -euo pipefail
 
 cd "$(dirname "$0")/../.."
@@ -25,6 +29,7 @@ fail() {
 
 [[ -n "${BUNDLES:-}" && -n "${OUT:-}" && -n "${ELF:-}" ]] || fail "set BUNDLES, OUT and ELF"
 [[ "${PINS:-}" == "" || "${PINS:-}" == write ]] || fail "PINS must be unset or 'write'"
+[[ -z "${SEGMENTS:-}" || "${PINS:-}" != write ]] || fail "PINS=write writes all 23 pins; unset SEGMENTS"
 
 # Every variable SP1CoreOpts::default() reads (sp1-core-executor 6.10.0 src/opts.rs). Gas estimation
 # treats each trace chunk as a shard, so the PGU depends on them; the recorded figures take none.
@@ -63,9 +68,20 @@ elf="$(cd "$(dirname "$ELF")" && pwd)/$(basename "$ELF")"
     fail "$elf's vkey differs from sp1/segment-guest.vkey"
 echo "OK: $elf matches sp1/segment-guest.elf.sha256 and sp1/segment-guest.vkey"
 
-tags=()
-for l in $(seq 0 21); do tags+=("B0L$l"); done
-tags+=(head)
+all=()
+for l in $(seq 0 21); do all+=("B0L$l"); done
+all+=(head)
+if [[ -z "${SEGMENTS:-}" ]]; then
+    tags=("${all[@]}")
+else
+    read -ra tags <<<"$SEGMENTS"
+    for tag in "${tags[@]}"; do
+        [[ " ${all[*]} " == *" $tag "* ]] || fail "SEGMENTS: $tag is not a TinyLlama segment tag"
+    done
+    for tag in B0L0 B0L10 head; do
+        [[ " ${tags[*]} " == *" $tag "* ]] || fail "SEGMENTS must include $tag: the controls run on it"
+    done
+fi
 
 field() { sed -n "s/^$2: //p" "$1"; }
 
@@ -115,7 +131,7 @@ if [[ "${PINS:-}" == write ]]; then
     } >"$pins"
     echo "OK: wrote $pins"
 fi
-[[ "$(grep -cv '^#' "$pins")" == "${#tags[@]}" ]] || fail "$pins must hold one pin per segment"
+[[ "$(grep -cv '^#' "$pins")" == "${#all[@]}" ]] || fail "$pins must hold one pin per segment"
 
 # One row per segment, then the totals. Shares are of the segment's cycles.
 for tag in "${tags[@]}"; do

@@ -1,10 +1,10 @@
 //! The segment guest in the SP1 executor on the synthetic corpus (`SPEC.md` §1.1 and the guest rows
 //! of §2.1): every corpus bundle and every bundle mutation of `sash-segment-check`'s native tests,
 //! whose mutations this suite shares. Each exits 1 with a panic message naming the native test's
-//! `Reject` variant: no corpus bundle is the single token block `B0` (rule 8), so none exits 0 here
-//! (`AGENTS.md` §9); `make sp1-execute` runs the accepting TinyLlama segments. The `Verdict`-level
-//! and other unit-level controls stay native-only. Run by `make sp1-guest-suite` and in the `sp1` or
-//! `sp1-cached` CI job:
+//! `Reject` variant: no corpus bundle is the single token block `B0` (rule 8), so none exits 0 here;
+//! the accepting path runs on the published TinyLlama bundles (`make sp1-execute`, in the
+//! `sp1-bundles` CI job, `SPEC.md` §2.1). The `Verdict`-level and other unit-level controls stay
+//! native-only. Run by `make sp1-guest-suite` and in the `sp1` or `sp1-cached` CI job:
 //! `SASH_SYNTHETIC_CORPUS=<dir> cargo test --release --locked -p sp1-host --test segment_guest -- --ignored`.
 
 #[path = "../../sash-segment-check/tests/common/mod.rs"]
