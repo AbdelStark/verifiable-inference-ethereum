@@ -7,7 +7,8 @@ name: CI
 # file the corpus and the built oracle come from, in the cache (entries saved on main, or by an earlier
 # run of the same PR). On a hit, sash checks the restored corpus without rebuilding upstream SASH, and
 # sp1-cached runs the executor suite on it without waiting for sash; on a miss, sash runs in full and
-# sp1 takes its artifact.
+# sp1 takes its artifact. sp1-bundles runs the segment guest on the published TinyLlama bundles with
+# sp1-workspace's Docker-built ELF: three segments on a PR, all 23 and the fixture check otherwise.
 on:
   push:
     branches: [main]
@@ -289,6 +290,90 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps: *sp1-suite
+
+  # The segment guest on the published TinyLlama bundles (sp1/scripts/tinyllama-bundles.sh), with the
+  # Docker-built ELF from sp1-workspace in this run. A PR runs B0L0, B0L10 and head and the controls,
+  # which use only those three; pushes to main and the schedule run all 23, the controls and the
+  # fixture byte-identity check. One segment execution at a time: the native executor keeps guest
+  # memory in /dev/shm.
+  sp1-bundles:
+    name: SP1 segment guest on the published TinyLlama bundles
+    needs: [changes, sp1-workspace]
+    if: needs.changes.outputs.heavy == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: ${{ github.event_name == 'pull_request' && 90 || 240 }}
+    env:
+      BUNDLES: ${{ github.workspace }}/runs/tinyllama
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install Rust toolchain from rust-toolchain.toml
+        run: rustup toolchain install
+      - name: Install protoc (sp1-sdk build dependency)
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+      - name: Install SP1 v6.10.0
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          curl -sSfL -o "$RUNNER_TEMP/sp1up" https://raw.githubusercontent.com/succinctlabs/sp1/v6.10.0/sp1up/sp1up
+          bash "$RUNNER_TEMP/sp1up" --version v6.10.0
+          echo "$HOME/.sp1/bin" >> "$GITHUB_PATH"
+      - name: Print toolchain versions
+        run: |
+          "$HOME/.sp1/bin/cargo-prove" prove --version
+          rustc +succinct --version
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: sp1 -> target
+          shared-key: sp1
+          save-if: false
+      - name: Vendor SASH eb95bfa (sha256-pinned tarball plus sp1/patches)
+        run: sp1/scripts/vendor-sash.sh
+      - name: Restore the TinyLlama bundles (keyed by sp1/pins/tinyllama.sha256)
+        id: bundles
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: runs/tinyllama
+          key: tinyllama-bundles-${{ hashFiles('sp1/pins/tinyllama.sha256') }}
+      # Anonymous: the dataset is public. Keeps restored files with their pinned sha256, downloads the
+      # rest at the pinned dataset commit, and fails unless runs/tinyllama holds exactly the 69 pinned files.
+      - name: Download the TinyLlama bundles from their public Hugging Face dataset and check them against sp1/pins/tinyllama.sha256
+        run: sp1/scripts/tinyllama-bundles.sh "$BUNDLES"
+      - name: Save the TinyLlama bundles
+        if: steps.bundles.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: runs/tinyllama
+          key: tinyllama-bundles-${{ hashFiles('sp1/pins/tinyllama.sha256') }}
+      # The native executor keeps guest memory in /dev/shm, a tmpfs of half the runner's 16 GB by default;
+      # head's run comes close to that (docs/EVM-GAS-MODEL.md §7), and a full /dev/shm is a SIGBUS.
+      - name: Enlarge /dev/shm for head's guest memory
+        run: |
+          sudo mount -o remount,size=12G /dev/shm
+          df -h /dev/shm && free -h
+      # sp1-execute.sh and sp1-fixture-check.sh check it against sp1/segment-guest.elf.sha256 and sp1/segment-guest.vkey.
+      - name: Download sp1-workspace's Docker-built segment guest ELF
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: segment-guest-elf
+          path: ${{ runner.temp }}/segment-guest-elf
+      - name: Segment guest in the executor on B0L0, B0L10 and head, against native check_segment and the fixedHash pins, and the real-bundle controls (SPEC.md §2.1 G2, G7, G9, G10) (PRs)
+        if: github.event_name == 'pull_request'
+        env:
+          ELF: ${{ runner.temp }}/segment-guest-elf/segment-guest
+          OUT: ${{ runner.temp }}/sp1-execute
+          SEGMENTS: B0L0 B0L10 head
+        run: sp1/scripts/sp1-execute.sh
+      - name: Segment guest in the executor on all 23 segments, against native check_segment and the fixedHash pins, and the real-bundle controls (SPEC.md §2.1 G2, G7, G9, G10) (main, schedule)
+        if: github.event_name != 'pull_request'
+        env:
+          ELF: ${{ runner.temp }}/segment-guest-elf/segment-guest
+          OUT: ${{ runner.temp }}/sp1-execute
+        run: sp1/scripts/sp1-execute.sh
+      - name: TinyLlamaFixture.sol rendered from the 23 segments' executor public values is byte-identical to the committed one (main, schedule)
+        if: github.event_name != 'pull_request'
+        env:
+          ELF: ${{ runner.temp }}/segment-guest-elf/segment-guest
+        run: sp1/scripts/sp1-fixture-check.sh
 
   sash:
     name: Upstream SASH prover & synthetic corpus

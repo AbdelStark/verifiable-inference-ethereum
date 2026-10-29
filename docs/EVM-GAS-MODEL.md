@@ -4,10 +4,10 @@ M1 has measured the grid path and the dev-mode settlement (§4). Every other gas
 
 ## 1. TinyLlama-1.1B SASH proof sizes
 
-Figures from the same unpublished SASH run as the fixture (`SPEC.md` §1.4), whose bundles `AbdelStark/hallmark`'s recipe (`make e2e-llm` at `675c99af66067d129dac30d6acc6612f4e392e68`, with patch 0006 applied before the prover build, `SPEC.md` §1.4) produced and `sp1/pins/tinyllama.sha256` pins: all 23 segments (`B0L0..B0L21` + `head`) of `TinyLlama/TinyLlama-1.1B-Chat-v1.0` (`fe8a4ea1ffedaf415f4da2f062534de366a451e6`) proved with `sg-ai-safety-hub/zk-inference-prover` (`eb95bfa887299d1637550228d42086c27cbb2b3b`, profile `y-attnout-w12`, `S = 32` tokens) plus the token binding (`sp1/patches/0006`, `SPEC.md` §1.1). `sp1-host sizes` recomputes every row from the bundles:
+Figures from the same SASH run as the fixture (`SPEC.md` §1.4), whose bundles `AbdelStark/hallmark`'s recipe (`make e2e-llm` at `675c99af66067d129dac30d6acc6612f4e392e68`, with patch 0006 applied before the prover build, `SPEC.md` §1.4) produced and `sp1/pins/tinyllama.sha256` pins: all 23 segments (`B0L0..B0L21` + `head`) of `TinyLlama/TinyLlama-1.1B-Chat-v1.0` (`fe8a4ea1ffedaf415f4da2f062534de366a451e6`) proved with `sg-ai-safety-hub/zk-inference-prover` (`eb95bfa887299d1637550228d42086c27cbb2b3b`, profile `y-attnout-w12`, `S = 32` tokens) plus the token binding (`sp1/patches/0006`, `SPEC.md` §1.1). The 69 bundle files are published as the public Hugging Face dataset [`0xchqrles/sash-tinyllama-bundles`](https://huggingface.co/datasets/0xchqrles/sash-tinyllama-bundles) at commit `7284cdba1353dfd441fb4a244aabd0c9bfb9dcd5`; `make bundles-download` (`sp1/scripts/tinyllama-bundles.sh`) fetches that commit anonymously into `runs/tinyllama` and checks every file against `sp1/pins/tinyllama.sha256`. `sp1-host sizes` recomputes every row from the bundles:
 
 ```bash
-make sp1-vendor
+make bundles-download sp1-vendor
 cd sp1 && cargo run --release --locked -p sp1-host --bin sp1-host -- sizes --bundles ../runs/tinyllama
 ```
 
@@ -197,7 +197,7 @@ All 23 segments of the §1 run, re-proved with the token binding (`SPEC.md` §1.
 - **Machine:** Apple M3 Max, 14 cores, 36 GiB, macOS 15.7.3.
 - **Program:** the committed segment guest (`SPEC.md` §1.1, patch 0006 and rule 8), the `segment-guest-elf` artifact of CI's x86_64 Docker build (#43's recipe): ELF sha256 `05dfd82121103f9448686fd567b86fc25c927c9d33a3c44625413e2f6b3eba6a`, vkey `bytes32` `0x003b73b0c998606408f61a261098a22a47e5edcbad107157e13763ef90c4997c` (`sp1/segment-guest.elf.sha256`, `sp1/segment-guest.vkey`).
 - **SP1 options:** the defaults. `make sp1-execute` refuses to run if any variable `SP1CoreOpts::default()` reads is set (`MINIMAL_TRACE_CHUNK_THRESHOLD`, `GAS_TRACE_CHUNK_THRESHOLD`, `TRACE_CHUNK_SLOTS`, `GAS_TRACE_CHUNK_SLOTS`, `MEMORY_LIMIT`, `SHARD_SIZE`, `ELEMENT_THRESHOLD`, `HEIGHT_THRESHOLD`, `FULL_SIZE_SHARDS`): gas estimation treats each trace chunk as a shard, so the PGU depends on them.
-- **Command** (about 10 minutes; not in `make check` or CI, which have no bundles):
+- **Command** (about 10 minutes; `make check` runs it on `B0L0`, `B0L10` and `head` when `make sp1-docker`'s ELF and the bundles are present; the `sp1-bundles` CI job runs it on the published bundles, on `B0L0`, `B0L10` and `head` on a PR (`SEGMENTS="B0L0 B0L10 head"`) and on all 23 on pushes to `main` and the weekly schedule, with `make sp1-fixture-check` after it):
 
   ```bash
   make sp1-execute BUNDLES=runs/tinyllama OUT=<dir> ELF=<segment-guest>

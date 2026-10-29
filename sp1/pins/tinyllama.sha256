@@ -1,3 +1,7 @@
+# sha256 of the 69 TinyLlama proof bundle files (SPEC.md §1.4), published as the public Hugging Face
+# dataset 0xchqrles/sash-tinyllama-bundles at commit 7284cdba1353dfd441fb4a244aabd0c9bfb9dcd5.
+# sp1/scripts/tinyllama-bundles.sh (make bundles-download, the sp1-bundles CI job) downloads that
+# commit and checks every file against these pins; make bundles-check checks a local copy.
 e798c0be6656aa4310cf61414a7bafa465ea368859e4fa082b2153ab9afe2d9a  B0L0.claims.json
 c03e8652c8033af9f71fbbfc0690a87035e4c7e3057ba50fb84a3112beae14e8  B0L0.fixed.json
 ead73f22f97c12241150dbb20981d8fe1b62327683abb9819eac1fe1ff2cc2ad  B0L0.proof.json

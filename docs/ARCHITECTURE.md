@@ -8,7 +8,7 @@
 |   which mixes the published token vectors into the transcript)          |
 |   Model: TinyLlama-1.1B-Chat-v1.0 (fe8a4ea, profile y-attnout-w12)      |
 |   Outputs 23 segment bundles: B0L0 .. B0L21 + head (761 MB JSON in the  |
-|   unpublished run; all 23 verify in the M2 guest)                       |
+|   published run; all 23 verify in the M2 guest)                         |
 +------------------------------------+------------------------------------+
                                      |
                                      v
