@@ -165,7 +165,7 @@ pub enum AssemblyError {
     PromptLength { prompt_len: usize, seq_len: usize },
     /// `S = tokIn.len()` does not fit a `u16`.
     SequenceLength { got: usize },
-    /// The assembled run fails the grid checks (`SPEC.md` §1.2).
+    /// The assembled run fails the grid checks (`SPEC.md` §2).
     Grid(GridError),
 }
 
