@@ -18,7 +18,7 @@
 |     of verify_composed (+ patch 0006); rejects token ids >= P;          |
 |     commits fixedHash                                                   |
 |   - M3: aggregator verifies 23 proofs, commits publicDigest             |
-|   - M3: SP1 v6 BN254 wrap (Groth16 or PLONK, chosen at M3 start)        |
+|   - M3: SP1 v6 BN254 PLONK wrap                                         |
 +------------------------------------+------------------------------------+
                                      |
            Single Ethereum Transaction (< 600k gas: M3 exit gate)
@@ -51,4 +51,4 @@ A naive zkVM wrapper would collapse the entire 23-segment LLM run into a single 
 By keeping **manifest admission, 22-layer residual Merkle root chaining, the sha256 `publicDigest` over the segment claims and both token vectors, prompt/response slicing, teacher-forcing loop closure, and EOS checking** native in Solidity (~76k gas measured: `getManifest`, `verifyGrid` and `computePublicDigest`, [EVM-GAS-MODEL.md](EVM-GAS-MODEL.md) §4):
 1. Smart contracts inspect and bind per-layer `modelRoot`, `preRoot` and `fixedHash` commitments directly on-chain.
 2. Any bug in token indexing, prompt prefix slicing, or boundary chaining is prevented by small, auditable, unconditional EVM code.
-3. The segment proof interface (`ISashSegmentVerifier`) stays modular: changing the proof system behind it, such as the BN254 wrap that M3 chooses for `Sp1SashSegmentVerifier`, requires **zero** changes to `SashModelRegistry`, `SashGridVerifier`, or downstream consumer contracts.
+3. The segment proof interface (`ISashSegmentVerifier`) stays modular: changing the proof system behind it, such as `Sp1SashSegmentVerifier`'s BN254 PLONK wrap, requires **zero** changes to `SashModelRegistry`, `SashGridVerifier`, or downstream consumer contracts.

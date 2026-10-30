@@ -6,9 +6,11 @@ import {ISP1Verifier} from "@sp1-contracts/ISP1Verifier.sol";
 import {ISashSegmentVerifier} from "./ISashSegmentVerifier.sol";
 
 /// @title Sp1SashSegmentVerifier
-/// @notice Production/testnet adapter verifying the BN254 Groth16/Plonk proof of the M3 aggregator over the
-///         SASH segment guests (`SPEC.md` §1) via an immutable `ISP1Verifier` and pinned `sashAggregatorVKey`.
-/// @dev Outer wrapper relies on BN254 pairing hardness, SRS ceremony integrity, and SP1 circuit soundness.
+/// @notice Production/testnet adapter verifying the BN254 PLONK proof of the M3 aggregator over the SASH segment
+///         guests (`SPEC.md` §1), through the pinned SP1 v6.1.0 `SP1VerifierPlonk` (an immutable `ISP1Verifier`)
+///         and the pinned `sashAggregatorVKey`.
+/// @dev The outer wrap relies on BN254 pairing hardness, the Aztec Ignition universal SRS and SP1 v6 circuit
+///      soundness (`SECURITY.md` §2 and §6).
 contract Sp1SashSegmentVerifier is ISashSegmentVerifier {
     ISP1Verifier public immutable SP1_VERIFIER;
     bytes32 public immutable SASH_AGGREGATOR_VKEY;
@@ -24,7 +26,7 @@ contract Sp1SashSegmentVerifier is ISashSegmentVerifier {
     }
 
     function verifierKind() external pure override returns (SashTypes.VerifierKind) {
-        return SashTypes.VerifierKind.ZKVM_GROTH16;
+        return SashTypes.VerifierKind.ZKVM_PLONK;
     }
 
     function verifyAggregatedSegments(bytes32 publicDigest, bytes calldata proofBytes) external view override {

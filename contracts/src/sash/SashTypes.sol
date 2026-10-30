@@ -6,7 +6,7 @@ pragma solidity ^0.8.38;
 library SashTypes {
     enum VerifierKind {
         DEV_TRANSCRIPT_ONLY,
-        ZKVM_GROTH16
+        ZKVM_PLONK
     }
 
     struct ModelManifest {
