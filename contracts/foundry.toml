@@ -6,7 +6,7 @@ script = "script"
 libs = ["lib"]
 solc_version = "0.8.38"
 evm_version = "osaka"
-chain_id = 31337
+# `chain_id` stays unset, so that forks and scripts see the chain's real id; forge's default is 31337.
 optimizer = true
 optimizer_runs = 200
 via_ir = true
@@ -19,9 +19,14 @@ gas_limit = 16777216
 # Each top-level state-changing call runs as its own transaction, so its gas includes intrinsic and
 # calldata gas and matches an anvil receipt; view and pure calls aren't isolated.
 isolate = true
-# The tests and DeployAnvilSp1.s.sol read the committed PLONK proof, contracts/fixtures/tinyllama.plonk.json;
-# `out` is Foundry's default, which `deployCode` reads, and a set `fs_permissions` replaces it.
-fs_permissions = [{ access = "read", path = "./out" }, { access = "read", path = "./fixtures" }]
+# The tests and DeployAnvilSp1.s.sol read the committed PLONK proof, contracts/fixtures/tinyllama.plonk.json, and
+# the fork tests the SP1 deployment addresses; `out` is Foundry's default, which `deployCode` reads, and a set
+# `fs_permissions` replaces it.
+fs_permissions = [
+    { access = "read", path = "./out" },
+    { access = "read", path = "./fixtures" },
+    { access = "read", path = "./lib/sp1-contracts/contracts/deployments" },
+]
 
 [fuzz]
 # Fixed so the single-field mutation fuzz test (`SPEC.md` §2.1, row F) replays the same cases.
