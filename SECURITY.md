@@ -11,9 +11,10 @@ When `VerifiableInferenceSettlement` accepts a run in `VerifierKind.ZKVM_PLONK` 
 4. `tokIn` and `tokOut` are the ids the embedding (segment 0) and the argmax (`head`) committed in their proofs, with every id `< P`: SASH with patch 0006 mixes the published vectors into the Fiat-Shamir transcript before drawing the challenge `embed_tok_ok` and `head_tok_ok` check them under (§5), and their sha256 hashes are part of the `publicDigest` the segment proof attests ([SPEC.md](SPEC.md) §1, the statement the M2 and M3 guests must meet).
 5. `tokIn[0..P-1]` equals `promptIds`, `tokIn[P+j] == tokOut[P-1+j]` closes every autoregressive step $j \in [0, A-2]$, `tokOut[P-1..P+A-2]` equals `answerIds`, and `tokOut[P+A-2] == eosTokenId`.
 
-Two assumptions come with the guest:
+Two assumptions come with the guest, and a third with the aggregator:
 - **`pre_root` comes from enrollment.** The guest does not re-derive the shape root (tree 0); it accepts the `pre_root` the statement names, and the manifest pins it. Its correctness rests on enrollment (§3).
 - **The verifier build matches upstream plus patch 0006.** The guest runs a verifier-only build of `verify_composed` at `eb95bfa`, differing from upstream only by the change classes [SPEC.md](SPEC.md) §1.1 lists, reproducible as a patch series and, from M2, checked by a differential test against upstream's verifier with patch 0006 alone. Patch 0006 is the one class that changes behaviour, on the prover's side too (§5).
+- **The segment proofs reach `publicDigest` only through SP1 v6's deferred-proof recursion.** The aggregator ties each segment's public values to a proof with `verify_sp1_proof(SEGMENT_VKEY, sha256(values_i))` ([SPEC.md](SPEC.md) §1.2). Only the recursion, when proving, checks the stdin proofs against those pairs, in order, and requires each to be complete and to exit 0. The SP1 executor treats the call as a no-op, so no executor test covers that binding: binding controls B1 and B2 ([SPEC.md](SPEC.md) §2.1) test it on a GPU, by proving.
 
 The manifest pins each segment's `fixedHash`, and `SashGridVerifier` enforces it on-chain: `fixedHash` is in each segment claim and in `manifestRootsHash` ([SPEC.md](SPEC.md) §1.3), so a proof against another `Fixed` with the same two roots fails with `ManifestRootMismatch`. The guest compares it with no pin; it commits the hash it computed.
 
