@@ -21,9 +21,11 @@ bytes32 constant BROKEN_SP1_VERIFIER_PLONK_CODEHASH =
     0x413a62f179f67c0ca0ec1ee42b7bf4cee2cd1d68b420165ec673876658824465;
 
 /// The live SP1 v6.1.0 PLONK verifier on a public testnet, at a pinned block. Each fork test contract reads its RPC
-/// URL from the environment and is skipped when it is unset. `setUp` doesn't call `super.setUp()`, whose
-/// `vm.chainId(31337)` and dev verifier would make the fork pass as the dev chain: `block.chainid` is the
-/// chain's own, which needs `chain_id` unset in `foundry.toml`. No gas is pinned or snapshotted here.
+/// URL from the environment and is skipped when it is unset. The URL must be an archive endpoint that serves state at
+/// the pinned block (a pruning one fails `setUp`), e.g. https://hoodi.drpc.org, https://sepolia.gateway.tenderly.co.
+/// `setUp` doesn't call `super.setUp()`, whose `vm.chainId(31337)` and dev verifier would make the fork pass as the
+/// dev chain: `block.chainid` is the chain's own, which needs `chain_id` unset in `foundry.toml`. No gas is pinned or
+/// snapshotted here.
 abstract contract TestnetForkTest is TinyLlamaBase {
     bytes32 internal programVKey;
     bytes internal proofBytes;

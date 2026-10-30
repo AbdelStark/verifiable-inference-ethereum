@@ -116,6 +116,8 @@ jobs:
         uses: foundry-rs/foundry-toolchain@dba66c27052e63476d886f22216e119ba7e615bf # v1.9.2
         with:
           version: v1.8.6
+          # The next step is the job's only cache of the fork tests' RPC state.
+          cache: false
       - name: Print toolchain versions
         working-directory: contracts
         run: |
