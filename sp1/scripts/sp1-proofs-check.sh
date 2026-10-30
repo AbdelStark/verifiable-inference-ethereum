@@ -6,7 +6,10 @@
 # setup, sp1/<guest>.vkey; the segment vk's hash_u32 against the aggregator's SEGMENT_VKEY; each proof
 # decoded, its public values the expected ones, verified on the CPU against the segment vk; the digest,
 # SPEC.md §1.4's publicDigest; and the aggregator in the executor with the 23 proofs in stdin, deferred
-# proof verification on, committing it. No GPU. A guest-linked change that moves either guest's pins
+# proof verification on, committing it. Then `sp1-host plonk-fixture` binds plonk/tinyllama.plonk.bin to
+# contracts/fixtures/tinyllama.plonk.json: the PLONK proof decoded, its proofBytes verified under
+# sp1/aggregator-guest.vkey with its public values, and rendered to the committed fixture byte for
+# byte. No GPU. A guest-linked change that moves either guest's pins
 # fails here until the segments are re-proved and the pins and contracts/fixtures/tinyllama.plonk.json
 # re-committed (AGENTS.md §5), which is paid GPU work that needs approval (AGENTS.md §2.6).
 #
@@ -36,3 +39,4 @@ echo "OK: the 24 proof files in $proofs match sp1/pins/tinyllama.proofs.sha256"
 
 "$host" aggregate --segment-elf "$ELF" --aggregator-elf "$AGGREGATOR_ELF" --proofs "$proofs/segments" \
     --tags all --execute-only
+"$host" plonk-fixture --proof "$proofs/plonk/tinyllama.plonk.bin" --fixture contracts/fixtures/tinyllama.plonk.json

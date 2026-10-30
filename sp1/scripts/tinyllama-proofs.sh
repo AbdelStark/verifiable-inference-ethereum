@@ -6,11 +6,13 @@
 # (docs/EVM-GAS-MODEL.md §9):
 #   segments/<tag>.proof.bin  the 23 segments' compressed proofs, B0L0..B0L21 and head (bincode
 #                             SP1ProofWithPublicValues), the segment guest's under sp1/segment-guest.vkey;
-#   plonk/tinyllama.plonk.bin the aggregator's PLONK proof over them, whose proofBytes are
-#                             contracts/fixtures/tinyllama.plonk.json's.
+#   plonk/tinyllama.plonk.bin the aggregator's PLONK proof over them, which sp1-proofs-check.sh
+#                             (sp1-host plonk-fixture) requires to render to
+#                             contracts/fixtures/tinyllama.plonk.json byte for byte.
 # A file already in DIR with its pinned sha256 is kept, so a directory restored from a cache is
-# checked, not downloaded again; any other file in DIR is an error. `sp1-host aggregate --proofs
-# DIR/segments --tags all --execute-only` (sp1/scripts/sp1-proofs-check.sh) then verifies the 23 proofs.
+# checked, not downloaded again; any other file in DIR is an error. sp1/scripts/sp1-proofs-check.sh then
+# verifies the 23 proofs (`sp1-host aggregate --proofs DIR/segments --tags all --execute-only`) and the
+# PLONK proof against the fixture.
 #
 # PINS=write (after a gpu-prove.sh run, with REVISION set to the dataset commit that holds all 24):
 # downloads the 24 files at REVISION into an empty DIR and writes sp1/pins/tinyllama.proofs.sha256 from

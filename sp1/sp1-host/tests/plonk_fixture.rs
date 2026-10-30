@@ -5,10 +5,13 @@
 //! `SP1VerifierPlonk` was generated from (`SECURITY.md`). Needs no download and no GPU:
 //! `cargo test --workspace`.
 
+use std::path::PathBuf;
+
 use sha2::{Digest, Sha256};
-use sp1_host::aggregate::{check_plonk_proof_bytes, plonk_fixture_json};
-use sp1_host::pins::repo_root;
-use sp1_verifier::{PLONK_VK_BYTES, PlonkVerifier, VK_ROOT_BYTES};
+use sp1_host::aggregate::{check_plonk_proof_bytes, plonk_fixture_command, plonk_fixture_json};
+use sp1_host::pins::{AGGREGATOR_GUEST, repo_root};
+use sp1_sdk::{SP1Proof, SP1ProofWithPublicValues, SP1PublicValues};
+use sp1_verifier::{PLONK_VK_BYTES, PlonkBn254Proof, PlonkVerifier, VK_ROOT_BYTES};
 
 /// `SPEC.md` §1.4's `publicDigest`.
 const SPEC_PUBLIC_DIGEST: &str =
@@ -68,12 +71,7 @@ fn hex_bytes(field: &str) -> Vec<u8> {
 /// `programVKey` is the aggregator guest's pinned `bytes32`, `sp1/aggregator-guest.vkey`.
 #[test]
 fn program_vkey_is_the_aggregator_guests_pinned_vkey() {
-    let pin = std::fs::read_to_string(repo_root().join("sp1/aggregator-guest.vkey")).unwrap();
-    let bytes32 = pin
-        .lines()
-        .find_map(|line| line.strip_prefix("bytes32: "))
-        .expect("no bytes32 line in sp1/aggregator-guest.vkey");
-    assert_eq!(fixture().program_vkey, bytes32);
+    assert_eq!(fixture().program_vkey, AGGREGATOR_GUEST.bytes32().unwrap());
 }
 
 /// `publicValues` is `SPEC.md` §1.4's `publicDigest`, the 32 bytes the aggregator commits.
@@ -121,4 +119,51 @@ fn proof_verifies_with_the_embedded_plonk_vk() {
 fn sp1_verifier_embeds_the_pinned_plonk_vk_and_vk_root() {
     assert_eq!(hex::encode(*VK_ROOT_BYTES), VK_ROOT);
     assert_eq!(hex::encode(Sha256::digest(*PLONK_VK_BYTES)), VERIFIER_HASH);
+}
+
+/// `sp1-host plonk-fixture` (`make sp1-proofs-check`) accepts a bincode PLONK proof file that carries
+/// the fixture's `proofBytes` and `publicValues`, and rejects one whose public values differ by one byte.
+#[test]
+fn plonk_fixture_command_binds_a_proof_file_to_the_fixture() {
+    let fixture = fixture();
+    let proof_bytes = hex_bytes(&fixture.proof_bytes);
+    let public_values = hex_bytes(&fixture.public_values);
+    let fixture_path = repo_root().join("contracts/fixtures/tinyllama.plonk.json");
+    // A proof file as `aggregate --mode plonk --out` writes it: `bytes()` is the first 4 bytes of
+    // `plonk_vkey_hash` followed by `encoded_proof`.
+    let write = |name: &str, public_values: &[u8]| -> PathBuf {
+        let proof = SP1ProofWithPublicValues {
+            proof: SP1Proof::Plonk(PlonkBn254Proof {
+                public_inputs: Default::default(),
+                encoded_proof: hex::encode(&proof_bytes[4..]),
+                raw_proof: String::new(),
+                plonk_vkey_hash: Sha256::digest(*PLONK_VK_BYTES).into(),
+            }),
+            public_values: SP1PublicValues::from(public_values),
+            sp1_version: String::new(),
+            tee_proof: None,
+        };
+        assert_eq!(proof.bytes(), proof_bytes);
+        let path = std::env::temp_dir().join(format!(
+            "sp1-host-plonk-fixture-{}-{name}.bin",
+            std::process::id()
+        ));
+        std::fs::write(&path, bincode::serialize(&proof).unwrap()).unwrap();
+        path
+    };
+
+    let honest = write("honest", &public_values);
+    let result = plonk_fixture_command(&honest, &fixture_path);
+    std::fs::remove_file(&honest).unwrap();
+    result.expect("plonk-fixture rejects the fixture's own proof");
+
+    let mut flipped = public_values;
+    flipped[0] ^= 1;
+    let mutated = write("flipped", &flipped);
+    let result = plonk_fixture_command(&mutated, &fixture_path);
+    std::fs::remove_file(&mutated).unwrap();
+    assert!(
+        result.is_err(),
+        "plonk-fixture accepts a proof file with a flipped public-values byte"
+    );
 }

@@ -25,7 +25,7 @@ help:
 	@echo "  make sp1-fixture-check BUNDLES=runs/tinyllama [ELF=<path>] [AGGREGATOR_ELF=<path>]"
 	@echo "                  - Check the bundles and the Docker-built segment guest (ELF), run it on all 23 TinyLlama segments in the SP1 executor, render TinyLlamaFixture.sol from its public values with sp1-host fixture-from-bundles, compare it byte for byte with the committed fixture, then run the Docker-built aggregator guest (AGGREGATOR_ELF) on those public values and require SPEC.md §1.4's publicDigest"
 	@echo "  make sp1-proofs-check PROOFS=runs/tinyllama-proofs [ELF=<path>] [AGGREGATOR_ELF=<path>]"
-	@echo "                  - Check the proofs against sp1/pins/tinyllama.proofs.sha256, then run sp1-host aggregate --tags all --execute-only with the Docker-built ELFs: the ELF and vkey pins, the segment vk against SEGMENT_VKEY, each segment proof verified with its expected public values, SPEC.md §1.4's publicDigest, and the aggregator in the executor over the 23 proofs (no GPU)"
+	@echo "                  - Check the proofs against sp1/pins/tinyllama.proofs.sha256, then run sp1-host aggregate --tags all --execute-only with the Docker-built ELFs: the ELF and vkey pins, the segment vk against SEGMENT_VKEY, each segment proof verified with its expected public values, SPEC.md §1.4's publicDigest, and the aggregator in the executor over the 23 proofs, then sp1-host plonk-fixture: the PLONK proof verified under the pinned aggregator vkey and rendered to contracts/fixtures/tinyllama.plonk.json byte for byte (no GPU)"
 	@echo "  make clean       - Clean build outputs"
 
 rust-check:

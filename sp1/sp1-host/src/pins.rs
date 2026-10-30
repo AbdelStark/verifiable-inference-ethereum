@@ -68,6 +68,14 @@ impl GuestPins {
         Ok(())
     }
 
+    /// The pinned vkey's `bytes32` (`vk.bytes32()`), as `sp1/<name>.vkey` records it.
+    pub fn bytes32(&self) -> Result<&'static str, String> {
+        self.vkey
+            .lines()
+            .find_map(|line| line.strip_prefix("bytes32: "))
+            .ok_or(format!("no bytes32 line in sp1/{}.vkey", self.name))
+    }
+
     /// Reads the ELF at `path` and checks its sha256, then its vkey from `light`'s CPU setup. Returns
     /// the ELF and its verifying key.
     pub fn load(&self, path: &Path, light: &LightProver) -> Result<(Elf, SP1VerifyingKey), String> {
@@ -141,12 +149,7 @@ pub fn decode_segment_proof(
     bytes: &[u8],
     expected: &[u8],
 ) -> Result<SP1ProofWithPublicValues, String> {
-    let proof: SP1ProofWithPublicValues = bincode::options()
-        .with_fixint_encoding()
-        .with_limit(bytes.len() as u64)
-        .reject_trailing_bytes()
-        .deserialize(bytes)
-        .map_err(|e| format!("not a bincode SP1ProofWithPublicValues: {e}"))?;
+    let proof = decode_proof(bytes)?;
     if proof.public_values.as_slice() != expected {
         return Err(format!(
             "public values {} differ from the expected {}",
@@ -158,6 +161,17 @@ pub fn decode_segment_proof(
         return Err(format!("an SP1Proof::{}, not Compressed", proof.proof));
     }
     Ok(proof)
+}
+
+/// A proof file, decoded: bincode `SP1ProofWithPublicValues` (`SP1ProofWithPublicValues::save`'s
+/// encoding, the whole file and nothing after it).
+pub fn decode_proof(bytes: &[u8]) -> Result<SP1ProofWithPublicValues, String> {
+    bincode::options()
+        .with_fixint_encoding()
+        .with_limit(bytes.len() as u64)
+        .reject_trailing_bytes()
+        .deserialize(bytes)
+        .map_err(|e| format!("not a bincode SP1ProofWithPublicValues: {e}"))
 }
 
 /// Verifies a decoded segment proof on the CPU against the segment guest's `vk`.

@@ -12,17 +12,18 @@ use clap::ValueEnum;
 use sash_aggregate::aggregate;
 use sash_evm_primitives::segment::SEGMENT_PUBLIC_VALUES_LEN;
 use sash_evm_primitives::tinyllama_fixture::tinyllama_model_id;
+use sha2::{Digest, Sha256};
 use sp1_sdk::blocking::prelude::*;
 use sp1_sdk::blocking::{CudaProver, ProverClient};
-use sp1_sdk::{SP1Stdin, SP1VerifyingKey};
+use sp1_sdk::{SP1Proof, SP1Stdin, SP1VerifyingKey};
 use sp1_verifier::{
     PLONK_VK_BYTES, PlonkVerifier, VK_ROOT_BYTES, decode_sp1_vkey_hash, hash_public_inputs,
 };
 
 use crate::gpu::with_cuda_client;
 use crate::pins::{
-    AGGREGATOR_GUEST, SEGMENT_GUEST, decode_segment_proof, expected_public_values, parse_tags,
-    repeated_tag, repo_root, verify_on_cpu, vkey_text, write_proof,
+    AGGREGATOR_GUEST, SEGMENT_GUEST, decode_proof, decode_segment_proof, expected_public_values,
+    parse_tags, repeated_tag, repo_root, verify_on_cpu, vkey_text, write_proof,
 };
 use crate::prove::{check_new_file, check_new_path, create_new, print_file, write_proof_file};
 use crate::{ECHO_GUEST_ELF, Execution, execute, run_executor, tinyllama_tags};
@@ -443,6 +444,41 @@ pub fn plonk_fixture_json(program_vkey: &str, public_values: &[u8], proof_bytes:
         hex::encode(public_values),
         hex::encode(proof_bytes)
     )
+}
+
+/// `sp1-host plonk-fixture`: binds a published PLONK proof file (`plonk/tinyllama.plonk.bin`) to the
+/// committed fixture. The file must decode to an `SP1Proof::Plonk` whose `proofBytes` pass
+/// [`check_plonk_proof`] under the aggregator's pinned `bytes32` with its own public values, and the
+/// fixture [`plonk_fixture_json`] renders from them must equal `fixture` byte for byte. No GPU.
+pub fn plonk_fixture_command(proof: &Path, fixture: &Path) -> Result<ExitCode, String> {
+    let bytes = fs::read(proof).map_err(|e| format!("{}: {e}", proof.display()))?;
+    let decoded = decode_proof(&bytes).map_err(|e| format!("{}: {e}", proof.display()))?;
+    if !matches!(decoded.proof, SP1Proof::Plonk(_)) {
+        return Err(format!(
+            "{}: an SP1Proof::{}, not Plonk",
+            proof.display(),
+            decoded.proof
+        ));
+    }
+    let program_vkey = AGGREGATOR_GUEST.bytes32()?;
+    let proof_bytes = check_plonk_proof(&decoded, program_vkey)?;
+    let rendered = plonk_fixture_json(program_vkey, decoded.public_values.as_slice(), &proof_bytes);
+    let committed = fs::read(fixture).map_err(|e| format!("{}: {e}", fixture.display()))?;
+    if committed != rendered.as_bytes() {
+        return Err(format!(
+            "{} (sha256 {}) is not the fixture {} renders under sp1/aggregator-guest.vkey (sha256 {})",
+            fixture.display(),
+            hex::encode(Sha256::digest(&committed)),
+            proof.display(),
+            hex::encode(Sha256::digest(rendered.as_bytes()))
+        ));
+    }
+    println!(
+        "OK: {} is {} byte for byte, under sp1/aggregator-guest.vkey",
+        fixture.display(),
+        proof.display()
+    );
+    Ok(ExitCode::SUCCESS)
 }
 
 /// `sp1-host aggregate-control`: binding control B1 or B2 (`SPEC.md` §2.1) at `N = 1` on `B0L10`,
