@@ -4,7 +4,7 @@
 
 ## 1. What an accepted proof guarantees
 
-When `VerifiableInferenceSettlement` accepts a run in `VerifierKind.ZKVM_PLONK` mode (never `DEV_TRANSCRIPT_ONLY`, whose events prove nothing about SASH execution), and once the M3 aggregator exists and it and the M2 segment guest meet [SPEC.md](SPEC.md) §1:
+When `VerifiableInferenceSettlement` accepts a run in `VerifierKind.ZKVM_PLONK` mode (never `DEV_TRANSCRIPT_ONLY`, whose events prove nothing about SASH execution), and once the M3 aggregator guest (`sp1/aggregator-guest`) is proved and wrapped and it and the M2 segment guest meet [SPEC.md](SPEC.md) §1:
 1. Every segment $i \in \{0, \dots, 22\}$ committed the exact `(preRoot[i], modelRoot[i], fixedHash[i])` enrolled in `SashModelRegistry` for `modelId`, where `fixedHash[i]` is the hash of segment $i$'s whole `Fixed` statement ([SPEC.md](SPEC.md) §1.1): its params, `sizes`, `layer`, `block` and `model`, which the verifier build checks only in part or not at all.
 2. Every segment passed the segment guest's rules ([SPEC.md](SPEC.md) §1.1): the verifier build of SASH's `verify_composed` with `Verdict::accepts()` (`log_blowup = 1`, `n_queries = 100`, `pow_bits = 0`), every token id `< P`, no unbound or lax gadget, sound dequant specs, no open requantize/dequantize seam, and a statement that is the single token block `B0` with no prefix keys. Upstream `accepts()` enforces only the first of these; the rest are guest rules.
 3. All 22 inter-segment residual-stream Merkle roots chain without gap (`outRoot[L] == inRoot[L+1]`), and `head` carries no dangling output boundary (`outRoot[22] == 0`).
@@ -23,7 +23,7 @@ The manifest pins each segment's `fixedHash`, and `SashGridVerifier` enforces it
 | Layer | Primitive | Security basis | Post-quantum? | Trusted setup? |
 |---|---|---|---|---|
 | Inner SASH segment proof | Circle STARK (SASH's vendored `nitroo` Stwo, [SPEC.md](SPEC.md) header) + GKR5 over `M31`/`QM31` with `Blake2sM31Channel` | Collision/PRF resistance of `BLAKE2s-256`; ~100 bits conjectured FRI query soundness (`100 * 1 + 0`); `QM31` Schwartz-Zippel ($\le \text{deg}/2^{124}$) | Candidate yes | None |
-| Outer zkVM wrapper (`ZKVM_PLONK`: the M2 segment guest; planned: the M3 aggregator and wrap) | SP1 v6 `riscv64im` STARK, wrapped for BN254 in PLONK (circuit `v6.1.0`), verified by the pinned `SP1VerifierPlonk` (§6) | BN254 pairing hardness (~100-bit classical taxonomy), the Aztec Ignition universal SRS, SP1 v6 constraint soundness | **No** (Shor breaks BN254) | **Yes, universal:** Aztec Ignition (176 participants, public; one honest participant suffices) |
+| Outer zkVM wrapper (`ZKVM_PLONK`: the M2 segment guest and the M3 aggregator guest; planned: their proofs and the PLONK wrap) | SP1 v6 `riscv64im` STARK, wrapped for BN254 in PLONK (circuit `v6.1.0`), verified by the pinned `SP1VerifierPlonk` (§6) | BN254 pairing hardness (~100-bit classical taxonomy), the Aztec Ignition universal SRS, SP1 v6 constraint soundness | **No** (Shor breaks BN254) | **Yes, universal:** Aztec Ignition (176 participants, public; one honest participant suffices) |
 | On-chain grid & digest checks | `SashGridVerifier.sol` (grid checks, sha256 `publicDigest`) | Deterministic EVM execution by Ethereum consensus; `sha256` collision resistance for the `publicDigest` binding | Yes | None |
 
 Effective classical soundness of the combined pipeline is bounded above by $\min(100, \lambda_{\text{zkVM}}, \lambda_{\text{BN254}}) \approx 100$ bits.
