@@ -8,9 +8,9 @@
 # `cargo build --release --locked -p sp1-host`, and sp1-gpu-server v6.10.0 fetched into ~/.sp1/bin
 # against its pinned sha256, as sp1-cuda would on the first client build (the warm-up, so no timed
 # step pays for it). SP1_PLONK_CIRCUIT_PATH points at the largest writable disk before any sp1-host
-# starts: sp1-gpu-server inherits sp1-host's environment and, as read in source (sp1-prover 6.10.0
-# src/build.rs) but not yet run, downloads the PLONK circuit there (into
-# $SP1_PLONK_CIRCUIT_PATH/v6.1.0/) and runs gnark natively; the smoke run checks it.
+# starts: sp1-gpu-server inherits sp1-host's environment, downloads the PLONK circuit there (into
+# $SP1_PLONK_CIRCUIT_PATH/v6.1.0/, sp1-prover 6.10.0 src/build.rs) and runs gnark natively, with no
+# Docker (docs/EVM-GAS-MODEL.md §9.3).
 #
 # Inputs: the 69 TinyLlama bundle files (tinyllama-bundles.sh, anonymous; smoke and all only, since
 # wrap proves no segment); the two Docker-built ELFs
