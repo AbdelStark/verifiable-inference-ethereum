@@ -90,7 +90,7 @@ After them the host passes the `N` compressed segment proofs with `SP1Stdin::wri
 **Segment vkey.** `SEGMENT_VKEY: [u32; 8]` is a compile-time constant of the guest, equal to `hash_u32` in `sp1/segment-guest.vkey`. It is never read from the input: a vkey from stdin would let the prover substitute any program for the segment guest. A segment guest change that moves its vkey must update `SEGMENT_VKEY`, which moves the aggregator's own vkey.
 
 **Checks and commitment.** The guest MUST:
-1. Reject, in this order, with the named variant, by panicking with `aggregate rejected: <name>` (the guest exits non-zero, and no proof exists):
+1. Reject, in this order, with the named variant, by panicking with `aggregate rejected: <name>` (the guest exits non-zero; SP1 can still prove that execution on request (`expected_exit_code`), but the proof then attests a non-zero `exitCode`, which `SP1VerifierPlonk` rejects with `InvalidExitCode`, below):
    - **`ModelIdLength`:** `modelId` is not 32 bytes;
    - **`SegmentValuesLength`:** `segmentValues` is empty, or its length is not a multiple of 226.
 
