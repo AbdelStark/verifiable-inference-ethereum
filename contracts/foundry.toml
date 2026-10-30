@@ -19,6 +19,9 @@ gas_limit = 16777216
 # Each top-level state-changing call runs as its own transaction, so its gas includes intrinsic and
 # calldata gas and matches an anvil receipt; view and pure calls aren't isolated.
 isolate = true
+# The tests and DeployAnvilSp1.s.sol read the committed PLONK proof, contracts/fixtures/tinyllama.plonk.json;
+# `out` is Foundry's default, which `deployCode` reads, and a set `fs_permissions` replaces it.
+fs_permissions = [{ access = "read", path = "./out" }, { access = "read", path = "./fixtures" }]
 
 [fuzz]
 # Fixed so the single-field mutation fuzz test (`SPEC.md` §2.1, row F) replays the same cases.
