@@ -29,8 +29,12 @@
 #   wrap   the contingency wrap-only run: the PLONK circuit downloaded with curl and extracted into
 #          $SP1_PLONK_CIRCUIT_PATH/v6.1.0/ with its empty .complete marker, then the N = 1 PLONK
 #          aggregation of the persisted B0L10 proof.
-# GPU memory is sampled every second, `df -h` printed before and after each PLONK wrap, and the bundles
-# and proofs deleted on EXIT, after the uploads have returned.
+# Each step starts once the previous step's sp1-gpu-server has exited and the GPU's memory.used is
+# back to its idle level, then samples memory.used every second. Each PLONK step prints `df -h` before
+# and after, and samples `du` of $SP1_PLONK_CIRCUIT_PATH, which holds sp1-prover's staging directory
+# (the tarball, then the tree extracted beside it) and the installed circuit: its peak circuit disk and
+# the tarball's download and extraction times. The bundles and proofs are deleted on EXIT, after the
+# uploads have returned.
 #
 # Environment:
 #   HF_TOKEN_PATH  (smoke, all) a 0600 file holding a token that can write to the dataset; read only by
@@ -58,6 +62,10 @@ PLONK_CIRCUIT_URL=https://sp1-circuits.s3-us-east-2.amazonaws.com/v6.1.0-plonk.t
 PLONK_CIRCUIT_VERSION=v6.1.0
 HF_HUB_VERSION=2.4.0
 CONTROL_CAP=6m
+# A step starts once memory.used is within GPU_IDLE_SLACK MiB of the idle GPU's, waiting at most
+# GPU_SETTLE_MAX seconds.
+GPU_IDLE_SLACK=256
+GPU_SETTLE_MAX=60
 
 fail() {
     echo "ERROR: $*" >&2
@@ -216,12 +224,39 @@ if [[ -n "${NO_GPU:-}" ]]; then
     exit 0
 fi
 
+gpu_used() { nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits | head -1; }
+gpu_idle=$(gpu_used)
+echo "idle GPU memory.used: $gpu_idle MiB"
+
+# Whether an sp1-gpu-server is running (a zombie holds no GPU memory, and pgrep counts it).
+# shellcheck disable=SC2009
+server_running() { ps -C sp1-gpu-server -o stat= | grep -qv '^Z'; }
+
+# Waits until no sp1-gpu-server runs and memory.used is back to idle. A step's server dies when its
+# client drops (sp1-cuda's kill_on_drop sends SIGKILL and does not wait), and the driver frees its
+# memory after that, so without the wait a step's first samples can be the previous step's server.
+gpu_settle() {
+    local waited=0
+    while server_running || (($(gpu_used) > gpu_idle + GPU_IDLE_SLACK)); do
+        if ((waited >= GPU_SETTLE_MAX)); then
+            echo "WARNING: after $waited s, the GPU is not idle: memory.used $(gpu_used) MiB"
+            ps -C sp1-gpu-server -o pid=,stat=,etime= || true
+            return 1
+        fi
+        sleep 1
+        waited=$((waited + 1))
+    done
+    echo "GPU idle after $waited s: memory.used $(gpu_used) MiB"
+}
+
 # One sp1-host step: GPU memory sampled every second, its own log, the wall clock and the peak RSS of
 # sp1-host and its exited children; prints the exit code. `cap` bounds the wall time (0: none).
 step() {
     local name=$1 cap=$2
     shift 2
     phase "$name"
+    local bound=""
+    gpu_settle || bound=" (an upper bound: the GPU was not idle when the step started)"
     nvidia-smi --query-gpu=timestamp,memory.used,utilization.gpu --format=csv,noheader,nounits -l 1 \
         >"$results/$name.gpu.csv" &
     local sampler=$!
@@ -239,16 +274,40 @@ step() {
     # A killed sp1-host leaves its sp1-gpu-server running (kill_on_drop needs a drop).
     [[ "$rc" == 0 ]] || pkill -x sp1-gpu-server 2>/dev/null || true
     echo "$rc" >"$results/$name.rc"
-    awk -F', ' '{ if ($2 > m) m = $2 } END { printf "peak GPU memory.used: %d MiB over %d samples\n", m, NR }' \
+    awk -F', ' -v b="$bound" '{ if ($2 > m) m = $2 }
+        END { printf "peak GPU memory.used: %d MiB over %d samples%s\n", m, NR, b }' \
         "$results/$name.gpu.csv" | tee "$results/$name.gpu-peak"
     grep -E "Elapsed|Maximum resident" "$results/$name.time" || true
     echo "exit code: $rc"
     return "$rc"
 }
 
-# The used kB of the circuit's disk, every second, during the PLONK step.
+# Every second during a PLONK step: the time, the kB under $SP1_PLONK_CIRCUIT_PATH and the bytes of
+# the tarball sp1-prover downloads into its staging directory there (0 when absent). sp1-prover 6.10.0
+# (src/build.rs) writes it to $SP1_PLONK_CIRCUIT_PATH/v6.1.0.incomplete.*/artifacts.tar.gz, extracts it
+# beside itself, deletes it and renames the directory to v6.1.0. A df of that disk would count other
+# tenants' writes to a shared volume.
 disk_sampler() {
-    while sleep 1; do df -P -k "$SP1_PLONK_CIRCUIT_PATH" | awk 'NR == 2 { print $3 }'; done
+    local tarball
+    while sleep 1; do
+        tarball=$(stat -c %s "$SP1_PLONK_CIRCUIT_PATH"/*.incomplete.*/artifacts.tar.gz 2>/dev/null | head -1) || true
+        echo "$(date +%s) $(du -sk "$SP1_PLONK_CIRCUIT_PATH" 2>/dev/null | cut -f1) ${tarball:-0}"
+    done
+}
+
+# The peak circuit disk and, if the step downloaded the circuit, the tarball's size, download time (its
+# first sample to the first at its final size) and extraction time (from then to its removal), at the
+# samples' 1 s resolution.
+disk_report() {
+    awk '{ if ($2 > d) d = $2
+           if ($3 > 0) { if (!t0) t0 = $1; last = $1; if ($3 > s) { s = $3; full = $1 } } }
+         END {
+           printf "peak circuit disk: %d MiB (du of SP1_PLONK_CIRCUIT_PATH, staging directory included; %d samples)\n", d / 1024, NR
+           if (s) {
+             printf "circuit tarball: %d bytes, downloaded in about %d s\n", s, full - t0
+             printf "circuit extraction: about %d s, until the tarball was deleted\n", last + 1 - full
+           } else print "circuit tarball: not seen (the circuit was already installed)"
+         }' "$1"
 }
 
 plonk_step() {
@@ -257,8 +316,6 @@ plonk_step() {
     mkdir -p "$SP1_PLONK_CIRCUIT_PATH"
     echo "--- df -h before $name"
     df -h
-    local base
-    base=$(df -P -k "$SP1_PLONK_CIRCUIT_PATH" | awk 'NR == 2 { print $3 }')
     disk_sampler >"$results/$name.disk" &
     local sampler=$!
     samplers+=("$sampler")
@@ -268,8 +325,7 @@ plonk_step() {
     echo "--- df -h after $name"
     df -h
     du -sh "$SP1_PLONK_CIRCUIT_PATH"/* 2>/dev/null || true
-    awk -v b="$base" '{ if ($1 > m) m = $1 } END { printf "peak disk added: %d MiB\n", (m - b) / 1024 }' \
-        "$results/$name.disk" | tee "$results/$name.disk-peak"
+    disk_report "$results/$name.disk" | tee "$results/$name.disk-peak"
     return "$rc"
 }
 
@@ -330,10 +386,14 @@ wrap)
     [[ ! -e "$dir" ]] || fail "$dir exists"
     mkdir -p "$dir"
     df -h
-    /usr/bin/time -f "download: %e s" curl -fsSL --retry 5 --retry-all-errors -o "$work/plonk.tar.gz" "$PLONK_CIRCUIT_URL"
-    ls -l "$work/plonk.tar.gz"
-    /usr/bin/time -f "extract: %e s" tar -Pxzf "$work/plonk.tar.gz" -C "$dir"
-    rm "$work/plonk.tar.gz"
+    # The tarball beside the tree, as sp1-prover stages it, so that du counts both.
+    tarball=$SP1_PLONK_CIRCUIT_PATH/$PLONK_CIRCUIT_VERSION-plonk.tar.gz
+    /usr/bin/time -f "download: %e s" curl -fsSL --retry 5 --retry-all-errors -o "$tarball" "$PLONK_CIRCUIT_URL"
+    ls -l "$tarball"
+    /usr/bin/time -f "extract: %e s" tar -Pxzf "$tarball" -C "$dir"
+    notes+=("peak circuit disk before the step: $(($(du -sk "$SP1_PLONK_CIRCUIT_PATH" | cut -f1) / 1024)) MiB, the tarball and the extracted tree")
+    echo "${notes[-1]}"
+    rm "$tarball"
     # All circuit_artifacts_installed checks (sp1-prover 6.10.0 src/build.rs).
     touch "$dir/.complete"
     du -sh "$dir"
