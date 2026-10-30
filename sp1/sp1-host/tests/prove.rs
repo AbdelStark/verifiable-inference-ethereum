@@ -17,7 +17,7 @@ use sp1_host::prove::{check_new_file, check_new_path, check_out_dir, create_new,
 use sp1_host::{read_fixed_pins, tinyllama_tags};
 use sp1_sdk::blocking::prelude::*;
 use sp1_sdk::{SP1Proof, SP1PublicValues};
-use sp1_verifier::PlonkBn254Proof;
+use sp1_verifier::{PlonkBn254Proof, VK_ROOT_BYTES};
 
 /// A fresh empty directory under the system's temp directory, outside the checkout.
 fn temp_dir(name: &str) -> PathBuf {
@@ -44,7 +44,8 @@ fn s(path: &Path) -> &str {
 }
 
 /// A PLONK proof as the SDK encodes one: `bytes()` is the 4-byte `plonk_vkey_hash` prefix, then
-/// `encoded_proof`.
+/// `encoded_proof`, which here is `SPEC.md` §1.2's `exitCode` `0`, `vkRoot`, `nonce` `0`, then
+/// `encoded_len - 96` bytes of `0x01` in place of the PLONK proof.
 fn plonk_proof(
     selector: [u8; 4],
     encoded_len: usize,
@@ -52,9 +53,14 @@ fn plonk_proof(
 ) -> SP1ProofWithPublicValues {
     let mut plonk_vkey_hash = [0; 32];
     plonk_vkey_hash[..4].copy_from_slice(&selector);
+    let encoded = [&[0; 32][..], &VK_ROOT_BYTES[..], &[0; 32]]
+        .concat()
+        .into_iter()
+        .chain(std::iter::repeat_n(1, encoded_len - 96))
+        .collect::<Vec<u8>>();
     SP1ProofWithPublicValues::new(
         SP1Proof::Plonk(PlonkBn254Proof {
-            encoded_proof: hex::encode(vec![1; encoded_len]),
+            encoded_proof: hex::encode(encoded),
             plonk_vkey_hash,
             ..Default::default()
         }),
@@ -159,6 +165,13 @@ fn a_file_that_is_no_compressed_proof_with_the_expected_values_is_rejected() {
     let plonk = bincode::serialize(&plonk_proof([0x5a, 0x09, 0x3a, 0x2f], 960, &expected)).unwrap();
     let err = decode_segment_proof(&plonk, &expected).unwrap_err();
     assert!(err.contains("an SP1Proof::Plonk, not Compressed"), "{err}");
+    // A compressed or PLONK proof of another segment, for example `head`'s saved as
+    // `B0L10.proof.bin`: its public values are checked first.
+    let head = expected_public_values("head").unwrap();
+    let mislabelled =
+        bincode::serialize(&plonk_proof([0x5a, 0x09, 0x3a, 0x2f], 960, &head)).unwrap();
+    let err = decode_segment_proof(&mislabelled, &expected).unwrap_err();
+    assert!(err.contains("differ from the expected"), "{err}");
     // The same with a byte after it.
     let mut trailing = plonk.clone();
     trailing.push(0);
@@ -353,8 +366,9 @@ fn aggregate_argument_rules() {
     }
 }
 
-/// `proofBytes` must be 964 bytes starting `0x5a093a2f` (`SPEC.md` §1.2) and verify with
-/// `sp1-verifier`: a wrong selector, a wrong length and a well-framed but forged proof are rejected.
+/// `proofBytes` must be 964 bytes starting `0x5a093a2f` with nonce `0` and no TEE proof (`SPEC.md`
+/// §1.2), and verify with `sp1-verifier`: a wrong selector, a wrong length, a nonzero nonce, a TEE
+/// proof and a well-framed but forged proof are rejected.
 #[test]
 fn plonk_proof_bytes_off_the_spec_are_rejected() {
     let digest = [7; 32];
@@ -378,6 +392,20 @@ fn plonk_proof_bytes_off_the_spec_are_rejected() {
             check_plonk_proof(&plonk_proof(selector, len, &digest), program_vkey).unwrap_err();
         assert!(err.contains(why), "{err}");
     }
+    // A nonzero nonce, which `PlonkVerifier::verify` would pass on as a public input.
+    let mut nonce = plonk_proof([0x5a, 0x09, 0x3a, 0x2f], 960, &digest);
+    if let SP1Proof::Plonk(plonk) = &mut nonce.proof {
+        let mut encoded = hex::decode(&plonk.encoded_proof).unwrap();
+        encoded[64 + 31] = 1;
+        plonk.encoded_proof = hex::encode(encoded);
+    }
+    let err = check_plonk_proof(&nonce, program_vkey).unwrap_err();
+    assert!(err.contains("nonce 0x"), "{err}");
+    // A TEE proof, which `bytes()` would prepend.
+    let mut tee = plonk_proof([0x5a, 0x09, 0x3a, 0x2f], 960, &digest);
+    tee.tee_proof = Some(vec![0; 4]);
+    let err = check_plonk_proof(&tee, program_vkey).unwrap_err();
+    assert!(err.contains("carries a TEE proof"), "{err}");
 }
 
 #[test]

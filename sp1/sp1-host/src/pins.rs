@@ -147,15 +147,15 @@ pub fn decode_segment_proof(
         .reject_trailing_bytes()
         .deserialize(bytes)
         .map_err(|e| format!("not a bincode SP1ProofWithPublicValues: {e}"))?;
-    if !matches!(proof.proof, SP1Proof::Compressed(_)) {
-        return Err(format!("an SP1Proof::{}, not Compressed", proof.proof));
-    }
     if proof.public_values.as_slice() != expected {
         return Err(format!(
             "public values {} differ from the expected {}",
             hex::encode(proof.public_values.as_slice()),
             hex::encode(expected)
         ));
+    }
+    if !matches!(proof.proof, SP1Proof::Compressed(_)) {
+        return Err(format!("an SP1Proof::{}, not Compressed", proof.proof));
     }
     Ok(proof)
 }

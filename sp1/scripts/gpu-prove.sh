@@ -8,10 +8,12 @@
 # `cargo build --release --locked -p sp1-host`, and sp1-gpu-server v6.10.0 fetched into ~/.sp1/bin
 # against its pinned sha256, as sp1-cuda would on the first client build (the warm-up, so no timed
 # step pays for it). SP1_PLONK_CIRCUIT_PATH points at the largest writable disk before any sp1-host
-# starts: sp1-gpu-server, which inherits sp1-host's environment, downloads the PLONK circuit there
-# (into $SP1_PLONK_CIRCUIT_PATH/v6.1.0/) and runs gnark.
+# starts: sp1-gpu-server inherits sp1-host's environment and, as read in source (sp1-prover 6.10.0
+# src/build.rs) but not yet run, downloads the PLONK circuit there (into
+# $SP1_PLONK_CIRCUIT_PATH/v6.1.0/) and runs gnark natively; the smoke run checks it.
 #
-# Inputs: the 69 TinyLlama bundle files (tinyllama-bundles.sh, anonymous); the two Docker-built ELFs
+# Inputs: the 69 TinyLlama bundle files (tinyllama-bundles.sh, anonymous; smoke and all only, since
+# wrap proves no segment); the two Docker-built ELFs
 # from the proofs dataset's elf/ at ELF_REVISION (or from ELF_DIR, holding segment-guest and
 # aggregator-guest), checked against sp1/<guest>.elf.sha256; and the proofs already in the dataset's
 # segments/, so that `prove` proves only the missing tags.
@@ -19,7 +21,7 @@
 # Modes, each step an sp1-host process with its own CUDA client:
 #   smoke  B0L10 proved and uploaded to segments/; the honest N = 1 compressed aggregation (T1);
 #          binding controls B1 and B2 (SPEC.md §2.1), each capped at CONTROL_CAP, a timeout reported
-#          as inconclusive; the N = 2 compressed aggregation of B0L10 twice (T2); the N = 1 PLONK wrap,
+#          as inconclusive, and not run if the honest N = 1 aggregation failed; the N = 2 compressed aggregation of B0L10 twice (T2); the N = 1 PLONK wrap,
 #          whose programVKey, publicValues and proofBytes are printed for the Foundry check.
 #   all    every missing segment proved and uploaded one by one; if all 23 are in place, the PLONK
 #          aggregation of the 23 with --fixture-out, its proof uploaded to plonk/ and the fixture
@@ -183,8 +185,10 @@ if [[ -z "${NO_GPU:-}" ]]; then
     [[ "$version" == 6.10.0 ]] || fail "sp1-gpu-server is not 6.10.0"
 fi
 
-phase "bundles"
-"$root/sp1/scripts/tinyllama-bundles.sh" "$bundles"
+if [[ "$mode" != wrap ]]; then
+    phase "bundles"
+    "$root/sp1/scripts/tinyllama-bundles.sh" "$bundles"
+fi
 
 phase "ELFs"
 for guest in segment-guest aggregator-guest; do
@@ -271,14 +275,25 @@ plonk_step() {
 upload_then="'$root/sp1/scripts/upload-proof.sh' \"\$1\" segments"
 steps=()
 failed=()
+notes=()
 case "$mode" in
 smoke)
     step prove-B0L10 0 prove --elf "$segment_elf" --bundle "$bundles" --tags B0L10 --out-dir "$proofs" \
         --then "$upload_then" || fail "B0L10 did not prove: the other steps need its proof"
     agg=(--segment-elf "$segment_elf" --aggregator-elf "$aggregator_elf" --proofs "$proofs")
+    baseline=0
     step aggregate-n1 0 aggregate "${agg[@]}" --tags B0L10 --mode compressed --out "$out/n1.compressed.bin" ||
-        failed+=(aggregate-n1)
+        baseline=$?
+    ((baseline == 0)) || failed+=(aggregate-n1)
     for kind in pv-byte vk; do
+        # A control passes on any proving error, so without a verifying honest baseline its pass would
+        # show nothing about the binding (SPEC.md §2.1).
+        if ((baseline != 0)); then
+            failed+=("control-$kind")
+            notes+=("control $kind: NOT RUN (honest baseline failed)")
+            echo "${notes[-1]}"
+            continue
+        fi
         rc=0
         step "control-$kind" "$CONTROL_CAP" aggregate-control --kind "$kind" "${agg[@]}" || rc=$?
         case "$rc" in
@@ -345,6 +360,7 @@ esac
         grep -E '^ *[0-9]{4}-[0-9]{2}-[0-9]{2}T' "$log" |
             grep -iE 'deferred|compress|shrink|wrap|plonk|gnark|circuit|artifact|download' | head -60 || true
     done
+    for note in "${notes[@]}"; do echo "$note"; done
     echo "failed steps: ${failed[*]:-none}"
     echo "===== END RESULTS ($mode) ====="
 } 2>&1
