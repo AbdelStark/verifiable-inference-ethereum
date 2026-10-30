@@ -9,9 +9,9 @@ import {SashModelRegistry} from "../src/sash/SashModelRegistry.sol";
 import {SashGridVerifier} from "../src/sash/SashGridVerifier.sol";
 import {VerifiableInferenceSettlement} from "../src/sash/VerifiableInferenceSettlement.sol";
 import {TinyLlamaFixture} from "../src/sash/TinyLlamaFixture.sol";
-import {StubSp1Gateway} from "./StubSp1Gateway.sol";
 
-/// Shared dev-mode stack with the TinyLlama manifest enrolled. Contracts are deployed with `deployCode`,
+/// Shared dev-mode stack with the TinyLlama manifest enrolled, and the SP1 stack that settles the committed PLONK
+/// proof (`SPEC.md` §1.4, `contracts/fixtures/tinyllama.plonk.json`). Contracts are deployed with `deployCode`,
 /// so test contracts don't embed their initcode and stay under `code_size_limit`.
 abstract contract TinyLlamaBase is Test {
     SashModelRegistry internal registry;
@@ -45,8 +45,26 @@ abstract contract TinyLlamaBase is Test {
         );
     }
 
-    function _deployStubGateway(bytes32 vkey) internal returns (StubSp1Gateway) {
-        return StubSp1Gateway(deployCode("StubSp1Gateway.sol:StubSp1Gateway", abi.encode(vkey)));
+    /// The committed PLONK proof of the aggregator over the 23 TinyLlama segment proofs.
+    function _plonkFixture()
+        internal
+        view
+        returns (bytes32 programVKey, bytes memory publicValues, bytes memory proofBytes)
+    {
+        string memory json = vm.readFile(string.concat(vm.projectRoot(), "/fixtures/tinyllama.plonk.json"));
+        programVKey = vm.parseJsonBytes32(json, ".programVKey");
+        publicValues = vm.parseJsonBytes(json, ".publicValues");
+        proofBytes = vm.parseJsonBytes(json, ".proofBytes");
+    }
+
+    /// The production stack: the v6.1.0 `SP1VerifierPlonk` compiled from the submodule, the adapter pinned to
+    /// `programVKey` and a settlement with `allowDevVerifier = false`; no dev verifier is reachable from it.
+    function _deployPlonkSettlement(bytes32 programVKey)
+        internal
+        returns (Sp1SashSegmentVerifier adapter, VerifiableInferenceSettlement prodSettlement)
+    {
+        adapter = _deploySp1Adapter(deployCode("SP1VerifierPlonk.sol:SP1Verifier"), programVKey);
+        prodSettlement = _deploySettlement(address(adapter), false);
     }
 
     function _deploySp1Adapter(address sp1Verifier, bytes32 vkey) internal returns (Sp1SashSegmentVerifier) {

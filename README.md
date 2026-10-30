@@ -18,7 +18,7 @@ Mainnet and Hoodi run Osaka, which binds this project; Amsterdam is tracked alon
    - A sha256 `publicDigest` over the segment claims and the `tok_in` / `tok_out` vectors, which the segment proof must attest, so the tokens are the ones SASH's own `embed_tok` / `head_tok` checks used; those checks bind the vectors only with SASH patch 0006, which mixes them into the Fiat-Shamir transcript (upstream `eb95bfa` does not: [SECURITY.md](SECURITY.md) §5, [SPEC.md](SPEC.md) §1),
    - Public prompt prefix matching, autoregressive teacher-forcing loop closure (`tok_in[P+j] == tok_out[P-1+j]`), and EOS (`2`) termination (`SashGridVerifier.sol`, ~40k gas measured, [docs/EVM-GAS-MODEL.md](docs/EVM-GAS-MODEL.md) §4).
 
-Aggregated single-transaction settlement is estimated at **~490k gas** (**~2.9%** of the `EIP-7825` cap) with a Groth16 wrap, from the measured dev-mode settlement plus an estimated SP1 verifier; M3 measures it ([docs/EVM-GAS-MODEL.md](docs/EVM-GAS-MODEL.md) §5).
+Aggregated single-transaction settlement of the TinyLlama run, with its real PLONK proof through the v6.1.0 `SP1VerifierPlonk` and `allowDevVerifier = false`, costs **520,898 gas** on Osaka (**3.1%** of the `EIP-7825` cap; anvil receipt, equal to its forge snapshot), below M3's 600,000 exit gate; the `SP1VerifierPlonk` frame is 286,360 of it ([docs/EVM-GAS-MODEL.md](docs/EVM-GAS-MODEL.md) §5).
 
 ## Exact claim boundary
 
@@ -62,7 +62,7 @@ make forge-test
 make anvil-demo
 ```
 
-`make anvil-demo` starts `anvil --hardfork osaka --enable-tx-gas-limit` (chain `31337`; port `8577`, or `ANVIL_PORT`), mines `DeployDevAnvil.s.sol`'s five transactions from anvil's first dev account, checks the receipts (status, `EIP-7825` gas limit, the `InferenceVerified` event with the `SPEC.md` §1.4 `runId`, `verifyAndSettle`'s gas against its snapshot, and its execution gas, from `trace_transaction`, against `settle_execution_gas` in the script, since the settle transaction pays the `EIP-7623` calldata floor), prints their gas and stops the node. `make check` runs it too.
+`make anvil-demo` starts `anvil --hardfork osaka --enable-tx-gas-limit` (chain `31337`; port `8577`, or `ANVIL_PORT`) and mines two runs on it from anvil's first dev account: `DeployDevAnvil.s.sol`'s five transactions (the dev verifier, `allowDevVerifier = true`), then `DeployAnvilSp1.s.sol`'s six (the v6.1.0 `SP1VerifierPlonk`, the registry and `enrollModel`, the adapter, the settlement with `allowDevVerifier = false`, and `verifyAndSettle` with the committed PLONK proof, `contracts/fixtures/tinyllama.plonk.json`; no dev verifier). For each it checks the receipts (status, `EIP-7825` gas limit, exactly one `InferenceVerified` with the `SPEC.md` §1.4 `runId` and `verifierKind` `0` or `1` (`ZKVM_PLONK`), `verifyAndSettle`'s gas against its snapshot and against the `EIP-7623` total, and its execution gas, from `trace_transaction`, against `dev_settle_execution_gas` or `sp1_settle_execution_gas` in the script), and that the SP1 settle costs less than 600,000 gas, the M3 exit gate. It prints both tables with each settle's `EIP-7623` breakdown and stops the node. `make check` runs it too.
 
 ### 3. Deploy to Hoodi (`560048`) (M4)
 

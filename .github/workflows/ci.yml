@@ -148,7 +148,7 @@ jobs:
           git diff --exit-code -- snapshots || { echo "::error::Gas snapshots differ from the commit"; exit 1; }
           untracked="$(git ls-files --others --exclude-standard -- snapshots)"
           test -z "$untracked" || { echo "::error::Untracked gas snapshots: $untracked"; exit 1; }
-      - name: Mine the TinyLlama dev-mode settlement on a local Osaka anvil node and check the receipts
+      - name: Mine the TinyLlama dev-mode and PLONK settlements on a local Osaka anvil node and check the receipts (PLONK settle < 600,000 gas)
         working-directory: contracts
         run: script/anvil-settle.sh
 

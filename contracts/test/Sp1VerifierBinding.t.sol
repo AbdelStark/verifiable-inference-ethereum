@@ -5,6 +5,7 @@ import {Test} from "forge-std/Test.sol";
 import {SP1Verifier as SP1VerifierPlonk} from "@sp1-contracts/v6.1.0/SP1VerifierPlonk.sol";
 import {SP1Verifier as SP1VerifierGroth16} from "@sp1-contracts/v6.1.0/SP1VerifierGroth16.sol";
 import {SP1VerifierGateway} from "@sp1-contracts/SP1VerifierGateway.sol";
+import {SashTypes} from "../src/sash/SashTypes.sol";
 import {Sp1SashSegmentVerifier} from "../src/sash/Sp1SashSegmentVerifier.sol";
 import {GetterStubPlonkVerifier} from "./GetterStubPlonkVerifier.sol";
 import {TinyLlamaBase} from "./TinyLlamaBase.sol";
@@ -18,7 +19,7 @@ bytes32 constant VK_ROOT = 0x002f850ee998974d6cc00e50cd0814b098c05bfade466d28573
 // `VK_ROOT()` (`SECURITY.md` §6).
 bytes32 constant GROTH16_VERIFIER_HASH = 0x4388a21c687fdd5f218d7e3d13190cac4c5355818d3605fd5fb811df468ee696;
 bytes32 constant BROKEN_VK_ROOT = 0x00995aa7753b437dfe98b936e602e002155914af1922d96e1af288578adc2251;
-// Any non-zero `programVKey`: each control reverts before the pairing check.
+// Any non-zero `programVKey`: each deployment control reverts before a proof is checked.
 bytes32 constant PROGRAM_VKEY = keccak256("sash-aggregator-vkey");
 
 /// `Sp1SashSegmentVerifier`'s binding to the real v6.1.0 `SP1VerifierPlonk`, compiled from the submodule
@@ -102,46 +103,80 @@ contract Sp1VerifierBindingTest is Test {
     }
 }
 
-/// The proof-format controls 23-25 (`SPEC.md` §2.1), through `verifyAndSettle` with `allowDevVerifier = false`
-/// and the adapter on the real v6.1.0 `SP1VerifierPlonk`. Each mutates one header field of a well-formed
-/// `proofBytes` and reverts before the pairing check.
-contract Sp1ProofFormatControlsTest is TinyLlamaBase {
+/// The settlement controls on the committed PLONK proof (`SPEC.md` §2.1): 22-27, through `verifyAndSettle` with
+/// `allowDevVerifier = false` and the adapter on the real v6.1.0 `SP1VerifierPlonk`. Each is the valid
+/// settlement with one mutation.
+contract Sp1PlonkSettlementControlsTest is TinyLlamaBase {
+    // `sp1/segment-guest.vkey`: a real SP1 vkey, not the aggregator's, whose top byte is `0x00`, so that it stays
+    // below the BN254 scalar field `r` and reaches the pairing check.
+    bytes32 internal constant SEGMENT_GUEST_VKEY = 0x003b73b0c998606408f61a261098a22a47e5edcbad107157e13763ef90c4997c;
+    // The BN254 scalar field modulus, the bound `PlonkVerifier` checks each public input against.
+    uint256 internal constant BN254_R = 21888242871839275222246405745257275088548364400416034343698204186575808495617;
+
+    bytes32 internal programVKey;
+    bytes internal proofBytes;
     VerifiableInferenceSettlement internal prodSettlement;
 
     function setUp() public override {
         super.setUp();
-        address plonk = deployCode("SP1VerifierPlonk.sol:SP1Verifier");
-        prodSettlement = _deploySettlement(address(_deploySp1Adapter(plonk, PROGRAM_VKEY)), false);
+        (programVKey,, proofBytes) = _plonkFixture();
+        (, prodSettlement) = _deployPlonkSettlement(programVKey);
+    }
+
+    function testNegative22_AdapterPinnedToSegmentGuestVKeyReverts() public {
+        assertTrue(SEGMENT_GUEST_VKEY != programVKey);
+        assertLt(uint256(SEGMENT_GUEST_VKEY), BN254_R);
+        (, VerifiableInferenceSettlement wrongSettlement) = _deployPlonkSettlement(SEGMENT_GUEST_VKEY);
+        vm.expectRevert(SP1VerifierPlonk.InvalidProof.selector);
+        _settle(wrongSettlement, TinyLlamaFixture.segments(), TinyLlamaFixture.tokOut(), proofBytes);
     }
 
     function testNegative23_WrongVerifierSelectorReverts() public {
-        bytes memory proof = _wellFormedProof();
+        bytes memory proof = proofBytes;
         proof[0] = 0x00;
-        _expectSettlementRevert(
-            proof,
+        vm.expectRevert(
             abi.encodeWithSelector(
                 SP1VerifierPlonk.WrongVerifierSelector.selector, bytes4(0x00093a2f), bytes4(0x5a093a2f)
             )
         );
+        _settle(prodSettlement, TinyLlamaFixture.segments(), TinyLlamaFixture.tokOut(), proof);
     }
 
     function testNegative24_NonZeroExitCodeReverts() public {
-        bytes memory proof = _wellFormedProof();
+        bytes memory proof = proofBytes;
         _setWord(proof, 4, bytes32(uint256(1)));
-        _expectSettlementRevert(proof, abi.encodeWithSelector(SP1VerifierPlonk.InvalidExitCode.selector));
+        vm.expectRevert(SP1VerifierPlonk.InvalidExitCode.selector);
+        _settle(prodSettlement, TinyLlamaFixture.segments(), TinyLlamaFixture.tokOut(), proof);
     }
 
     function testNegative25_WrongVkRootReverts() public {
-        bytes memory proof = _wellFormedProof();
+        bytes memory proof = proofBytes;
         _setWord(proof, 36, BROKEN_VK_ROOT);
-        _expectSettlementRevert(proof, abi.encodeWithSelector(SP1VerifierPlonk.InvalidVkRoot.selector));
+        vm.expectRevert(SP1VerifierPlonk.InvalidVkRoot.selector);
+        _settle(prodSettlement, TinyLlamaFixture.segments(), TinyLlamaFixture.tokOut(), proof);
     }
 
-    /// The 964-byte `proofBytes` of `SPEC.md` §1.2: the selector `0x5a093a2f`, `exitCode` 0, `vkRoot` `VK_ROOT`,
-    /// `nonce` 0 and 864 zero bytes in place of the PLONK proof.
-    function _wellFormedProof() internal pure returns (bytes memory proof) {
-        proof = abi.encodePacked(bytes4(PLONK_VERIFIER_HASH), uint256(0), VK_ROOT, uint256(0), new bytes(864));
-        assertEq(proof.length, 964);
+    /// The low byte of `L(zeta)`, the first opening of the PLONK proof (`proofBytes[100 + 0x180 + 31]`): the
+    /// opening stays below `r`, so the verifier runs to the pairing check, which fails.
+    function testNegative26_FlippedPlonkProofByteReverts() public {
+        bytes memory proof = proofBytes;
+        proof[100 + 0x180 + 31] ^= 0x01;
+        vm.expectRevert(SP1VerifierPlonk.InvalidProof.selector);
+        _settle(prodSettlement, TinyLlamaFixture.segments(), TinyLlamaFixture.tokOut(), proof);
+    }
+
+    /// The proof check runs before the grid (`VerifiableInferenceSettlement.verifyAndSettle`), so the recomputed
+    /// `publicDigest`, which no longer matches the one the proof attests, is what rejects each mutation.
+    function testNegative27_ClaimOrTokenMutationFailsPlonkProof() public {
+        SashTypes.SegmentClaim[] memory segs = TinyLlamaFixture.segments();
+        segs[3].fixedHash ^= bytes32(uint256(1));
+        vm.expectRevert(SP1VerifierPlonk.InvalidProof.selector);
+        _settle(prodSettlement, segs, TinyLlamaFixture.tokOut(), proofBytes);
+
+        uint32[] memory to = TinyLlamaFixture.tokOut();
+        to[31] ^= 1;
+        vm.expectRevert(SP1VerifierPlonk.InvalidProof.selector);
+        _settle(prodSettlement, TinyLlamaFixture.segments(), to, proofBytes);
     }
 
     function _setWord(bytes memory proof, uint256 offset, bytes32 word) internal pure {
@@ -150,13 +185,17 @@ contract Sp1ProofFormatControlsTest is TinyLlamaBase {
         }
     }
 
-    function _expectSettlementRevert(bytes memory proof, bytes memory revertData) internal {
-        vm.expectRevert(revertData);
-        prodSettlement.verifyAndSettle(
+    function _settle(
+        VerifiableInferenceSettlement target,
+        SashTypes.SegmentClaim[] memory segs,
+        uint32[] memory tokOut,
+        bytes memory proof
+    ) internal {
+        target.verifyAndSettle(
             TinyLlamaFixture.MODEL_ID,
-            TinyLlamaFixture.segments(),
+            segs,
             TinyLlamaFixture.tokIn(),
-            TinyLlamaFixture.tokOut(),
+            tokOut,
             TinyLlamaFixture.promptIds(),
             TinyLlamaFixture.answerIds(),
             proof

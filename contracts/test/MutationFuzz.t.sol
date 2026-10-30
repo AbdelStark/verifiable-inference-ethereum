@@ -4,12 +4,24 @@ pragma solidity ^0.8.38;
 import {SashTypes} from "../src/sash/SashTypes.sol";
 import {TinyLlamaBase} from "./TinyLlamaBase.sol";
 import {TinyLlamaFixture} from "../src/sash/TinyLlamaFixture.sol";
+import {VerifiableInferenceSettlement} from "../src/sash/VerifiableInferenceSettlement.sol";
 
-/// Single-field mutation fuzz control (`SPEC.md` §2.1, row F).
+/// Single-field mutation fuzz control (`SPEC.md` §2.1, row F), on the SP1 path: the adapter on the real v6.1.0
+/// `SP1VerifierPlonk` and `allowDevVerifier = false`.
 contract MutationFuzzTest is TinyLlamaBase {
-    /// Flips bits in one field of the valid run and submits it with the original dev proof
-    /// (`SPEC.md` §2.1, row F). The proof is never re-derived for the mutated digest: nothing but the
-    /// digest binds `segments[0].residualInRoot`, so that mutation would settle.
+    bytes internal plonkProof;
+    VerifiableInferenceSettlement internal prodSettlement;
+
+    function setUp() public override {
+        super.setUp();
+        bytes32 programVKey;
+        (programVKey,, plonkProof) = _plonkFixture();
+        (, prodSettlement) = _deployPlonkSettlement(programVKey);
+    }
+
+    /// Flips bits in one field of the valid run and submits it with the committed PLONK proof
+    /// (`SPEC.md` §2.1, row F). The grid checks nothing that binds `segments[0].residualInRoot`, so only the
+    /// proof, through the `publicDigest` it attests, rejects that mutation.
     function testFuzzSingleFieldMutationReverts(
         uint8 target,
         uint256 index,
@@ -24,7 +36,7 @@ contract MutationFuzzTest is TinyLlamaBase {
         uint32[] memory to = TinyLlamaFixture.tokOut();
         uint32[] memory pr = TinyLlamaFixture.promptIds();
         uint32[] memory ans = TinyLlamaFixture.answerIds();
-        bytes memory proof = devVerifier.computeDevProof(TinyLlamaFixture.PUBLIC_DIGEST);
+        bytes memory proof = plonkProof;
 
         target %= 7;
         if (target == 0) {
@@ -54,6 +66,6 @@ contract MutationFuzzTest is TinyLlamaBase {
         }
 
         vm.expectRevert();
-        settlement.verifyAndSettle(modelId, segs, ti, to, pr, ans, proof);
+        prodSettlement.verifyAndSettle(modelId, segs, ti, to, pr, ans, proof);
     }
 }
