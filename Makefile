@@ -5,7 +5,7 @@ help:
 	@echo "  make check       - Run Rust format, clippy, unit/negative tests, vector sync, Foundry format, lint, tests and anvil settlement (if forge is installed), the SP1 workspace checks (if cargo-prove is installed), and the segment guest on the 23 TinyLlama segments with the fixture check and the aggregator on their public values (if make sp1-docker's ELFs and the bundles are present), and the aggregator over the 23 published segment proofs (if those ELFs and the proofs are present)"
 	@echo "  make rust-check  - Run cargo fmt --check, then clippy -D warnings and cargo test --workspace with --locked"
 	@echo "  make vectors     - Regenerate contracts/src/sash/TinyLlamaFixture.sol from the Rust TinyLlama fixture"
-	@echo "  make forge-test  - Check Solidity format, build against foundry.lock, lint, run the Foundry suite with gas report, and check the gas snapshots against the index"
+	@echo "  make forge-test  - Check Solidity format, build against foundry.lock, lint, run the Foundry suite with gas report (the Hoodi and Sepolia fork tests when HOODI_RPC_URL and SEPOLIA_RPC_URL are set), and check the gas snapshots against the index"
 	@echo "  make anvil-demo  - Mine the TinyLlama-1.1B 23-segment settlement on a local Osaka anvil node twice, dev mode (DeployDevAnvil.s.sol) and with the committed PLONK proof through SP1VerifierPlonk (DeployAnvilSp1.s.sol, below 600,000 gas), check the receipts and print their gas"
 	@echo "  make sp1-vendor  - Build sp1/vendor/sash: SASH eb95bfa from its sha256-pinned tarball plus sp1/patches"
 	@echo "  make sp1-check   - Vendor SASH, check nitroo's Stwo (also with count-ops) and SASH's zk-prover library without the prover feature on stable, then cargo fmt --check, the segment check's and the aggregator's unit tests, the executor tests and clippy -D warnings in sp1/ (needs SP1 v6.10.0 and protoc)"
@@ -38,6 +38,8 @@ vectors:
 
 forge-test:
 	cd contracts && forge fmt --check && forge build --locked --sizes && forge lint --deny warnings
+	@[ -n "$$HOODI_RPC_URL" ] || echo "NOTE: HOODI_RPC_URL is unset; fork tests skipped (HoodiForkTest, contracts/test/TestnetFork.t.sol)."
+	@[ -n "$$SEPOLIA_RPC_URL" ] || echo "NOTE: SEPOLIA_RPC_URL is unset; fork tests skipped (SepoliaForkTest, contracts/test/TestnetFork.t.sol)."
 	cd contracts && rm -rf snapshots && forge test -vvv --gas-report
 	@git diff --exit-code -- contracts/snapshots || { echo "ERROR: gas snapshots differ from the index; stage them if the change is intended"; exit 1; }
 	@test -z "$$(git ls-files --others --exclude-standard -- contracts/snapshots)" || { echo "ERROR: untracked gas snapshots; stage them if the change is intended"; git ls-files --others --exclude-standard -- contracts/snapshots; exit 1; }
