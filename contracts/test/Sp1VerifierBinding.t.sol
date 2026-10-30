@@ -6,7 +6,7 @@ import {SP1Verifier as SP1VerifierPlonk} from "@sp1-contracts/v6.1.0/SP1Verifier
 import {SP1Verifier as SP1VerifierGroth16} from "@sp1-contracts/v6.1.0/SP1VerifierGroth16.sol";
 import {SP1VerifierGateway} from "@sp1-contracts/SP1VerifierGateway.sol";
 import {Sp1SashSegmentVerifier} from "../src/sash/Sp1SashSegmentVerifier.sol";
-import {BrokenVkRootPlonkVerifier} from "./BrokenVkRootPlonkVerifier.sol";
+import {GetterStubPlonkVerifier} from "./GetterStubPlonkVerifier.sol";
 import {TinyLlamaBase} from "./TinyLlamaBase.sol";
 import {TinyLlamaFixture} from "../src/sash/TinyLlamaFixture.sol";
 import {VerifiableInferenceSettlement} from "../src/sash/VerifiableInferenceSettlement.sol";
@@ -74,13 +74,23 @@ contract Sp1VerifierBindingTest is Test {
     }
 
     function testNegative30_BrokenVkRootPlonkVerifierRejectedAtDeploy() public {
-        BrokenVkRootPlonkVerifier broken = new BrokenVkRootPlonkVerifier();
+        GetterStubPlonkVerifier broken = new GetterStubPlonkVerifier(PLONK_VERIFIER_HASH, BROKEN_VK_ROOT);
         vm.expectRevert(
             abi.encodeWithSelector(
                 Sp1SashSegmentVerifier.WrongSp1Verifier.selector, PLONK_VERIFIER_HASH, BROKEN_VK_ROOT
             )
         );
         new Sp1SashSegmentVerifier(address(broken), PROGRAM_VKEY);
+    }
+
+    /// All 32 bytes of `VERIFIER_HASH()` are checked, not only the 4-byte selector the verifier reads from
+    /// `proofBytes`.
+    function testAdapterRejectsVerifierHashDifferingPastSelector() public {
+        bytes32 verifierHash = PLONK_VERIFIER_HASH ^ bytes32(uint256(1));
+        assertEq(bytes4(verifierHash), bytes4(PLONK_VERIFIER_HASH));
+        GetterStubPlonkVerifier stub = new GetterStubPlonkVerifier(verifierHash, VK_ROOT);
+        vm.expectRevert(abi.encodeWithSelector(Sp1SashSegmentVerifier.WrongSp1Verifier.selector, verifierHash, VK_ROOT));
+        new Sp1SashSegmentVerifier(address(stub), PROGRAM_VKEY);
     }
 
     function _assertBareRevert(address sp1Verifier) internal {
