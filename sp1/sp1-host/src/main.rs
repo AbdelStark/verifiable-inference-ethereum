@@ -1,12 +1,15 @@
 //! `sp1-host`: runs the segment guest on one bundle in the SP1 executor, runs the aggregator guest on
-//! the 23 segments' public values, prints a guest's vkey, runs the controls on the real TinyLlama
-//! bundles, prints their proof sizes, proves one segment on a GPU, or renders `TinyLlamaFixture.sol`
-//! from the 23 segments' public values.
+//! the 23 segments' public values, prints a guest's vkey, proves segments, aggregates their proofs and
+//! runs the binding controls on a GPU, runs the controls on the real TinyLlama bundles, prints their
+//! proof sizes, or renders `TinyLlamaFixture.sol` from the 23 segments' public values.
 //!
 //! - `sp1-host execute [--elf PATH] --bundle DIR --tag T [--public-values PATH]`
 //! - `sp1-host execute-aggregator [--elf PATH] --public-values DIR`
 //! - `sp1-host vkey --elf PATH`
-//! - `sp1-host prove --elf PATH --bundle DIR --tag T --out FILE`
+//! - `sp1-host prove --elf PATH --bundle DIR --tags B0L10,head|all --out-dir DIR [--then CMD]`
+//! - `sp1-host aggregate --segment-elf PATH --aggregator-elf PATH --proofs DIR --tags …|all
+//!   [--mode compressed|plonk --out FILE] [--fixture-out FILE] [--execute-only]`
+//! - `sp1-host aggregate-control --kind pv-byte|vk --aggregator-elf PATH [--segment-elf PATH --proofs DIR]`
 //! - `sp1-host controls --elf PATH --bundles DIR --out DIR --pins FILE`
 //! - `sp1-host sizes --bundles DIR`
 //! - `sp1-host trace-share --trace FILE [--function NAME]`
@@ -15,24 +18,23 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
-use std::time::{Duration, Instant};
 
 use clap::{Parser, Subcommand};
 use sash_aggregate::aggregate;
 use sash_evm_primitives::tinyllama_fixture::tinyllama_model_id;
-use sha2::{Digest, Sha256};
-use sp1_host::aggregate::{aggregator_stdin, execute_aggregator, read_tinyllama_segment_values};
+use sp1_host::aggregate::{
+    AggregateArgs, ControlKind, Mode, aggregate_command, aggregate_control, aggregator_stdin,
+    execute_aggregator, read_tinyllama_segment_values,
+};
 use sp1_host::controls::CONTROLS;
 use sp1_host::fixture::{check_fixture_out, contracts_src, fixture_from_bundles};
-use sp1_host::prove::{
-    FIXED_PINS, check_elf, check_fixed_hash, check_out, check_vkey, create_out, fixed_pin,
-    gpu_server_vm_hwm, repo_root, vkey_text,
-};
+use sp1_host::pins::vkey_text;
+use sp1_host::prove::prove;
 use sp1_host::sizes::{Sizes, table};
 use sp1_host::trace::function_samples;
 use sp1_host::{
     AGGREGATOR_GUEST_ELF, CYCLE_LIMIT, SEGMENT_GUEST_ELF, SegmentInput, execute, is_cycle_limit,
-    peak_rss, read_fixed_pins, tinyllama_tags,
+    read_fixed_pins, tinyllama_tags,
 };
 use sp1_sdk::blocking::{ProverClient, prelude::*};
 
@@ -77,23 +79,79 @@ enum Command {
         #[arg(long)]
         elf: PathBuf,
     },
-    /// Proves `<tag>.{fixed,claims,proof}.json` on the local NVIDIA GPU, in compressed mode, with #43's
-    /// Docker-built ELF; verifies the proof and checks its public values against an executor run on
-    /// the same input and its `fixedHash` against its pin (`docs/EVM-GAS-MODEL.md` §8). Linux x86_64.
+    /// Proves TinyLlama segments to compressed proofs on the local NVIDIA GPU with one CUDA client and
+    /// one setup, from the Docker-built segment guest (`docs/EVM-GAS-MODEL.md` §9). Linux x86_64.
+    /// Checks first, on the CPU: the out directory, each `<tag>.proof.bin` already there (a verified
+    /// proof with the expected public values is skipped; anything else refuses the run), the ELF's
+    /// sha256 and vkey. Each proof must verify and carry the expected public values
+    /// (`tinyllama_segment_public_values`) byte for byte; it is written as `<tag>.proof.bin`, then
+    /// `--then` runs on it. A failing tag does not stop the others; the exit code is 1 if any failed.
     Prove {
-        /// #43's Docker-built segment guest: its sha256 and vkey must be the committed ones.
+        /// The Docker-built segment guest: its sha256 and vkey must be the committed ones.
         #[arg(long)]
         elf: PathBuf,
         /// The bundle directory.
         #[arg(long)]
         bundle: PathBuf,
-        /// The segment's tag.
+        /// Comma-separated TinyLlama tags, proved in this order, or `all`.
         #[arg(long)]
-        tag: String,
-        /// Where the compressed proof goes: `<tag>.proof.bin`, no symlink, under the checkout's `runs/`
-        /// or outside the checkout, and never in the bundle directory.
+        tags: String,
+        /// Where `<tag>.proof.bin` go: an existing directory under the checkout's `runs/` or outside
+        /// the checkout, never in the bundle directory.
         #[arg(long)]
-        out: PathBuf,
+        out_dir: PathBuf,
+        /// A shell command run with `sh -c` after each proof is written, the proof's path as its `$1`
+        /// (e.g. `'sp1/scripts/upload-proof.sh "$1" segments'`); a non-zero exit fails the tag.
+        #[arg(long)]
+        then: Option<String>,
+    },
+    /// Aggregates segment proofs: every CPU check first (both ELFs against their pins, the segment vk
+    /// against `SEGMENT_VKEY`, each proof verified with the expected public values, the digest, and the
+    /// aggregator in the executor over the proofs), then proves the aggregator on the local NVIDIA GPU
+    /// in `--mode`, verifies it and checks its public values (`SPEC.md` §1.2, `docs/EVM-GAS-MODEL.md`
+    /// §9).
+    Aggregate {
+        /// The Docker-built segment guest.
+        #[arg(long)]
+        segment_elf: PathBuf,
+        /// The Docker-built aggregator guest.
+        #[arg(long)]
+        aggregator_elf: PathBuf,
+        /// The directory holding `<tag>.proof.bin`.
+        #[arg(long)]
+        proofs: PathBuf,
+        /// Comma-separated TinyLlama tags, in the order the aggregator takes them, or `all`. Repeats
+        /// only with `--mode compressed`.
+        #[arg(long)]
+        tags: String,
+        #[arg(long, value_enum, required_unless_present = "execute_only")]
+        mode: Option<Mode>,
+        /// Where the bincode proof goes: a new file under the checkout's `runs/` or outside it.
+        #[arg(long, required_unless_present = "execute_only")]
+        out: Option<PathBuf>,
+        /// With `--mode plonk` and `--tags all` only: writes `programVKey`, `publicValues` and
+        /// `proofBytes` as 0x-hex JSON to this new file.
+        #[arg(long)]
+        fixture_out: Option<PathBuf>,
+        /// Stops after the CPU checks: nothing touches a GPU.
+        #[arg(long)]
+        execute_only: bool,
+    },
+    /// Binding control B1 (`pv-byte`) or B2 (`vk`) (`SPEC.md` §2.1): proves the aggregator at `N = 1`
+    /// on `B0L10` in compressed mode with one half of the `(vk, sha256(public values))` pair mutated.
+    /// Exit 0 only if proving fails or the proof does not verify, 1 on a verifying proof.
+    AggregateControl {
+        #[arg(long, value_enum)]
+        kind: ControlKind,
+        /// The Docker-built segment guest (`pv-byte`).
+        #[arg(long, required_if_eq("kind", "pv-byte"))]
+        segment_elf: Option<PathBuf>,
+        /// The Docker-built aggregator guest.
+        #[arg(long)]
+        aggregator_elf: PathBuf,
+        /// The directory holding `B0L10.proof.bin` (`pv-byte`).
+        #[arg(long, required_if_eq("kind", "pv-byte"))]
+        proofs: Option<PathBuf>,
     },
     /// Runs the controls on modified copies of the TinyLlama bundles, written under
     /// `<out>/controls/`, after `make sp1-execute` has written `<out>/<tag>.public-values`.
@@ -221,9 +279,40 @@ fn run(cli: Cli) -> Result<ExitCode, String> {
         Command::Prove {
             elf,
             bundle,
-            tag,
+            tags,
+            out_dir,
+            then,
+        } => prove(&elf, &bundle, &tags, &out_dir, then.as_deref()),
+        Command::Aggregate {
+            segment_elf,
+            aggregator_elf,
+            proofs,
+            tags,
+            mode,
             out,
-        } => prove(&elf, &bundle, &tag, &out),
+            fixture_out,
+            execute_only,
+        } => aggregate_command(AggregateArgs {
+            segment_elf: &segment_elf,
+            aggregator_elf: &aggregator_elf,
+            proofs: &proofs,
+            tags: &tags,
+            mode,
+            out: out.as_deref(),
+            fixture_out: fixture_out.as_deref(),
+            execute_only,
+        }),
+        Command::AggregateControl {
+            kind,
+            segment_elf,
+            aggregator_elf,
+            proofs,
+        } => aggregate_control(
+            kind,
+            segment_elf.as_deref(),
+            &aggregator_elf,
+            proofs.as_deref(),
+        ),
         Command::Controls {
             elf,
             bundles,
@@ -287,129 +376,6 @@ fn run(cli: Cli) -> Result<ExitCode, String> {
             Ok(ExitCode::SUCCESS)
         }
     }
-}
-
-/// `sp1-host prove`. Every check runs on the CPU before the CUDA client starts: the out path, the
-/// ELF's sha256, its vkey (`LightProver::setup`), and the executor run's exit code and `fixedHash`. The
-/// GPU's key and proof are checked again after proving.
-fn prove(elf: &Path, bundle: &Path, tag: &str, out: &Path) -> Result<ExitCode, String> {
-    let out = check_out(out, tag, &repo_root(), bundle)?;
-    let elf_bytes = read(elf)?;
-    check_elf(&elf_bytes)?;
-    println!("OK: the ELF matches sp1/segment-guest.elf.sha256");
-    let pin = fixed_pin(FIXED_PINS, tag)?;
-    let elf = Elf::from(elf_bytes);
-    let light = ProverClient::builder().light().build();
-    let light_pk = light.setup(elf.clone()).map_err(|e| e.to_string())?;
-    check_vkey(&vkey_text(light_pk.verifying_key()))?;
-    println!("OK: the vkey (CPU setup) matches sp1/segment-guest.vkey");
-    let input = SegmentInput::read_bundle(bundle, tag).map_err(|e| e.to_string())?;
-    println!("stdin bytes: {}", input.len());
-
-    // The executor run, on the CPU: the reference for the proof's public values.
-    let t = Instant::now();
-    let run = execute(elf.clone(), input.stdin())?;
-    println!("execute time: {:.1} s", t.elapsed().as_secs_f64());
-    println!("exit code: {}", run.exit_code);
-    println!("cycles: {}", run.cycles);
-    println!("PGU: {}", run.gas);
-    // On Linux x86_64 the native executor runs the guest in a child process, which this counts.
-    println!("executor peak RSS: {} bytes", run.peak_rss);
-    if run.exit_code != 0 {
-        return Err(format!(
-            "the executor rejects {tag}; stderr:\n{}",
-            run.stderr
-        ));
-    }
-    check_fixed_hash(&run.public_values, &pin)?;
-    println!("OK: the executor's fixedHash equals its pin in sp1/pins/tinyllama.fixed.sha256");
-
-    // sp1-cuda's client and proving key spawn their cleanup on the current Tokio runtime when dropped
-    // (sp1-cuda 6.10.0 `client.rs`, `pk.rs`), and sp1-sdk's blocking API keeps its own runtime to
-    // itself: dropped outside a runtime context, they panic in the destructor and the process aborts.
-    // They live and drop inside this runtime's context. Dropping the client also kills
-    // `sp1-gpu-server` (`kill_on_drop`); the shutdown drops whatever of the cleanup has not run.
-    let runtime = tokio::runtime::Runtime::new().map_err(|e| e.to_string())?;
-    let proved = {
-        let _context = runtime.enter();
-        prove_on_gpu(elf, &input, &run.public_values, &pin, &out)
-    };
-    runtime.shutdown_timeout(Duration::from_secs(10));
-    proved?;
-    Ok(ExitCode::SUCCESS)
-}
-
-/// `sp1-host prove`'s GPU half: the CUDA client, the setup, the compressed proof, its checks against the
-/// executor's `public_values` and the `fixedHash` pin, and the proof file.
-fn prove_on_gpu(
-    elf: Elf,
-    input: &SegmentInput,
-    public_values: &[u8],
-    pin: &[u8; 32],
-    out: &Path,
-) -> Result<(), String> {
-    // Building the client downloads `sp1-gpu-server` on first use and starts it: the warm-up, timed
-    // apart from setup and proving.
-    let t = Instant::now();
-    let client = ProverClient::builder().cuda().build();
-    println!(
-        "client build time (server download and start): {:.1} s",
-        t.elapsed().as_secs_f64()
-    );
-
-    let t = Instant::now();
-    let pk = client.setup(elf).map_err(|e| e.to_string())?;
-    println!("setup time: {:.1} s", t.elapsed().as_secs_f64());
-    check_vkey(&vkey_text(pk.verifying_key()))?;
-    println!("OK: the GPU setup's vkey matches sp1/segment-guest.vkey");
-
-    let t = Instant::now();
-    let proof = client
-        .prove(&pk, input.stdin())
-        .compressed()
-        .run()
-        .map_err(|e| e.to_string())?;
-    println!("prove time: {:.1} s", t.elapsed().as_secs_f64());
-    match gpu_server_vm_hwm() {
-        Some(hwm) => println!("sp1-gpu-server VmHWM: {hwm}"),
-        None => println!("sp1-gpu-server VmHWM: not found"),
-    }
-
-    let t = Instant::now();
-    client
-        .verify(&proof, pk.verifying_key(), None)
-        .map_err(|e| format!("the proof does not verify: {e}"))?;
-    println!("verify time: {:.1} s", t.elapsed().as_secs_f64());
-    if proof.public_values.as_slice() != public_values {
-        return Err(format!(
-            "the proof's public values {} differ from the executor's {}",
-            hex::encode(proof.public_values.as_slice()),
-            hex::encode(public_values)
-        ));
-    }
-    println!("public values: {}", hex::encode(public_values));
-    println!("OK: the proof verifies and its public values equal the executor's, byte for byte");
-    let fixed_hash = check_fixed_hash(proof.public_values.as_slice(), pin)?;
-    println!(
-        "OK: fixedHash {} equals its pin in sp1/pins/tinyllama.fixed.sha256",
-        hex::encode(fixed_hash)
-    );
-
-    // `SP1ProofWithPublicValues::save`'s encoding, through a file that refuses an existing path.
-    let mut file = std::io::BufWriter::new(create_out(out)?);
-    bincode::serialize_into(&mut file, &proof).map_err(|e| format!("{}: {e}", out.display()))?;
-    std::io::Write::flush(&mut file).map_err(|e| format!("{}: {e}", out.display()))?;
-    let bytes = read(out)?;
-    println!("proof: {}", out.display());
-    println!("proof size: {} bytes", bytes.len());
-    println!("proof sha256: {}", hex::encode(Sha256::digest(&bytes)));
-    // Before the client drops and kills `sp1-gpu-server`, which would then count as an exited child:
-    // see its `VmHWM` above.
-    println!(
-        "peak RSS of sp1-host and its exited children (the executor): {} bytes",
-        peak_rss()
-    );
-    Ok(())
 }
 
 fn read(path: &Path) -> Result<Vec<u8>, String> {

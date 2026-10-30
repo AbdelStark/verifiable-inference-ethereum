@@ -10,7 +10,7 @@ use sha2::{Digest, Sha256};
 use sp1_host::aggregate::{
     AGGREGATOR_GUEST_SOURCE, aggregator_stdin, execute_aggregator, segment_vkey, vkey_hash_u32,
 };
-use sp1_host::prove::VKEY;
+use sp1_host::pins::SEGMENT_GUEST;
 use sp1_host::{AGGREGATOR_GUEST_ELF, ECHO_GUEST_ELF, Execution, execute};
 use sp1_sdk::SP1Stdin;
 use sp1_sdk::blocking::{ProverClient, prelude::*};
@@ -104,7 +104,7 @@ fn a2_segment_values_length() {
 fn segment_vkey_is_the_pinned_one() {
     assert_eq!(
         segment_vkey(AGGREGATOR_GUEST_SOURCE).unwrap(),
-        vkey_hash_u32(VKEY).unwrap(),
+        vkey_hash_u32(SEGMENT_GUEST.vkey).unwrap(),
         "the aggregator guest's SEGMENT_VKEY differs from sp1/segment-guest.vkey's hash_u32"
     );
 }

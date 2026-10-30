@@ -1,6 +1,6 @@
 [package]
 name = "sp1-host"
-description = "Host side of the SP1 guests: builds them, runs them in the SP1 executor and proves the segment guest on a GPU"
+description = "Host side of the SP1 guests: builds them, runs them in the SP1 executor and proves the segment and aggregator guests on a GPU"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -48,6 +48,7 @@ sash-segment-check = { workspace = true, features = ["forge"] }
 serde_json.workspace = true
 sha2 = "0.10.9"
 sp1-sdk = { workspace = true, features = ["cuda"] }
+sp1-verifier.workspace = true
 stwo = { workspace = true, optional = true }
 tokio = { version = "1", features = ["rt-multi-thread", "sync"] }
 zk-prover.workspace = true
