@@ -13,15 +13,16 @@
                                      |
                                      v
 +-------------------------------------------------------------------------+
-| Off-Chain Proof Compression (M2 segment guest present; M3 planned)      |
+| Off-Chain Proof Compression (M2 and M3 present)                         |
 |   - M2: SP1 v6 riscv64im guest per segment runs a verifier-only build   |
 |     of verify_composed (+ patch 0006); rejects token ids >= P;          |
 |     commits fixedHash                                                   |
 |   - M3: aggregator verifies 23 proofs, commits publicDigest             |
-|   - M3: SP1 v6 BN254 PLONK wrap                                         |
+|   - M3: SP1 v6 BN254 PLONK wrap; proving per inference, measured:       |
+|     $4.61 and 100.6 min on one GPU (18.9 min, segments in parallel)     |
 +------------------------------------+------------------------------------+
                                      |
-           Single Ethereum Transaction (< 600k gas: M3 exit gate)
+  Single Ethereum Transaction: 520,898 gas on Osaka (M3 exit gate < 600k)
                                      |
                                      v
 +-------------------------------------------------------------------------+
@@ -33,7 +34,7 @@
 |     |         Loads enrolled ModelManifest & manifestRootsHash          |
 |     |                                                                   |
 |     +--> 2. [ISashSegmentVerifier.sol]                                  |
-|     |         - Sp1SashSegmentVerifier (SP1 BN254 wrap; proofs from M3) |
+|     |         - Sp1SashSegmentVerifier (SP1 BN254 PLONK wrap, M3)       |
 |     |         - DevTranscriptSegmentVerifier (chainid==31337 dev only)  |
 |     |                                                                   |
 |     +--> 3. [SashGridVerifier.sol]                                      |

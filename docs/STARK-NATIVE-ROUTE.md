@@ -51,7 +51,7 @@ The EIP facts below are verified; the sizes and gas multiples are estimates from
 
 | Route | Exists today | Works with today's SASH proofs | L1 cost | Trust | Verdict |
 |---|---|---|---|---|---|
-| **SP1 wrap** (current plan): SP1 runs SASH's verifier per segment, aggregates, BN254 PLONK | Verifier contracts yes; guest and aggregator no | Yes | ~270k (Groth16) to ~300k (PLONK) verify; settlement ~490k with Groth16, ~520k with PLONK (estimates, `docs/EVM-GAS-MODEL.md` §5) | BN254, setup ceremony, SP1 circuits | Current M3 plan; proving cost in `docs/EVM-GAS-MODEL.md` §8 |
+| **SP1 wrap** (chosen, built in M3): SP1 runs SASH's verifier per segment, aggregates, BN254 PLONK | Verifier contracts, segment guest and aggregator yes | Yes | Measured on Osaka: `SP1VerifierPlonk.verifyProof` 286,360; settlement 520,898 (`docs/EVM-GAS-MODEL.md` §5; 604,318 under Amsterdam, provisional) | BN254, PLONK's universal setup (Aztec Ignition), SP1 circuits | M3's route; proving measured at $4.61 and 100.6 min per inference on one GPU, 18.9 min with the segments in parallel (`docs/EVM-GAS-MODEL.md` §9.4) |
 | **Raw Solidity verifier** | No | No: block and tx limits | Billions of gas | Hash-based | Dead |
 | **Cairo/circuit verifier for today's format**, S-two proof, SHARP fact | SHARP, S-two and Atlantic yes; the SASH verifier no; SHARP acceptance of a task this size untested | Yes, no re-proving | Our settlement + a fact lookup; SHARP root shared | Transparent; SHARP verifier (2/4 multisig, 8-day delay) and its unreproduced allowlist of recursive verifier programs | Most credible STARK-native route; many months |
 | **Port SASH to stwo 2.4** (lifted trees, 4 trees, no GKR), StarkWare recursion, SHARP or its future L1 circuit verifier | Off-chain half yes; L1 circuit verifier no | No: re-prove TinyLlama | Unknown | Transparent | Strategic end state; depends on StarkWare and SASH upstream |
@@ -64,7 +64,7 @@ The EIP facts below are verified; the sizes and gas multiples are estimates from
 - **No BLAKE2s or M31/QM31 precompile in SP1 v6.10.** The ~5.13M BLAKE2s compressions and the field arithmetic run as plain RISC-V. `docs/EVM-GAS-MODEL.md` §6 measures the unit costs, at 2,139 cycles per compression and 148 per DEEP-quotient step. §7 measures the whole run: the 23 segments verify in the SP1 executor in 4.79e10 cycles (4.47e10 PGU), with a `bincode` proof, 22.9% of them in BLAKE2s. S-two Cairo and StarkWare's circuit library make exactly these operations native.
 - **Large guest input.** `verify_composed` reads serde JSON: about 761 MB per run, 85.5 MB for the `head` segment alone. Decoding JSON in the guest costs ~31 cycles per byte, so the proof buffer moves to `bincode`, at 8.4x fewer cycles (`docs/EVM-GAS-MODEL.md` §6.2, `SPEC.md` §1.1).
 - **No verifier-only build.** The verifier sits inside SASH's monolithic prover crate, which always enables stwo's `prover` and `parallel` features, rayon and the CUDA modules, and needs nightly. A guest means splitting out and maintaining a verifier crate. Prior art shows a stwo verifier compiling inside SP1 (`Okm165/stwo-verifier-sp1`), but not this fork or GKR.
-- **Weak Groth16 setup.** L2BEAT rates SP1 v6.1.0's Groth16 phase-2 setup red: Succinct ran it, with 18 participants and no public call. The PLONK option rests on Aztec Ignition and is rated green. If we stay on SP1, PLONK costs ~79k more gas for a stronger setup (measured in scratch through `verifyAndSettle` on Osaka with a v6.0.0 twin verifier, 520,993 against 442,113 gas, issue #76; `docs/EVM-GAS-MODEL.md` §5 records the real PLONK settlement after #82).
+- **Weak Groth16 setup.** L2BEAT rates SP1 v6.1.0's Groth16 phase-2 setup red: Succinct ran it, with 18 participants and no public call. The PLONK option rests on Aztec Ignition and is rated green. On SP1, PLONK costs ~79k more gas for a stronger setup (measured in scratch through `verifyAndSettle` on Osaka with a v6.0.0 twin verifier, 520,993 against 442,113 gas, issue #76). `docs/EVM-GAS-MODEL.md` §5 measures the real PLONK settlement at 520,898 gas, 95 below that twin.
 
 ## S-two unit costs (M2)
 
@@ -340,7 +340,7 @@ S-two's figures cover OODS constraint evaluation, FRI, the channel and GKR only 
 ## Implications for the roadmap
 
 - **M2:** SP1's proving cost, its comparison with S-two and the go/no-go for M3 (GO on SP1) are in `docs/EVM-GAS-MODEL.md` §8. M2 built no prototype SASH verifier in Cairo or S-two.
-- **M3:** PLONK (decided), for the setup.
+- **M3:** PLONK (decided), for the setup. The real proof settles in 520,898 gas on Osaka (`docs/EVM-GAS-MODEL.md` §5).
 - **SHARP route:**
   - bind to SHARP's own contracts, not to Atlantic's upgradeable Satellite diamond proxy, whose `isCairoFactValid(fact_hash, is_mocked)` also serves facts registered without on-chain verification. Two choices:
     - the SHARP call proxy `0x47312450B3Ac8b5b8e247a6bB6d523e7605bDb60`, which follows SHARP upgrades (2/4 SHARP Multisig, 8-day delay);

@@ -8,9 +8,9 @@ A 23-segment SASH run for `TinyLlama/TinyLlama-1.1B-Chat-v1.0` (`fe8a4ea1ffedaf4
 
 Mainnet and Hoodi run Osaka, which binds this project; Amsterdam is tracked alongside it ([docs/EVM-GAS-MODEL.md](docs/EVM-GAS-MODEL.md) §2 lists both forks' constants). Verifying those proofs directly in one EVM transaction would need at least ~863x the `EIP-7825` per-transaction cap under Osaka (~1,131x under Amsterdam), estimated from those sizes: calldata plus ~10.27 billion gas of `BLAKE2s` in Solidity, which no precompile computes ([docs/EVM-GAS-MODEL.md](docs/EVM-GAS-MODEL.md) §3). `verifiable-inference-ethereum` therefore splits the work across two layers, without weakening SASH's execution relation:
 
-1. **Off-chain segment verification and compression (M2 present, M3 planned):**
+1. **Off-chain segment verification and compression (present):**
    - M2 (`sp1/segment-guest`): an SP1 v6 `riscv64im` guest per segment runs a verifier-only build of SASH's `verify_composed` ([SPEC.md](SPEC.md) §1.1). Unmodified, `verify_composed` cannot run in a guest: it calls `std::time::Instant::now`, and its crate needs stwo's nightly `prover` feature (for the GKR verifier) and nitroo's CUDA build script.
-   - M3: an aggregator guest verifies the 23 segment proofs and commits `publicDigest`; an SP1 v6 BN254 PLONK wrap makes it verifiable on-chain through `Sp1SashSegmentVerifier.sol` and the pinned, ownerless SP1 v6.1.0 `SP1VerifierPlonk` ([SECURITY.md](SECURITY.md) §6; ~300k gas, estimated).
+   - M3 (`sp1/aggregator-guest`): an aggregator guest verifies the 23 segment proofs and commits `publicDigest`; an SP1 v6 BN254 PLONK wrap makes it verifiable on-chain through `Sp1SashSegmentVerifier.sol` and the pinned, ownerless SP1 v6.1.0 `SP1VerifierPlonk` ([SECURITY.md](SECURITY.md) §6), whose frame costs 286,360 gas (measured, [docs/EVM-GAS-MODEL.md](docs/EVM-GAS-MODEL.md) §5). Proving the TinyLlama run's 23 segments and its PLONK proof (committed as `contracts/fixtures/tinyllama.plonk.json`) takes 100.6 min and $4.61 per inference on one RTX PRO 6000 GPU rented on Hugging Face Jobs, or 18.9 min with the segments proved in parallel ([docs/EVM-GAS-MODEL.md](docs/EVM-GAS-MODEL.md) §9.4).
 2. **Native Solidity SASH grid settlement (`contracts/src/`, present):**
    Enforces on-chain in pure Solidity:
    - Enrolled 23-segment `(preRoot, modelRoot, fixedHash)` manifest membership (`SashModelRegistry.sol`),
@@ -18,7 +18,7 @@ Mainnet and Hoodi run Osaka, which binds this project; Amsterdam is tracked alon
    - A sha256 `publicDigest` over the segment claims and the `tok_in` / `tok_out` vectors, which the segment proof must attest, so the tokens are the ones SASH's own `embed_tok` / `head_tok` checks used; those checks bind the vectors only with SASH patch 0006, which mixes them into the Fiat-Shamir transcript (upstream `eb95bfa` does not: [SECURITY.md](SECURITY.md) §5, [SPEC.md](SPEC.md) §1),
    - Public prompt prefix matching, autoregressive teacher-forcing loop closure (`tok_in[P+j] == tok_out[P-1+j]`), and EOS (`2`) termination (`SashGridVerifier.sol`, ~40k gas measured, [docs/EVM-GAS-MODEL.md](docs/EVM-GAS-MODEL.md) §4).
 
-Aggregated single-transaction settlement of the TinyLlama run, with its real PLONK proof through the v6.1.0 `SP1VerifierPlonk` and `allowDevVerifier = false`, costs **520,898 gas** on Osaka (**3.1%** of the `EIP-7825` cap; anvil receipt, equal to its forge snapshot), below M3's 600,000 exit gate; the `SP1VerifierPlonk` frame is 286,360 of it ([docs/EVM-GAS-MODEL.md](docs/EVM-GAS-MODEL.md) §5).
+Aggregated single-transaction settlement of the TinyLlama run, with its real PLONK proof through the v6.1.0 `SP1VerifierPlonk` and `allowDevVerifier = false`, costs **520,898 gas** on Osaka (**3.1%** of the `EIP-7825` cap; anvil receipt, equal to its forge snapshot), below M3's 600,000 exit gate; the `SP1VerifierPlonk` frame is 286,360 of it. Under Amsterdam it costs 604,318 gas (provisional, mined on a Foundry nightly), 4,318 above 600,000; the gate is Osaka's ([docs/EVM-GAS-MODEL.md](docs/EVM-GAS-MODEL.md) §5).
 
 ## Exact claim boundary
 
