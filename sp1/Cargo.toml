@@ -29,6 +29,8 @@ sash-evm-primitives = { path = "../crates/sash-evm-primitives" }
 sash-segment-check = { path = "sash-segment-check" }
 sp1-build = "=6.10.0"
 sp1-sdk = { version = "=6.10.0", features = ["blocking"] }
+# The PLONK proof's offline check, with its embedded PLONK_VK_BYTES (the version sp1-sdk links).
+sp1-verifier = "=6.10.0"
 sp1-zkvm = "=6.10.0"
 # nitroo's Stwo from the vendored SASH tree, without its `prover` feature (SPEC.md §1.1).
 stwo = { path = "vendor/sash/nitroo/crates/stwo", default-features = false, features = ["std"] }
