@@ -383,15 +383,15 @@ The thresholds below are the ones `docs/ROADMAP.md` records with M2's decision, 
 |---|---|---|---|---|
 | F1 | Every segment's §7 figures within half of SP1's limits | `head`, the largest: 6.23e9 cycles, 0.62% of sp1-sdk 6.10.0's 1e12-cycle `MAINNET_DEFAULT_CYCLE_LIMIT` (`network/mod.rs`); the network's 1e12-PGU request cap is not assessed: it is #38's figure, unverified, and sp1-sdk 6.10.0 defines no PGU cap (its 1e9-PGU `DEFAULT_GAS_LIMIT` is a default a request overrides, §7); 35,901,653 stdin bytes, 0.21% of the 16 GiB input region (`SP1_ZKVM_INPUT_REGION_SIZE` default `1 << 34`, sp1 `crates/zkvm/entrypoint/build.rs`); native executor child peak RSS 4,725,551,104 B (§8.1), 18.3% of its 24 GiB `DEFAULT_MEMORY_LIMIT` | ≤ 50% of each limit | Passes for cycles, input and RSS; PGU cap not assessed |
 | F2 | `B0L10` and `head` prove without running out of memory | Both prove and verify, twice; peak 26,541 MiB of the GPU's 97,887 MiB, `sp1-gpu-server` `VmHWM` 25,671,472 kB of the 256 GB allotted | Both prove and verify | Passes |
-| C1 | $ per inference | $4.10–4.25, proving the 23 segments (estimate from two measured proofs), plus the aggregator, about $0.16 (estimate), and the wrap (M3) | ≤ $5, the order of the S-two route's scaled estimate ($4.46) | Meets it, if the wrap costs under about $0.60 |
-| C2 | Wall time per inference, 23 segments in parallel, aggregator and wrap included | `head`'s 721.6 s (measured) + the aggregator, about 210 s (estimate) + the wrap (M3): about 15.5 min plus the wrap | ≤ 1 h, about twice SASH's own 31 min | Meets it, if the wrap takes under about 44 min |
+| C1 | $ per inference | $4.61 (§9.4, measured): proving the 23 segments, 5,642.7 s, $4.31, plus the aggregator and its PLONK wrap over the 23 proofs, 395.1 s, $0.30 | ≤ $5, the order of the S-two route's scaled estimate ($4.46) | Meets it |
+| C2 | Wall time per inference, 23 segments in parallel, aggregator and wrap included | `head`'s 738.5 s + the aggregator and its PLONK wrap, 395.1 s = 1,133.6 s, 18.9 min (§9.4, measured) | ≤ 1 h, about twice SASH's own 31 min | Meets it |
 | C3 | §7's measured cycles against the ~1e10 estimate made before #45 | 4.79e10, 4.79× | ≤ 10× | Passes |
 
 **GO**: F1 and F2 pass, and C1 and C2 meet their thresholds.
 
 - F1 and F2 pass: every segment fits SP1's limits with a wide margin, and the largest proves in 27% of one card's memory.
-- C1 and C2 meet the thresholds: $4.10–4.25 per inference for the 23 segments on one GPU, about the S-two route's scaled estimate, which still needs a Cairo SASH verifier that does not exist; about 12 minutes for `head` with the segments in parallel.
-- The margins are what M3 must measure first: the aggregator and the wrap are estimates, and C1 leaves about $0.60 for them. §9.3 measures both at `N = 1`, and C1 and C2 still hold. The cost is 13–14× SASH's own proving, and BLAKE2s, with no SP1 precompile, is about a quarter of it.
+- C1 and C2 meet the thresholds, measured on the 23 segments, the aggregator and its PLONK wrap (§9.4): $4.61 per inference on one GPU, about the S-two route's scaled estimate ($4.46), which still needs a Cairo SASH verifier that does not exist; 18.9 min with the segments in parallel. GO holds.
+- Proving the segments costs about 14× SASH's own proving of the run ($4.31 against about $0.31), and BLAKE2s, with no SP1 precompile, is about a quarter of it.
 
 ## 9. M3: aggregator and wrap
 
@@ -440,7 +440,7 @@ Each segment past the first adds 91,085 cycles and 89,435 PGU. That is execution
 - **Hardware:** NVIDIA RTX PRO 6000 Blackwell Server Edition, compute capability 12.0, 97,887 MiB, power limit 600 W, driver 580.178.04 (CUDA 13.0); 23 vCPU and 256 GB allotted (the container sees 192 threads and 1,999 GB); Linux 6.12.103, x86_64.
 - **Software:** sp1-sdk `6.10.0`; `sp1-gpu-server` `v6.10.0`, binary sha256 `4043fe250c471515e144f4ae722b7ea3afd9bdc257609d3bcd9fea6247f74537` (from the tarball of §8's sha256); rustc 1.99.1.
 - **ELFs:** the Docker builds of CI run 41051189040 (commit `96f8d3b`), published in the public dataset `0xchqrles/sash-tinyllama-sp1-proofs` at commit `29d003c1a7f6e94c6bcdf9e9473955cbf41dc768` (`ELF_REVISION`); both match `sp1/<guest>.elf.sha256`.
-- **Dataset:** `B0L10`'s proof was uploaded as `segments/B0L10.proof.bin` right after it verified, dataset commit `2e49e17c4fb8abe1629b75da96928163417e6435`. #80 reuses it.
+- **Dataset:** `B0L10`'s proof was uploaded as `segments/B0L10.proof.bin` right after it verified, dataset commit `2e49e17c4fb8abe1629b75da96928163417e6435`. §9.4's run reuses it.
 
 | Step | Figures | Wall clock (`time -v`) |
 |---|---|---:|
@@ -455,29 +455,72 @@ Each segment past the first adds 91,085 cycles and 89,435 PGU. That is execution
 | `aggregate --mode plonk --tags B0L10` | setup 11.4 s; **prove 390.9 s**, stages below; `VmHWM` 69,257,968 kB; peak GPU at most 12,707 MiB (an upper bound, below) | 6:48.34 |
 
 - **Binding controls.** B1 and B2 each produce no proof. `sp1-gpu-server` logs `task failed with fatal error: attempted to perform base field division 904710250/0` (B1; `655659029/0` for B2) and `Reduction task … failed`: an equality assertion of the recursion program fails, since SP1 compiles `assert_eq` into `SubF` then `DivF` of the difference by zero, which errors unless the difference is zero (`sp1-recursion-compiler-6.10.0` `src/circuit/compiler.rs:214-224`). The deferred-proof recursion rejects the mismatched `(vk, sha256(public values))` pair, as `SPEC.md` §1.2 says it must. The client returns `CudaClientError: The server returned an internal error … artifact not found`. Both ran beside the honest `N = 1` aggregation, which verifies, so neither pass comes from a broken setup.
-- **The deferred recursion's slope.** `T2 - T1` is 0.1 s, at the 0.1 s resolution of the printed times: at `N = 1` and `N = 2`, the aggregation's compressed proof takes about 1.5 s and does not grow measurably with `N`. The `N = 23` aggregation is measured by #80.
+- **The deferred recursion's slope.** `T2 - T1` is 0.1 s, at the 0.1 s resolution of the printed times: at `N = 1` and `N = 2`, the aggregation's compressed proof takes about 1.5 s and does not grow measurably with `N`. §9.4 measures `N = 23`.
 - **The PLONK wrap.** `sp1-gpu-server` downloads the circuit and runs gnark natively on the job's CPU, with no Docker. Its log separates these stages; times are from its timestamps:
   - from the start of proving to the circuit download: 6.6 s; the log does not separate the core, compress, shrink and wrap stages in it;
   - circuit download (`v6.1.0-plonk.tar.gz`, 2,305,113,029 B), extraction and loading: about 82 s, one-time per host. The log does not separate them, so the download time alone is not measured here;
   - gnark PLONK prover over BN254, 27,576,375 constraints: 301.9 s, the solver's 9.9 s included;
   - gnark's verification: 1.8 ms.
 
-  The extracted circuit takes 2.8 GB (`du -sh` of `$SP1_PLONK_CIRCUIT_PATH/v6.1.0`). The peak disk is not measured: this run's sampler read `df` of the 14 TB host volume the container's overlay shares, whose used space grew 48,292 MiB in that time, beyond what this step writes. The circuit's own peak is the tarball and the extracted tree side by side, about 5.1 GB (estimate). `gpu-prove.sh` now samples `du` of `$SP1_PLONK_CIRCUIT_PATH` and the staged tarball's size (§9.2), so #80's job, which downloads the circuit again, measures the peak disk and the download time. `VmHWM` of `sp1-gpu-server` reaches 66 GiB with gnark, within the 256 GB allotted.
-- **GPU memory per step.** This run's sampler started as soon as the previous step's `sp1-host` exited, while that step's `sp1-gpu-server`, killed on the client's drop, could still hold GPU memory. `T1`'s 26,605 MiB is `B0L10`'s and is left out of the table. The PLONK step's 12,707 MiB equals `T2`'s, so it is an upper bound on the wrap's own peak, which may be lower. `gpu-prove.sh` now waits for the GPU to return to idle before a step samples (§9.2), and #80 measures the 23-segment wrap's own peak.
+  The extracted circuit takes 2.8 GB (`du -sh` of `$SP1_PLONK_CIRCUIT_PATH/v6.1.0`). The peak disk is not measured: this run's sampler read `df` of the 14 TB host volume the container's overlay shares, whose used space grew 48,292 MiB in that time, beyond what this step writes. The circuit's own peak is the tarball and the extracted tree side by side, about 5.1 GB (estimate). `gpu-prove.sh` now samples `du` of `$SP1_PLONK_CIRCUIT_PATH` and the staged tarball's size (§9.2), and §9.4 measures the peak disk and the download time. `VmHWM` of `sp1-gpu-server` reaches 66 GiB with gnark, within the 256 GB allotted.
+- **GPU memory per step.** This run's sampler started as soon as the previous step's `sp1-host` exited, while that step's `sp1-gpu-server`, killed on the client's drop, could still hold GPU memory. `T1`'s 26,605 MiB is `B0L10`'s and is left out of the table. The PLONK step's 12,707 MiB equals `T2`'s, so it is an upper bound on the wrap's own peak, which may be lower. `gpu-prove.sh` now waits for the GPU to return to idle before a step samples (§9.2), and §9.4 measures the 23-segment wrap's own peak.
 - **The PLONK proof.** bincode 4,103 B; `proofBytes` 964 B, selector `0x5a093a2f`, nonce 0; `programVKey` `0x00eb19e4…fe97747c` (`sp1/aggregator-guest.vkey`); `publicValues` the `N = 1` digest. It verifies:
   - with the SDK;
   - with `sp1-verifier`'s `PlonkVerifier` and with the sha256 public-values hash alone;
   - with the pinned v6.1.0 `SP1VerifierPlonk` in Foundry (forge 1.8.6, the repository's `foundry.toml`, a scratch test): `verifyProof` passes in 289,764 gas, and a flipped public-value byte reverts.
 
-  The `N = 1` proof is not committed; #80 commits the 23-segment one.
+  The `N = 1` proof is not committed; §9.4's 23-segment one is.
 - **§8.4's C1 and C2 still hold.**
   - C1: the `N = 1` aggregation and wrap take 390.9 s, $0.30, within the about $0.60 that C1 left for them. §8.2's $4.10–4.25 for the 23 segments was measured before patch 0006, and `B0L10` proved 6.8% slower here; scaled by that, the segments take 5,731–5,950 s, $4.38–4.55. Per inference, that is $4.38–4.55 + about $0.30 = $4.68–4.84, under $5.
   - C2: `head`'s 721.6 s, scaled by the same 6.8% to 771.0 s, + 390.9 s = 1,161.9 s, about 19.4 min, under 1 h.
-  - Both carry the `N = 1` wrap and the 23-proof deferred recursion at the slope above; #80 measures `N = 23`.
+  - Both carry the `N = 1` wrap and the 23-proof deferred recursion at the slope above; §9.4 measures `N = 23`.
 
-### 9.4 The 23-segment run
+### 9.4 The 23-segment run (measured)
 
 `gpu-prove.sh all` on `rtx-pro-6000`, after #79's run: it downloads `B0L10`'s proof from `segments/`, proves the 22 other segments in order with one client and one setup, uploading each one as it verifies, then aggregates the 23 in PLONK mode with `--fixture-out`, uploads the PLONK proof under `plonk/`, and last aggregates them in compressed mode (timing only, capped at 6 min).
 
-- **Timeout: 135 min (at most $6.19).** The rule: §8.2's upper end for the 22 remaining segments, 5,568 s less `B0L10`'s 210 s, 89 min, plus 1.5 × the rest from §9.3: the setup before the first GPU step (170 s), the `N = 1` PLONK step (6:48.34 wall clock, 408 s, the circuit download included) and 22 × the slope `T2 - T1` (0.1 s, 2.2 s), and the timing-only compressed step (`T1`'s 17.27 s wall clock plus the same 2.2 s, 19.5 s), 1.5 × 600 s = 900 s, 15 min. The sum, 104 min, is under 135 min, so the timeout stays at 135 min. The compressed step runs after the PLONK proof is uploaded and is capped at 6 min, so even at its cap it cannot cost the deliverable. The `N = 23` deferred recursion is unmeasured until this run; the slope is its only estimate.
-- **Resume:** at most one job re-running `gpu-prove.sh all`, which proves only the tags missing from `segments/`, then aggregates. Its timeout is 1.5 × (the 170 s setup, the missing tags' §8.2 times and the aggregation, 408 s at `N = 1` or this run's measured figure), at most 60 min ($2.75).
+- **Timeout: 135 min (at most $6.19).** The rule: §8.2's upper end for the 22 remaining segments, 5,568 s less `B0L10`'s 210 s, 89 min, plus 1.5 × the rest from §9.3: the setup before the first GPU step (170 s), the `N = 1` PLONK step (6:48.34 wall clock, 408 s, the circuit download included) and 22 × the slope `T2 - T1` (0.1 s, 2.2 s), and the timing-only compressed step (`T1`'s 17.27 s wall clock plus the same 2.2 s, 19.5 s), 1.5 × 600 s = 900 s, 15 min. The sum, 104 min, is under 135 min, so the timeout stays at 135 min. The compressed step runs after the PLONK proof is uploaded and is capped at 6 min, so even at its cap it cannot cost the deliverable. The `N = 23` deferred recursion was unmeasured before this run, with the slope its only estimate. The run took 101.6 min.
+- **Resume:** at most one job re-running `gpu-prove.sh all`, which proves only the tags missing from `segments/`, then aggregates. Its timeout is 1.5 × (the 170 s setup, the missing tags' §8.2 times and the aggregation, 408 s at `N = 1` or this run's measured figure), at most 60 min ($2.75). This run needed none.
+- **Job:** Hugging Face Jobs `6ae4b8030e0338d1bb7cbc1a`, 2026-10-30, flavor `rtx-pro-6000` ($0.045833 per minute), image `nvidia/cuda:12.8.1-base-ubuntu24.04`, timeout 135 min, commit `643f859`. It ran 6,094 s (5 s scheduling apart), 101.6 min: **$4.66**. Every step exited 0.
+- **Hardware and software:** §9.3's: the same GPU model, driver and allotment; sp1-sdk `6.10.0`, `sp1-gpu-server` `v6.10.0` from §8's tarball; the ELFs from the dataset at `ELF_REVISION`, checked against their pins.
+- **Dataset:** each proof was uploaded right after it verified, one dataset commit each. The last, the PLONK proof's, is `d1cb00686f27b7491e71a28564e2ea490cd5621d`: `sp1/scripts/tinyllama-proofs.sh` pins it (`REVISION`), and `sp1/pins/tinyllama.proofs.sha256` was written from it (`PINS=write`). It holds the 23 segment proofs, 1,272,795 B each (`B0L10`'s from §9.3), and the PLONK proof.
+- **Steps:** the setup, from apt to the proofs already in `segments/`, 174 s (§9.3: 170 s); `prove --tags all`, 1:31:07 wall clock for the 22 missing tags (setup 11.8 s, each upload 1.1–3.0 s, peak GPU 26,733 MiB, `sp1-gpu-server` `VmHWM` 25,103,984 kB); `aggregate --mode plonk`, 6:54.68; the timing-only `aggregate --mode compressed`, 0:22.69.
+
+| Segment | PGU (§7) | Prove, compressed (s) | PGU/s |
+|---|---:|---:|---:|
+| `B0L0` | 1,930,854,534 | 239.7 | 8,055,296 |
+| `B0L1` | 1,787,278,491 | 230.5 | 7,753,920 |
+| `B0L2` | 1,781,008,887 | 236.3 | 7,537,067 |
+| `B0L3` | 1,762,329,231 | 229.8 | 7,668,970 |
+| `B0L4` | 1,758,807,596 | 238.3 | 7,380,645 |
+| `B0L5` | 1,747,071,218 | 221.5 | 7,887,455 |
+| `B0L6` | 1,749,776,699 | 226.1 | 7,738,950 |
+| `B0L7` | 1,765,591,696 | 220.4 | 8,010,852 |
+| `B0L8` | 1,765,205,480 | 228.9 | 7,711,688 |
+| `B0L9` | 1,753,494,646 | 223.7 | 7,838,599 |
+| `B0L10` (§9.3) | 1,750,956,986 | 224.6 | 7,795,890 |
+| `B0L11` | 1,761,841,429 | 218.6 | 8,059,659 |
+| `B0L12` | 1,739,625,044 | 213.0 | 8,167,254 |
+| `B0L13` | 1,749,424,876 | 203.6 | 8,592,460 |
+| `B0L14` | 1,757,305,463 | 216.6 | 8,113,137 |
+| `B0L15` | 1,751,403,810 | 208.1 | 8,416,164 |
+| `B0L16` | 1,760,862,151 | 207.5 | 8,486,083 |
+| `B0L17` | 1,742,708,287 | 210.1 | 8,294,661 |
+| `B0L18` | 1,749,829,741 | 222.6 | 7,860,870 |
+| `B0L19` | 1,753,116,323 | 228.0 | 7,689,107 |
+| `B0L20` | 1,763,557,815 | 234.6 | 7,517,297 |
+| `B0L21` | 1,759,575,388 | 221.7 | 7,936,741 |
+| `head` | 5,853,065,177 | 738.5 | 7,925,613 |
+| **All 23** | **44,694,690,968** | **5,642.7** | **7,920,799** |
+
+- **The 23 segments: 5,642.7 s, 94.0 min, $4.31** at $0.045833/min: 5,418.1 s for this run's 22 and §9.3's 224.6 s for `B0L10`. That is 7.92M PGU/s over §7's Σ PGU (7.38M–8.59M per segment), 1.3% above §8.2's extrapolated 5,364–5,568 s and 1.5% below §9.3's 5,731–5,950 s, which scaled §8.2 by `B0L10`'s 6.8%. `head` took 738.5 s (§8.1: 721.6 s, +2.3%). Each proof verified on the GPU host with its expected public values.
+- **The aggregator over the 23 proofs, PLONK.** Before the GPU: both ELFs and vkeys, `SEGMENT_VKEY`, the 23 proofs verified on the CPU, the digest `SPEC.md` §1.4's `publicDigest` `cf52e19e…d067b3ef`, and the executor with the proofs in stdin (3,252,408 cycles, 3,083,538 PGU, §9.1's, 1.5 s). Setup 11.5 s, **prove 395.1 s** (§9.3's `N = 1`: 390.9 s). Times from `sp1-gpu-server`'s log:
+  - from the start of proving to the circuit download: 9.3 s (`N = 1`: 6.6 s). The core execution, the deferred recursion over the 23 proofs, compress, shrink and wrap are all in it, and the log does not separate them;
+  - the circuit download, extraction and loading: about 88 s, until gnark's prover starts (its end less its 296.6 s; `N = 1`: about 82 s). From the 1 s disk samples, the 2,305,113,029 B tarball downloaded in about 38 s and extracted in about 14 s; the remaining ~36 s is loading. One-time per host;
+  - gnark's PLONK prover over BN254, 27,576,375 constraints: 296.6 s, the solver's 10.3 s included (`N = 1`: 301.9 s); its verification 1.9 ms;
+  - peak circuit disk 6,764 MiB (`du` of `$SP1_PLONK_CIRCUIT_PATH`, the staging directory included; §9.3 estimated about 5.1 GB), 2.8 GB once extracted;
+  - peak GPU memory 16,651 MiB, the step's own (the GPU was idle, at 0 MiB, when it started); `sp1-gpu-server` `VmHWM` 69,375,964 kB.
+- **The PLONK proof.** bincode 4,103 B, sha256 `ca593bab…2154d680`, published as `plonk/tinyllama.plonk.bin`; `proofBytes` 964 B, selector `0x5a093a2f`, nonce 0; `programVKey` `0x00eb19e4…fe97747c` (`sp1/aggregator-guest.vkey`); `publicValues` the `publicDigest`. It verifies with the SDK and with `sp1-verifier`'s `PlonkVerifier` with the sha256 public-values hash alone. `contracts/fixtures/tinyllama.plonk.json` is the file `--fixture-out` wrote (2,128 B, sha256 `e27f39ff…e1cb3d16`, checked against the job's print), and `sp1-host plonk-fixture` binds the published proof to it (§9.2).
+- **The deferred recursion, compressed (timing only).** `aggregate --mode compressed` over the 23 proofs: setup 11.5 s, **prove 4.7 s**, against `T1`'s 1.4 s: 3.3 s more, 0.15 s per added proof against §9.3's slope of 0.1 s, which estimated 3.6 s. Peak GPU 16,713 MiB, `VmHWM` 13,673,520 kB; the proof, 1,272,601 B, verifies with the 32-byte digest and is not kept. Against the PLONK step's 395.1 s, the recursion over 23 proofs is a few seconds; gnark dominates.
+- **Per inference.** On one GPU: the 23 segments and the PLONK aggregation, 5,642.7 s + 395.1 s = 6,037.8 s, 100.6 min, **$4.61**, the circuit's one-time download included and the one-time setups (about 12 s each) and build left out. With the segments in parallel: `head`'s 738.5 s + 395.1 s = 1,133.6 s, **18.9 min**. §8.4's C1 and C2 hold on these figures.
+- **Hugging Face spend in M3:** §9.3's job $0.69 and this one $4.66, $5.35 in all, against the $11.69 the M3 plan allows at the caps (~$5.8–6.5 expected); the contingency job was not used.

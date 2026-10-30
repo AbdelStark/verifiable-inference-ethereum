@@ -25,7 +25,7 @@ root="$(cd "$(dirname "$0")/../.." && pwd -P)"
 
 DATASET=0xchqrles/sash-tinyllama-sp1-proofs
 # The dataset commit holding the 23 segment proofs and the PLONK proof.
-REVISION=
+REVISION=d1cb00686f27b7491e71a28564e2ea490cd5621d
 pins="$root/sp1/pins/tinyllama.proofs.sha256"
 
 fail() {
