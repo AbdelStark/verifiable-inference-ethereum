@@ -1,6 +1,6 @@
 # TinyLlama-1.1B SASH Sizing and EVM Gas Model
 
-M1 has measured the grid path and the dev-mode settlement (§4). Every other gas figure here is an estimate until a milestone measures it: M3 the SP1 verifier and the aggregated settlement. §6 measures the SP1 unit costs of SASH's verifier primitives, §7 the 23 TinyLlama segments in the SP1 executor, and §8 the GPU proving of two of them.
+Every gas figure here is measured, except §3's estimates and the figures labelled derived. M1 measured the grid path and the dev-mode settlement (§4), and M3 the aggregated settlement through the real SP1 PLONK verifier (§5), both on Osaka; their Amsterdam figures are provisional, mined on a Foundry nightly. §6 measures the SP1 unit costs of SASH's verifier primitives, §7 the 23 TinyLlama segments in the SP1 executor, §8 the GPU proving of two of them and M2's go/no-go, and §9 M3's aggregator, its PLONK wrap and the GPU proving of all 23 segments.
 
 ## 1. TinyLlama-1.1B SASH proof sizes
 
@@ -91,19 +91,19 @@ The harness snapshots include their own ABI decoding, so the split between rows 
 
 ### Amsterdam (provisional)
 
-The same Osaka-compiled bytecode, mined on `anvil --hardfork amsterdam --enable-tx-gas-limit --code-size-limit 24576` from a Foundry nightly (`1.8.7-nightly`, commit `024702852`, 2026-10-27). These figures are provisional until Amsterdam activates on mainnet, and are taken from a nightly: Foundry 1.8.6's anvil doesn't apply Amsterdam gas (`EIP-7976`, `EIP-8037`, `EIP-2780`). #24 re-measures them on a stable Foundry release.
+The same Osaka-compiled bytecode, mined from a Foundry nightly (`1.8.7-nightly`, commit `024702852`, built 2026-10-27) on a fresh `anvil --hardfork amsterdam --enable-tx-gas-limit --code-size-limit 24576`, with that nightly's `forge script --hardfork amsterdam --gas-limit 100000000`. The raised simulation block gas limit, for that invocation only, funds the simulated deployment of the script contract itself, whose state gas exceeds `foundry.toml`'s `gas_limit` under Amsterdam. The nightly compiles byte-identical artifacts to Foundry 1.8.6's. These figures are provisional until Amsterdam activates on mainnet, and are taken from a nightly: Foundry 1.8.6's anvil doesn't apply Amsterdam gas (`EIP-7976`, `EIP-8037`, `EIP-2780`). Neither `make check` nor CI runs this; #24 re-mines this table and §5's on a stable Foundry release.
 
-No receipt field separates state gas, so it is derived from the `EIP-8037` constants: 183,600 per new contract, 1,530 per byte of deployed code, 97,920 per new storage slot.
+No receipt field separates state gas, so it is derived from the `EIP-8037` constants: 183,600 per new contract, 1,530 per byte of deployed code, 97,920 per new storage slot. The constructors set only immutables, so a deployment creates one contract and no storage slot.
 
 | Transaction (anvil receipt, Amsterdam, Foundry nightly `024702852`) | `gasUsed` | State gas (derived) | Rest | Osaka |
 |---|---:|---:|---:|---:|
-| `SashModelRegistry` deployment (1,095 B) | 1,902,912 | 1,858,950 | 43,962 | 291,740 |
-| `SashModelRegistry.enrollModel` (3 new slots) | 350,025 | 293,760 | 56,265 | 92,053 |
+| `SashModelRegistry` deployment (1,095 B) | 1,902,900 | 1,858,950 | 43,950 | 291,740 |
+| `SashModelRegistry.enrollModel` (3 new slots) | 350,013 | 293,760 | 56,253 | 92,053 |
 | `DevTranscriptSegmentVerifier` deployment (784 B) | 1,420,693 | 1,383,120 | 37,573 | 223,223 |
-| `VerifiableInferenceSettlement` deployment (3,763 B) | 6,032,117 | 5,940,990 | 91,127 | 874,235 |
-| `VerifiableInferenceSettlement.verifyAndSettle` (1 new slot), computed | 525,208 | 97,920 | floor-bound | 218,380 |
+| `VerifiableInferenceSettlement` deployment (3,773 B) | 6,047,633 | 5,956,290 | 91,343 | 874,235 |
+| `VerifiableInferenceSettlement.verifyAndSettle` (1 new slot) | 525,208 | 97,920 | floor-bound | 218,380 |
 
-The settle row is computed, not mined: 15,000 (`EIP-2780`) + 64 × 7,972 calldata bytes (`EIP-7976`) = 525,208, about 2.4x its Osaka cost. It is floor-bound, as the nightly's receipt was for the 7,236 B calldata before the claims carried `fixedHash` (478,104 = 15,000 + 64 × 7,236). The `enrollModel` and `VerifiableInferenceSettlement` deployment rows are that nightly's receipts for the bytecode before `fixedHash` (the settlement contract was 3,763 B; it is 3,773 B now); #24 re-mines every row. Deployments cost 6–7x more, almost all of it state gas.
+The settle is floor-bound, as on Osaka: its receipt is 15,000 (`EIP-2780`) + 64 × 7,972 calldata bytes (`EIP-7976`) = 525,208, about 2.4x its Osaka cost, against standard plus execution 15,000 + 78,952 + 206,147 = 300,099 (execution from `trace_transaction`, its 97,920 of state gas included). Deployments cost 6–7x more, almost all of it state gas.
 
 ## 5. Aggregated settlement (Osaka, measured)
 
@@ -156,7 +156,37 @@ As in §4, the harness snapshots include their own ABI decoding, so the split be
 
 The canonical deployment costs 4,687 more execution gas, so a settlement bound to it would cost about 525,585 gas on Osaka (derived, not measured). M4 measures it on Hoodi.
 
-Amsterdam is not measured here: Foundry 1.8.6's anvil doesn't apply Amsterdam gas (§4). Its `EIP-7976` floor alone is 15,000 + 64 × 8,932 = 586,648 gas.
+### Amsterdam (provisional)
+
+`DeployAnvilSp1.s.sol`, the same Osaka-compiled bytecode, mined as §4's Amsterdam run: on a fresh `anvil --hardfork amsterdam --enable-tx-gas-limit --code-size-limit 24576` from Foundry `1.8.7-nightly` commit `024702852` (built 2026-10-27), with that nightly's `forge script --hardfork amsterdam --gas-limit 100000000`. Every deployed contract's runtime code hashes as on Osaka, and the settle emits one `InferenceVerified` with the §1.4 `runId` and `verifierKind == 1`. These figures are provisional, like §4's, and not M3's exit gate, which is Osaka's (`docs/ROADMAP.md`). Neither `make check` nor CI runs this; #24 re-mines this table with §4's on a stable Foundry release. State gas is derived from the `EIP-8037` constants, as in §4.
+
+| Transaction (anvil receipt, Amsterdam, Foundry nightly `024702852`) | `gasUsed` | Gas limit | State gas (derived) | Rest | Osaka |
+|---|---:|---:|---:|---:|---:|
+| `SP1VerifierPlonk` deployment (8,966 B) | 14,072,497 | 18,294,246 | 13,901,580 | 170,917 | 1,991,431 |
+| `SashModelRegistry` deployment (1,095 B) | 1,902,900 | 2,473,770 | 1,858,950 | 43,950 | 291,740 |
+| `SashModelRegistry.enrollModel` (3 new slots) | 350,013 | 483,454 | 293,760 | 56,253 | 92,053 |
+| `Sp1SashSegmentVerifier` deployment (826 B) | 1,497,011 | 1,946,114 | 1,447,380 | 49,631 | 243,275 |
+| `VerifiableInferenceSettlement` deployment (3,773 B) | 6,051,129 | 7,866,467 | 5,956,290 | 94,839 | 877,331 |
+| `VerifiableInferenceSettlement.verifyAndSettle` (1 new slot) | **604,318** | 834,713 | 97,920 | 506,398 | 520,898 |
+
+The verifier's deployment has a gas limit above 16,777,216, which Amsterdam allows: the `EIP-7825` cap applies to all but state gas (`EIP-8037`, §2), and that deployment's rest is 170,917.
+
+**The settle transaction under `EIP-7623` with Amsterdam's constants.** The same 8,932 B of calldata as on Osaka, 4,143 zero and 4,789 non-zero.
+
+| Part | Gas |
+|---|---:|
+| Intrinsic (`EIP-2780`) | 15,000 |
+| Standard calldata: 4 × 4,143 + 16 × 4,789 | 93,196 |
+| Execution: `trace_transaction` top call `gasUsed` | 496,122 |
+| of which state gas: the new `settledRuns` slot (derived) | 97,920 |
+| Standard + execution: 15,000 + 93,196 + 496,122 | **604,318** |
+| Floor (`EIP-7976`): 15,000 + 64 × 8,932 | 586,648 |
+| **`gasUsed`**: the larger of the two | **604,318** |
+
+- **Bound:** execution-bound, by 17,670 gas, as on Osaka.
+- **Against 600,000:** under Amsterdam the settlement costs 604,318 gas, 4,318 above 600,000. M3's 600,000 gate applies to the Osaka receipt, 520,898 gas (this section's first table); the Amsterdam figure is recorded, not gated.
+- **Against Osaka:** 83,420 more (+16.0%). The intrinsic cost is 6,000 lower and standard calldata is the same, but execution is 89,420 higher. The `settledRuns` `SSTORE` of a new slot costs 108,020 against 20,000 (from `debug_traceTransaction` on both forks), 97,920 of it state gas; the remaining 1,400 is spread over the call frames, 500 of it in the adapter's (290,749). The verifier's frames don't change: `SP1VerifierPlonk.verifyProof` 286,360 and `PlonkVerifier.Verify` 282,990, as on Osaka.
+- **Against the cap:** `EIP-8037` counts all but state gas against the 16,777,216 cap. That is 604,318 − 97,920 = 506,398 here, 3.0% of the cap; the floor is 3.5% of it.
 
 ## 6. SP1 unit costs of SASH's verifier (measured)
 
@@ -385,9 +415,9 @@ Proving time scales with PGU at each segment's measured rate: all 23 segments ta
 
 Over both runs and both rates: 5,364–5,568 s and $4.10–4.25 per inference on one GPU. §7's 6.208 GPU-hours, at an unverified 2M PGU/s, was about 4× too high: one RTX PRO 6000 proves 8.0–8.3M PGU/s. PGU counts the work that SP1's prover network bills; the GPU's time per PGU may still vary with a segment's mix of chips, which the two segments sample.
 
-**Aggregator (estimate; §9.3 measures it at `N = 1` and `N = 2`).** One guest verifies the 23 compressed proofs with `verify_sp1_proof` and commits the 32-byte `publicDigest`, as SP1's aggregation example does (sp1 `v6.10.0` `examples/aggregation`). Its RISC-V work measures 3,252,408 cycles and 3,083,538 PGU at `N = 23` in the executor (§9), 0.007% of §7's segment cycles and PGU. Each `verify_sp1_proof` is a deferred proof, checked by the recursion program like one node of a compress tree, so the aggregator's proof is one recursion layer over 23 proofs plus a short core execution. The server did not log how many core shards `B0L10`'s own compress tree folds, so no bound follows from it. Working figure: one `B0L10` proof, about 210 s and $0.16 on this GPU, which is a scale, not a bound.
+**Aggregator (estimated here; measured in §9.3 at `N = 1` and `N = 2` and in §9.4 at `N = 23`).** One guest verifies the 23 compressed proofs with `verify_sp1_proof` and commits the 32-byte `publicDigest`, as SP1's aggregation example does (sp1 `v6.10.0` `examples/aggregation`). Its RISC-V work measures 3,252,408 cycles and 3,083,538 PGU at `N = 23` in the executor (§9), 0.007% of §7's segment cycles and PGU. Each `verify_sp1_proof` is a deferred proof, checked by the recursion program like one node of a compress tree, so the aggregator's proof is one recursion layer over 23 proofs plus a short core execution. The server did not log how many core shards `B0L10`'s own compress tree folds, so no bound follows from it. Working figure: one `B0L10` proof, about 210 s and $0.16 on this GPU, which is a scale, not a bound. §9.4 measures it: the deferred recursion over the 23 proofs adds 3.3 s to the aggregator's compressed proof (4.7 s against 1.4 s at `N = 1`).
 
-**BN254 wrap (estimate; §9.3 measures it at `N = 1`).** One per inference and independent of the segments: SP1's shrink and wrap recursion, then gnark's PLONK prover over BN254 (`ProofMode::Plonk`, which `sp1-gpu-server` also serves). Not measured or estimated here. Its on-chain cost is §5's, measured: the `SP1VerifierPlonk` frame is 286,360 gas of a 520,898 gas settlement.
+**BN254 wrap (measured in §9.3 at `N = 1` and in §9.4 at `N = 23`).** One per inference and independent of the segments: SP1's shrink and wrap recursion, then gnark's PLONK prover over BN254 (`ProofMode::Plonk`, which `sp1-gpu-server` also serves). Not estimated here; §9.4 measures the aggregator's PLONK proof over the 23 segment proofs at 395.1 s, $0.30, 296.6 s of it in gnark's prover. Its on-chain cost is §5's, measured: the `SP1VerifierPlonk` frame is 286,360 gas of a 520,898 gas settlement.
 
 ### 8.3 Against the S-two route and SASH's own proving
 
@@ -446,7 +476,7 @@ The aggregator guest (`SPEC.md` §1.2, `sp1/aggregator-guest`) on the TinyLlama 
 | 1 | `B0L10`'s public values | `sha256(modelId \|\| be32(1) \|\| claim \|\| 0^32 \|\| 0^32)` | 1,248,544 | 1,115,967 |
 | 23 | the 23 segments' public values | `SPEC.md` §1.4's `publicDigest` | 3,252,408 | 3,083,538 |
 
-Each segment past the first adds 91,085 cycles and 89,435 PGU. That is execution only: the deferred-proof recursion that checks the `N` segment proofs runs when proving, and §8.2's estimate for it stands until the GPU run measures it.
+Each segment past the first adds 91,085 cycles and 89,435 PGU. That is execution only: the deferred-proof recursion that checks the `N` segment proofs runs when proving, which §9.3 and §9.4 measure on the GPU.
 
 
 ### 9.2 The GPU pipeline
