@@ -348,7 +348,7 @@ Proving time scales with PGU at each segment's measured rate: all 23 segments ta
 
 Over both runs and both rates: 5,364–5,568 s and $4.10–4.25 per inference on one GPU. §7's 6.208 GPU-hours, at an unverified 2M PGU/s, was about 4× too high: one RTX PRO 6000 proves 8.0–8.3M PGU/s. PGU counts the work that SP1's prover network bills; the GPU's time per PGU may still vary with a segment's mix of chips, which the two segments sample.
 
-**Aggregator (estimate; M3 measures it).** One guest verifies the 23 compressed proofs with `verify_sp1_proof` and commits the 32-byte `publicDigest`, as SP1's aggregation example does (sp1 `v6.10.0` `examples/aggregation`). Its RISC-V work is small: 23 × 226 bytes of public values, the vkey checks and a few sha256 hashes. Each `verify_sp1_proof` is a deferred proof, checked by the recursion program like one node of a compress tree, so the aggregator's proof is one recursion layer over 23 proofs plus a short core execution. The server did not log how many core shards `B0L10`'s own compress tree folds, so no bound follows from it. Working figure: one `B0L10` proof, about 210 s and $0.16 on this GPU, which is a scale, not a bound.
+**Aggregator (estimate; M3 measures it).** One guest verifies the 23 compressed proofs with `verify_sp1_proof` and commits the 32-byte `publicDigest`, as SP1's aggregation example does (sp1 `v6.10.0` `examples/aggregation`). Its RISC-V work measures 3,252,408 cycles and 3,083,538 PGU at `N = 23` in the executor (§9), 0.007% of §7's segment cycles and PGU. Each `verify_sp1_proof` is a deferred proof, checked by the recursion program like one node of a compress tree, so the aggregator's proof is one recursion layer over 23 proofs plus a short core execution. The server did not log how many core shards `B0L10`'s own compress tree folds, so no bound follows from it. Working figure: one `B0L10` proof, about 210 s and $0.16 on this GPU, which is a scale, not a bound.
 
 **BN254 wrap (estimate; M3 measures it).** One per inference and independent of the segments: SP1's shrink and wrap recursion, then gnark's PLONK prover over BN254 (`ProofMode::Plonk`, which `sp1-gpu-server` also serves). Not measured or estimated here. Its on-chain cost is §5's: ~270k gas (Groth16) or ~300k (PLONK).
 
@@ -392,3 +392,22 @@ The thresholds below are the ones `docs/ROADMAP.md` records with M2's decision, 
 - F1 and F2 pass: every segment fits SP1's limits with a wide margin, and the largest proves in 27% of one card's memory.
 - C1 and C2 meet the thresholds: $4.10–4.25 per inference for the 23 segments on one GPU, about the S-two route's scaled estimate, which still needs a Cairo SASH verifier that does not exist; about 12 minutes for `head` with the segments in parallel.
 - The margins are what M3 must measure first: the aggregator and the wrap are estimates, and C1 leaves about $0.60 for them. The cost is 13–14× SASH's own proving, and BLAKE2s, with no SP1 precompile, is about a quarter of it.
+
+## 9. M3: aggregator and wrap
+
+### 9.1 The aggregator guest in the executor (measured)
+
+The aggregator guest (`SPEC.md` §1.2, `sp1/aggregator-guest`) on the TinyLlama `modelId` and the segments' expected public values (`tinyllama_segment_public_values`), in the SP1 executor with deferred proof verification off and no segment proofs in stdin. The executor treats `verify_sp1_proof` as a no-op, but the guest still folds each call into its deferred-proofs digest with Poseidon2 in software (`sp1-zkvm-6.10.0` `src/syscalls/verify.rs`), so those cycles count.
+
+- **SP1:** sp1-sdk `6.10.0`, `LightProver`, `calculate_gas(true)`, the default `SP1CoreOpts`; portable executor.
+- **Machine:** Apple M3 Max, macOS, 2026-10-30.
+- **Program:** the aggregator guest that `sp1-host`'s `build.rs` builds with the local `succinct` toolchain, not the Docker build pinned in `sp1/aggregator-guest.{elf.sha256,vkey}`. Cycles and PGU depend only on the ELF and the input; the `sp1-bundles` CI job prints the Docker build's on the 23 real public values (`sp1/scripts/sp1-fixture-check.sh`).
+- **Command:** `cd sp1 && cargo test --locked -p sp1-host --test aggregator_guest -- --nocapture --test-threads=1`.
+
+| `N` | Input | Commits | Cycles | PGU |
+|---:|---|---|---:|---:|
+| 1 | `B0L10`'s public values | `sha256(modelId \|\| be32(1) \|\| claim \|\| 0^32 \|\| 0^32)` | 1,248,544 | 1,115,967 |
+| 23 | the 23 segments' public values | `SPEC.md` §1.4's `publicDigest` | 3,252,408 | 3,083,538 |
+
+Each segment past the first adds 91,085 cycles and 89,435 PGU. That is execution only: the deferred-proof recursion that checks the `N` segment proofs runs when proving, and §8.2's estimate for it stands until the GPU run measures it.
+

@@ -1,0 +1,13 @@
+[package]
+name = "aggregator-guest"
+description = "SP1 aggregator guest (SPEC.md §1.2)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[dependencies]
+sash-aggregate.workspace = true
+# `verify` for verify_sp1_proof; without `blake3`: the public values are hashed with sha256 (SPEC.md §1.2).
+sp1-zkvm = { workspace = true, features = ["verify"] }

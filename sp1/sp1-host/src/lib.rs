@@ -1,8 +1,9 @@
 //! Host side of the SP1 guests: the segment guest's input encoding and executor run (`SPEC.md`
-//! §1.1), and stwo-bench's; the TinyLlama controls and their token forgeries, proof sizes and
-//! `prove`'s checks
+//! §1.1), the aggregator guest's (§1.2), and stwo-bench's; the TinyLlama controls and their token
+//! forgeries, proof sizes and `prove`'s checks
 //! (`docs/EVM-GAS-MODEL.md`); the fixture rendered from the segments' public values.
 
+pub mod aggregate;
 pub mod controls;
 pub mod fixture;
 pub mod prove;
@@ -21,6 +22,14 @@ use zk_prover::common::Proof;
 /// (`sp1/scripts/docker-guests.sh`) is reproducible, and only it is compared with the committed
 /// `sp1/segment-guest.elf.sha256` and `sp1/segment-guest.vkey`.
 pub const SEGMENT_GUEST_ELF: Elf = include_elf!("segment-guest");
+
+/// The aggregator guest (`SPEC.md` §1.2), built by `build.rs` like [`SEGMENT_GUEST_ELF`]; only its
+/// Docker build is compared with `sp1/aggregator-guest.elf.sha256` and `sp1/aggregator-guest.vkey`.
+pub const AGGREGATOR_GUEST_ELF: Elf = include_elf!("aggregator-guest");
+
+/// The control-only echo guest of binding control B2 (`SPEC.md` §2.1): commits its one input
+/// buffer unchanged. Not Docker-pinned.
+pub const ECHO_GUEST_ELF: Elf = include_elf!("echo-guest");
 
 /// The Stwo micro-benchmark guest: one verifier primitive of nitroo's Stwo without its `prover`
 /// feature, run `N` times in its own cycle-tracker region (`STWO_BENCH_OPS`).
@@ -141,19 +150,38 @@ pub struct Execution {
 impl Execution {
     /// The `Reject` variant the segment guest's panic message names, if any.
     pub fn reject(&self) -> Option<&str> {
+        self.panic_name("segment rejected: ")
+    }
+
+    /// The `AggregateReject` variant the aggregator guest's panic message names, if any.
+    pub fn aggregate_reject(&self) -> Option<&str> {
+        self.panic_name("aggregate rejected: ")
+    }
+
+    fn panic_name(&self, prefix: &str) -> Option<&str> {
         self.stderr
             .lines()
             .rev()
-            .find_map(|line| line.strip_prefix("segment rejected: "))
+            .find_map(|line| line.strip_prefix(prefix))
     }
 }
 
 /// Runs `elf` on `stdin` in the executor (LightProver, gas on, [`CYCLE_LIMIT`]).
 pub fn execute(elf: Elf, stdin: SP1Stdin) -> Result<Execution, String> {
+    run_executor(elf, stdin, true)
+}
+
+/// [`execute`], with SP1's deferred proof verification on or off.
+fn run_executor(
+    elf: Elf,
+    stdin: SP1Stdin,
+    deferred_proof_verification: bool,
+) -> Result<Execution, String> {
     let client = ProverClient::builder().light().build();
     let (stderr_tx, stderr_rx) = tokio::sync::watch::channel(String::new());
     let (public_values, report): (_, ExecutionReport) = client
         .execute(elf, stdin)
+        .deferred_proof_verification(deferred_proof_verification)
         .calculate_gas(true)
         .cycle_limit(CYCLE_LIMIT)
         .stderr(stderr_tx)

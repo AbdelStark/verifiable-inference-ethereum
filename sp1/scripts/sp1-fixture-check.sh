@@ -2,18 +2,22 @@
 # make sp1-fixture-check: the M2 byte-identity gate (docs/ROADMAP.md). Runs the Docker-built segment
 # guest on all 23 TinyLlama segments in the SP1 executor, renders TinyLlamaFixture.sol from the public
 # values it commits (`sp1-host fixture-from-bundles`), and compares the result byte for byte with
-# contracts/src/sash/TinyLlamaFixture.sol. The temporary directory is removed either way.
+# contracts/src/sash/TinyLlamaFixture.sol. Then feeds those 23 public values to the Docker-built
+# aggregator guest in the executor (`sp1-host execute-aggregator`, without the segment proofs) and
+# requires it to commit SPEC.md §1.4's publicDigest. The temporary directory is removed either way.
 #
 # BUNDLES: the 69 bundle files (`make bundles-download`, checked by `make bundles-check` first). ELF:
 # the segment guest from
 # `make sp1-docker`, or the `segment-guest-elf` CI artifact; it must match sp1/segment-guest.elf.sha256
-# and sp1/segment-guest.vkey. A difference is a stop-and-ask: never edit the committed fixture, the Rust
+# and sp1/segment-guest.vkey. AGGREGATOR_ELF: the aggregator guest from `make sp1-docker`, or the
+# `aggregator-guest-elf` CI artifact; it must match sp1/aggregator-guest.elf.sha256 and
+# sp1/aggregator-guest.vkey. A difference is a stop-and-ask: never edit the committed fixture, the Rust
 # constants or SPEC.md §1.4 to match, and never run `make vectors` for it (AGENTS.md §2.4).
 #
 # The comparison does not cover modelId, EOS_TOKEN_ID or the prompt/response text: fixture-from-bundles
 # fills them from tinyllama_fixture.rs, since they come from enrollment, not from the proofs.
 #
-# `make check` runs it after sp1-execute when make sp1-docker's ELF and the bundles are present; the
+# `make check` runs it after sp1-execute when make sp1-docker's ELFs and the bundles are present; the
 # sp1-bundles CI job runs it on pushes to main, the weekly schedule and a manual run. Needs SP1
 # v6.10.0 and protoc.
 set -euo pipefail
@@ -21,15 +25,18 @@ set -euo pipefail
 cd "$(dirname "$0")/../.."
 fixture=contracts/src/sash/TinyLlamaFixture.sol
 host=sp1/target/release/sp1-host
+# SPEC.md §1.4.
+public_digest=cf52e19e82f82680f0098ab435b52e22512f3d634bd7a947d32abc76d067b3ef
 
 fail() {
     echo "ERROR: $*" >&2
     exit 1
 }
 
-[[ -n "${BUNDLES:-}" && -n "${ELF:-}" ]] || fail "set BUNDLES and ELF"
+[[ -n "${BUNDLES:-}" && -n "${ELF:-}" && -n "${AGGREGATOR_ELF:-}" ]] || fail "set BUNDLES, ELF and AGGREGATOR_ELF"
 bundles="$(cd "$BUNDLES" && pwd -P)"
 elf="$(cd "$(dirname "$ELF")" && pwd)/$(basename "$ELF")"
+aggregator_elf="$(cd "$(dirname "$AGGREGATOR_ELF")" && pwd)/$(basename "$AGGREGATOR_ELF")"
 
 (cd sp1 && cargo build --release --locked -p sp1-host --bin sp1-host)
 
@@ -42,6 +49,13 @@ vkey="$("$host" vkey --elf "$elf")"
 echo "OK: ELF sha256 $elf_sha matches sp1/segment-guest.elf.sha256"
 echo "OK: its vkey matches sp1/segment-guest.vkey:"
 echo "$vkey"
+aggregator_sha="$(shasum -a 256 <"$aggregator_elf" | cut -d' ' -f1)"
+[[ "$aggregator_sha" == "$(cut -d' ' -f1 sp1/aggregator-guest.elf.sha256)" ]] ||
+    fail "$aggregator_elf has sha256 $aggregator_sha, not the one in sp1/aggregator-guest.elf.sha256; pass the Docker-built aggregator ELF"
+aggregator_vkey="$("$host" vkey --elf "$aggregator_elf")"
+[[ "$aggregator_vkey" == "$(cat sp1/aggregator-guest.vkey)" ]] ||
+    fail "$aggregator_elf's vkey differs from sp1/aggregator-guest.vkey: $aggregator_vkey"
+echo "OK: aggregator ELF sha256 $aggregator_sha matches sp1/aggregator-guest.elf.sha256, and its vkey sp1/aggregator-guest.vkey"
 
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
@@ -72,3 +86,12 @@ fi
 echo "regenerated sha256: $(shasum -a 256 <"$tmp/TinyLlamaFixture.sol" | cut -d' ' -f1)"
 echo "committed sha256:   $(shasum -a 256 <"$fixture" | cut -d' ' -f1)"
 echo "OK: the fixture regenerated from the 23 bundles is byte-identical to $fixture"
+
+# The aggregator on the 23 public values the segment guest committed on the real bundles.
+rc=0
+"$host" execute-aggregator --elf "$aggregator_elf" --public-values "$tmp" >"$tmp/aggregator.txt" 2>&1 || rc=$?
+cat "$tmp/aggregator.txt"
+[[ $rc == 0 ]] || fail "the aggregator exits $rc on the 23 segments' public values. Stop and ask"
+grep -qx "public values: $public_digest" "$tmp/aggregator.txt" ||
+    fail "the aggregator does not commit SPEC.md §1.4's publicDigest $public_digest. Stop and ask"
+echo "OK: the aggregator commits SPEC.md §1.4's publicDigest on the 23 segments' public values"

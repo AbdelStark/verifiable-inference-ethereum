@@ -29,6 +29,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
+name = "aggregator-guest"
+version = "0.1.0"
+dependencies = [
+ "sash-aggregate",
+ "sp1-zkvm",
+]
+
+[[package]]
 name = "ahash"
 version = "0.8.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1097,6 +1105,13 @@ dependencies = [
  "serdect",
  "signature",
  "spki",
+]
+
+[[package]]
+name = "echo-guest"
+version = "0.1.0"
+dependencies = [
+ "sp1-zkvm",
 ]
 
 [[package]]
@@ -3419,6 +3434,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9774ba4a74de5f7b1c1451ed6cd5285a32eddb5cccb8cc655a4e50009e06477f"
 
 [[package]]
+name = "sash-aggregate"
+version = "0.1.0"
+dependencies = [
+ "hex",
+ "sash-evm-primitives",
+ "sha2",
+]
+
+[[package]]
 name = "sash-evm-primitives"
 version = "0.1.0"
 dependencies = [
@@ -4303,6 +4327,7 @@ dependencies = [
  "hex",
  "libc",
  "postcard",
+ "sash-aggregate",
  "sash-evm-primitives",
  "sash-segment-check",
  "serde_json",
@@ -4700,6 +4725,7 @@ dependencies = [
  "libm",
  "rand 0.8.8",
  "sha2",
+ "slop-algebra",
  "sp1-lib",
  "sp1-primitives",
 ]

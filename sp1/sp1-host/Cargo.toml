@@ -1,6 +1,6 @@
 [package]
 name = "sp1-host"
-description = "Host side of the SP1 segment guest: builds it, runs it in the SP1 executor and proves it on a GPU"
+description = "Host side of the SP1 guests: builds them, runs them in the SP1 executor and proves the segment guest on a GPU"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -42,6 +42,7 @@ clap = { version = "4.6.7", features = ["derive"] }
 hex = "0.4.3"
 libc = "0.2.191"
 postcard = { workspace = true, optional = true }
+sash-aggregate.workspace = true
 sash-evm-primitives.workspace = true
 sash-segment-check = { workspace = true, features = ["forge"] }
 serde_json.workspace = true
