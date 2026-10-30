@@ -373,11 +373,9 @@ fn setup_aggregator(
     Ok(pk)
 }
 
-/// A PLONK proof's `proofBytes` (`SP1ProofWithPublicValues::bytes`), if they follow `SPEC.md` §1.2's
-/// layout: 964 bytes starting with the v6.1.0 selector, with nonce `0` at bytes `68..100`, accepted by
-/// `sp1-verifier`'s `PlonkVerifier` with its embedded `PLONK_VK_BYTES`, and accepted with the sha256
-/// public-values hash alone. `PlonkVerifier::verify` accepts any nonce and falls back to a blake3
-/// public-values hash, neither of which `SP1VerifierPlonk` accepts, so both are checked here.
+/// A PLONK proof's `proofBytes` (`SP1ProofWithPublicValues::bytes`), if the proof carries no TEE
+/// proof (which `bytes()` would prepend, moving the selector) and the bytes pass
+/// [`check_plonk_proof_bytes`].
 pub fn check_plonk_proof(
     proof: &SP1ProofWithPublicValues,
     program_vkey: &str,
@@ -386,6 +384,25 @@ pub fn check_plonk_proof(
         return Err("the proof carries a TEE proof, which would move the selector".into());
     }
     let bytes = proof.bytes();
+    check_plonk_proof_bytes(&bytes, proof.public_values.as_slice(), program_vkey)?;
+    println!(
+        "OK: proofBytes are {PLONK_PROOF_BYTES_LEN} bytes with selector 0x{} and nonce 0, and sp1-verifier's PlonkVerifier accepts them, with the sha256 public-values hash",
+        hex::encode(PLONK_SELECTOR)
+    );
+    Ok(bytes)
+}
+
+/// Whether `proofBytes` follow `SPEC.md` §1.2's layout and verify as `SP1VerifierPlonk` would verify
+/// them: 964 bytes starting with the v6.1.0 selector, with nonce `0` at bytes `68..100`, accepted by
+/// `sp1-verifier`'s `PlonkVerifier` with its embedded `PLONK_VK_BYTES` for `public_values` under
+/// `program_vkey`, and accepted with the sha256 public-values hash alone. `PlonkVerifier::verify`
+/// accepts any nonce and falls back to a blake3 public-values hash, neither of which
+/// `SP1VerifierPlonk` accepts, so both are checked here.
+pub fn check_plonk_proof_bytes(
+    bytes: &[u8],
+    public_values: &[u8],
+    program_vkey: &str,
+) -> Result<(), String> {
     if bytes.len() != PLONK_PROOF_BYTES_LEN || bytes[..4] != PLONK_SELECTOR {
         return Err(format!(
             "proofBytes are {} bytes starting 0x{}, not {PLONK_PROOF_BYTES_LEN} starting 0x{}",
@@ -401,31 +418,21 @@ pub fn check_plonk_proof(
             hex::encode(nonce)
         ));
     }
-    PlonkVerifier::verify(
-        &bytes,
-        proof.public_values.as_slice(),
-        program_vkey,
-        &PLONK_VK_BYTES,
-    )
-    .map_err(|e| format!("sp1-verifier's PlonkVerifier rejects the proof: {e}"))?;
+    PlonkVerifier::verify(bytes, public_values, program_vkey, &PLONK_VK_BYTES)
+        .map_err(|e| format!("sp1-verifier's PlonkVerifier rejects the proof: {e}"))?;
     let program_vkey_hash = decode_sp1_vkey_hash(program_vkey).map_err(|e| e.to_string())?;
     PlonkVerifier::verify_gnark_proof(
         &bytes[PLONK_NONCE_OFFSET + 32..],
         &[
             program_vkey_hash,
-            hash_public_inputs(proof.public_values.as_slice()),
+            hash_public_inputs(public_values),
             [0; 32],
             *VK_ROOT_BYTES,
             [0; 32],
         ],
         &PLONK_VK_BYTES,
     )
-    .map_err(|e| format!("the proof does not verify with the sha256 public-values hash: {e}"))?;
-    println!(
-        "OK: proofBytes are {PLONK_PROOF_BYTES_LEN} bytes with selector 0x{} and nonce 0, and sp1-verifier's PlonkVerifier accepts them, with the sha256 public-values hash",
-        hex::encode(PLONK_SELECTOR)
-    );
-    Ok(bytes)
+    .map_err(|e| format!("the proof does not verify with the sha256 public-values hash: {e}"))
 }
 
 /// The PLONK fixture (`contracts/fixtures/tinyllama.plonk.json`): `programVKey`, `publicValues` and

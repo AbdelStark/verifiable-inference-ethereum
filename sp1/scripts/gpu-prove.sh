@@ -23,9 +23,10 @@
 #          binding controls B1 and B2 (SPEC.md §2.1), each capped at CONTROL_CAP, a timeout reported
 #          as inconclusive, and not run if the honest N = 1 aggregation failed; the N = 2 compressed aggregation of B0L10 twice (T2); the N = 1 PLONK wrap,
 #          whose programVKey, publicValues and proofBytes are printed for the Foundry check.
-#   all    every missing segment proved and uploaded one by one; if all 23 are in place, the PLONK
-#          aggregation of the 23 with --fixture-out, its proof uploaded to plonk/ and the fixture
-#          printed.
+#   all    every missing segment proved and uploaded one by one; if all 23 are in place, the
+#          compressed aggregation of the 23 (timing only), then their PLONK aggregation with
+#          --fixture-out, its proof uploaded to plonk/ and the fixture printed with its sha256. A re-run
+#          (the resume) proves only the tags missing from segments/, then aggregates.
 #   wrap   the contingency wrap-only run: the PLONK circuit downloaded with curl and extracted into
 #          $SP1_PLONK_CIRCUIT_PATH/v6.1.0/ with its empty .complete marker, then the N = 1 PLONK
 #          aggregation of the persisted B0L10 proof.
@@ -370,13 +371,19 @@ smoke)
 all)
     step prove-all 0 prove --elf "$segment_elf" --bundle "$bundles" --tags all --out-dir "$proofs" \
         --then "$upload_then" || fail "a segment did not prove; re-run to prove the missing tags"
-    plonk_step aggregate-all-plonk aggregate --segment-elf "$segment_elf" --aggregator-elf "$aggregator_elf" \
-        --proofs "$proofs" --tags all --mode plonk --out "$out/tinyllama.plonk.bin" \
+    agg=(--segment-elf "$segment_elf" --aggregator-elf "$aggregator_elf" --proofs "$proofs" --tags all)
+    # The deferred recursion over the 23 proofs and the compress stage alone, which the PLONK step's
+    # log does not separate from shrink and wrap; its proof is not kept.
+    step aggregate-all-compressed 0 aggregate "${agg[@]}" --mode compressed --out "$out/tinyllama.compressed.bin" ||
+        failed+=(aggregate-all-compressed)
+    plonk_step aggregate-all-plonk aggregate "${agg[@]}" --mode plonk --out "$out/tinyllama.plonk.bin" \
         --fixture-out "$out/tinyllama.plonk.json" || failed+=(aggregate-all-plonk)
     if [[ -f "$out/tinyllama.plonk.bin" ]]; then
         "$root/sp1/scripts/upload-proof.sh" "$out/tinyllama.plonk.bin" plonk
+        # The fixture as --fixture-out wrote it, and its sha256 to check a copy taken from this log.
         echo "--- tinyllama.plonk.json"
         cat "$out/tinyllama.plonk.json"
+        echo "tinyllama.plonk.json sha256: $(sha256sum "$out/tinyllama.plonk.json" | cut -d' ' -f1)"
     fi
     ;;
 wrap)
@@ -412,7 +419,7 @@ esac
         echo "--- $name (exit $(cat "$results/$name.rc" 2>/dev/null))"
         # sp1-host's own lines; the server's tracing lines stay in the job log above.
         grep -Ev '^ *[0-9]{4}-[0-9]{2}-[0-9]{2}T' "$log" | grep -E \
-            '^(OK|PASS|FAIL|FAILED|skip|failed tags|honest half|B1:|echo|digest|executor|client build|setup|aggregator setup|prove time|stdin bytes|proof|fixture|sp1-gpu-server VmHWM|--then|uploaded)|^ *"(programVKey|publicValues|proofBytes)"' || true
+            '^(== |OK|PASS|FAIL|FAILED|skip|failed tags|honest half|B1:|echo|digest|executor|client build|setup|aggregator setup|prove time|stdin bytes|proof|fixture|sp1-gpu-server VmHWM|--then|uploaded)|^ *"(programVKey|publicValues|proofBytes)"' || true
         cat "$results/$name.gpu-peak" 2>/dev/null || true
         cat "$results/$name.disk-peak" 2>/dev/null || true
         cat "$results/$name.outcome" 2>/dev/null || true
