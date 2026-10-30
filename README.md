@@ -10,7 +10,7 @@ Mainnet and Hoodi run Osaka, which binds this project; Amsterdam is tracked alon
 
 1. **Off-chain segment verification and compression (M2 present, M3 planned):**
    - M2 (`sp1/segment-guest`): an SP1 v6 `riscv64im` guest per segment runs a verifier-only build of SASH's `verify_composed` ([SPEC.md](SPEC.md) §1.1). Unmodified, `verify_composed` cannot run in a guest: it calls `std::time::Instant::now`, and its crate needs stwo's nightly `prover` feature (for the GKR verifier) and nitroo's CUDA build script.
-   - M3: an aggregator guest verifies the 23 segment proofs and commits `publicDigest`; an SP1 v6 BN254 wrap (Groth16 or PLONK, chosen at M3 start) makes it verifiable on-chain through `Sp1SashSegmentVerifier.sol` (~270k gas, estimated).
+   - M3: an aggregator guest verifies the 23 segment proofs and commits `publicDigest`; an SP1 v6 BN254 PLONK wrap makes it verifiable on-chain through `Sp1SashSegmentVerifier.sol` and the pinned, ownerless SP1 v6.1.0 `SP1VerifierPlonk` ([SECURITY.md](SECURITY.md) §6; ~300k gas, estimated).
 2. **Native Solidity SASH grid settlement (`contracts/src/`, present):**
    Enforces on-chain in pure Solidity:
    - Enrolled 23-segment `(preRoot, modelRoot, fixedHash)` manifest membership (`SashModelRegistry.sol`),
@@ -66,7 +66,7 @@ make anvil-demo
 
 ### 3. Deploy to Hoodi (`560048`) (M4)
 
-Testnet deployment is M4. It targets Hoodi; Sepolia (`11155111`) is optional. It disables `DevTranscriptSegmentVerifier` (`allowDevVerifier = false`) and binds `Sp1SashSegmentVerifier` to an immutable SP1 verifier address (`SP1_VERIFIER_GATEWAY`) and `SASH_AGGREGATOR_VKEY`. The vkey needs the M3 aggregator, and M3 chooses whether that address is a pinned SP1 verifier or the `SP1VerifierGateway`; `Sp1SashSegmentVerifier` takes either.
+Testnet deployment is M4. It targets Hoodi; Sepolia (`11155111`) is optional. It disables `DevTranscriptSegmentVerifier` (`allowDevVerifier = false`) and binds `Sp1SashSegmentVerifier` immutably to the pinned SP1 v6.1.0 `SP1VerifierPlonk` (`SP1_VERIFIER`, `0xc3c6dDDAc8829b233Dc6536Ec024775a57b0AF2A` on Hoodi and Sepolia, never the `SP1VerifierGateway`: [SECURITY.md](SECURITY.md) §6) and to `SASH_AGGREGATOR_VKEY`, which needs the M3 aggregator.
 
 ```bash
 cd contracts

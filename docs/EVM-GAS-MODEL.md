@@ -61,10 +61,10 @@ M1 measures the grid path and the dev-mode settlement on Foundry 1.8.6 (`evm_ver
 
 | Transaction (anvil receipt, Osaka, Foundry 1.8.6) | `gasUsed` | Gas limit | Calldata |
 |---|---:|---:|---:|
-| `SashModelRegistry` deployment | 291,752 | 379,277 | 1,292 B |
+| `SashModelRegistry` deployment | 291,740 | 379,262 | 1,292 B |
 | `SashModelRegistry.enrollModel` | 92,053 | 127,147 | 164 B |
 | `DevTranscriptSegmentVerifier` deployment | 223,223 | 290,189 | 837 B |
-| `VerifiableInferenceSettlement` deployment | 874,223 | 1,136,489 | 4,305 B |
+| `VerifiableInferenceSettlement` deployment | 874,235 | 1,136,505 | 4,305 B |
 | `VerifiableInferenceSettlement.verifyAndSettle` | 218,380 | 301,636 | 7,972 B |
 
 **The settle transaction under `EIP-7623`** (anvil receipt, Osaka, Foundry 1.8.6). Its calldata is 7,972 B: 4,050 zero and 3,922 non-zero bytes. The settle transaction is floor-bound under Osaka: `gasUsed` is the calldata floor, so execution is measured separately, as the top call's `gasUsed` in anvil's `trace_transaction` (Parity-style) trace of the mined transaction, which excludes intrinsic and calldata gas. Because the receipt and the `verifyAndSettle` snapshot stay at the floor, that execution figure is what `make anvil-demo` gates.
@@ -97,10 +97,10 @@ No receipt field separates state gas, so it is derived from the `EIP-8037` const
 
 | Transaction (anvil receipt, Amsterdam, Foundry nightly `024702852`) | `gasUsed` | State gas (derived) | Rest | Osaka |
 |---|---:|---:|---:|---:|
-| `SashModelRegistry` deployment (1,095 B) | 1,902,912 | 1,858,950 | 43,962 | 291,752 |
+| `SashModelRegistry` deployment (1,095 B) | 1,902,912 | 1,858,950 | 43,962 | 291,740 |
 | `SashModelRegistry.enrollModel` (3 new slots) | 350,025 | 293,760 | 56,265 | 92,053 |
 | `DevTranscriptSegmentVerifier` deployment (784 B) | 1,420,693 | 1,383,120 | 37,573 | 223,223 |
-| `VerifiableInferenceSettlement` deployment (3,763 B) | 6,032,117 | 5,940,990 | 91,127 | 874,223 |
+| `VerifiableInferenceSettlement` deployment (3,763 B) | 6,032,117 | 5,940,990 | 91,127 | 874,235 |
 | `VerifiableInferenceSettlement.verifyAndSettle` (1 new slot), computed | 525,208 | 97,920 | floor-bound | 218,380 |
 
 The settle row is computed, not mined: 15,000 (`EIP-2780`) + 64 × 7,972 calldata bytes (`EIP-7976`) = 525,208, about 2.4x its Osaka cost. It is floor-bound, as the nightly's receipt was for the 7,236 B calldata before the claims carried `fixedHash` (478,104 = 15,000 + 64 × 7,236). The `enrollModel` and `VerifiableInferenceSettlement` deployment rows are that nightly's receipts for the bytecode before `fixedHash` (the settlement contract was 3,763 B; it is 3,773 B now); #24 re-mines every row. Deployments cost 6–7x more, almost all of it state gas.
@@ -114,7 +114,7 @@ One transaction carrying `SegmentClaim[23]`, the four token arrays and one wrapp
 | Intrinsic tx gas | 21,000 | — |
 | Standard calldata: 4 × 4,077 + 16 × 4,151 | 82,724 | computed |
 | Dev-mode settle execution, 117,227, less the dev verifier's ~1,000 | ~116,230 | measured (§4: anvil `trace_transaction`, Osaka, Foundry 1.8.6) |
-| `Sp1SashSegmentVerifier` (BN254 wrap: ~270k Groth16, ~300k PLONK; chosen at M3 start) | ~270,000 | estimate, M3 measures it |
+| `Sp1SashSegmentVerifier` (BN254 wrap: ~270k Groth16, ~300k PLONK; the wrap is PLONK (decided)) | ~270,000 | estimate, M3 measures it |
 | **Total single-tx gas** | **~490,000** (~2.9% of `EIP-7825`) | estimate, M3 measures it |
 
 The floor, 21,000 + 10 × 4,077 + 40 × 4,151 = 227,810 gas, is below the total, so it doesn't bind: the verifier's execution outweighs its 260 B of calldata.
@@ -350,7 +350,7 @@ Over both runs and both rates: 5,364–5,568 s and $4.10–4.25 per inference on
 
 **Aggregator (estimate; M3 measures it).** One guest verifies the 23 compressed proofs with `verify_sp1_proof` and commits the 32-byte `publicDigest`, as SP1's aggregation example does (sp1 `v6.10.0` `examples/aggregation`). Its RISC-V work is small: 23 × 226 bytes of public values, the vkey checks and a few sha256 hashes. Each `verify_sp1_proof` is a deferred proof, checked by the recursion program like one node of a compress tree, so the aggregator's proof is one recursion layer over 23 proofs plus a short core execution. The server did not log how many core shards `B0L10`'s own compress tree folds, so no bound follows from it. Working figure: one `B0L10` proof, about 210 s and $0.16 on this GPU, which is a scale, not a bound.
 
-**BN254 wrap (estimate; M3 measures it).** One per inference and independent of the segments: SP1's shrink and wrap recursion, then gnark's Groth16 or PLONK prover over BN254 (`ProofMode::Groth16` / `Plonk`, which `sp1-gpu-server` also serves). Not measured or estimated here. Its on-chain cost is §5's: ~270k gas (Groth16) or ~300k (PLONK).
+**BN254 wrap (estimate; M3 measures it).** One per inference and independent of the segments: SP1's shrink and wrap recursion, then gnark's PLONK prover over BN254 (`ProofMode::Plonk`, which `sp1-gpu-server` also serves). Not measured or estimated here. Its on-chain cost is §5's: ~270k gas (Groth16) or ~300k (PLONK).
 
 ### 8.3 Against the S-two route and SASH's own proving
 

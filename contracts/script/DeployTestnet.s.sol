@@ -9,11 +9,11 @@ import {TinyLlamaFixture} from "../src/sash/TinyLlamaFixture.sol";
 
 /// @title DeployTestnet
 /// @notice Deploys the production-gated SASH EVM settlement stack (`allowDevVerifier = false`)
-///         to Ethereum Sepolia (`11155111`) or Hoodi (`560048`) using `SP1_VERIFIER_GATEWAY` and
-///         `SASH_AGGREGATOR_VKEY` from environment variables.
+///         to Ethereum Sepolia (`11155111`) or Hoodi (`560048`), reading from the environment `SP1_VERIFIER`, the
+///         pinned SP1 v6.1.0 `SP1VerifierPlonk` (`SECURITY.md` §6), and `SASH_AGGREGATOR_VKEY`.
 contract DeployTestnet is Script {
     function run() external returns (address registryAddr, address adapterAddr, address settlementAddr) {
-        address sp1Gateway = vm.envAddress("SP1_VERIFIER_GATEWAY");
+        address sp1Verifier = vm.envAddress("SP1_VERIFIER");
         bytes32 sashVKey = vm.envBytes32("SASH_AGGREGATOR_VKEY");
 
         vm.startBroadcast();
@@ -27,7 +27,7 @@ contract DeployTestnet is Script {
             TinyLlamaFixture.MANIFEST_ROOTS_HASH
         );
 
-        Sp1SashSegmentVerifier adapter = new Sp1SashSegmentVerifier(sp1Gateway, sashVKey);
+        Sp1SashSegmentVerifier adapter = new Sp1SashSegmentVerifier(sp1Verifier, sashVKey);
         VerifiableInferenceSettlement settlement =
             new VerifiableInferenceSettlement(address(registry), address(adapter), false);
 
