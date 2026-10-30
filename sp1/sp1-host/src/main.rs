@@ -24,7 +24,7 @@ use sash_aggregate::aggregate;
 use sash_evm_primitives::tinyllama_fixture::tinyllama_model_id;
 use sp1_host::aggregate::{
     AggregateArgs, ControlKind, Mode, aggregate_command, aggregate_control, aggregator_stdin,
-    execute_aggregator, read_tinyllama_segment_values,
+    execute_aggregator, plonk_fixture_command, read_tinyllama_segment_values,
 };
 use sp1_host::controls::CONTROLS;
 use sp1_host::fixture::{check_fixture_out, contracts_src, fixture_from_bundles};
@@ -136,6 +136,17 @@ enum Command {
         /// Stops after the CPU checks: nothing touches a GPU.
         #[arg(long)]
         execute_only: bool,
+    },
+    /// Binds a PLONK proof file (`plonk/tinyllama.plonk.bin`) to the committed fixture: it must decode
+    /// to a PLONK proof whose `proofBytes` verify under `sp1/aggregator-guest.vkey`'s `bytes32` with
+    /// its own public values, and render to `--fixture` byte for byte. No GPU.
+    PlonkFixture {
+        /// The bincode PLONK proof `aggregate --mode plonk --out` wrote.
+        #[arg(long)]
+        proof: PathBuf,
+        /// The committed fixture, `contracts/fixtures/tinyllama.plonk.json`.
+        #[arg(long)]
+        fixture: PathBuf,
     },
     /// Binding control B1 (`pv-byte`) or B2 (`vk`) (`SPEC.md` §2.1): proves the aggregator at `N = 1`
     /// on `B0L10` in compressed mode with one half of the `(vk, sha256(public values))` pair mutated.
@@ -302,6 +313,7 @@ fn run(cli: Cli) -> Result<ExitCode, String> {
             fixture_out: fixture_out.as_deref(),
             execute_only,
         }),
+        Command::PlonkFixture { proof, fixture } => plonk_fixture_command(&proof, &fixture),
         Command::AggregateControl {
             kind,
             segment_elf,

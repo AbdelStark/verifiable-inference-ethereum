@@ -29,6 +29,15 @@ command -v hf >/dev/null || fail "no hf CLI (pip install huggingface_hub)"
 
 name=$(basename "$file")
 sha=$(sha256sum "$file" 2>/dev/null | cut -d' ' -f1 || shasum -a 256 "$file" | cut -d' ' -f1)
-hf upload "$PROOFS_DATASET" "$file" "$dir/$name" --repo-type dataset \
-    --commit-message "Add $dir/$name (sha256 $sha)"
-echo "uploaded $file to $PROOFS_DATASET as $dir/$name (sha256 $sha)"
+# Three attempts: a transient Hub error must not lose a proof that took GPU time to make. Uploading
+# the same bytes again to the same path changes nothing in the dataset.
+for attempt in 1 2 3; do
+    if hf upload "$PROOFS_DATASET" "$file" "$dir/$name" --repo-type dataset \
+        --commit-message "Add $dir/$name (sha256 $sha)"; then
+        echo "uploaded $file to $PROOFS_DATASET as $dir/$name (sha256 $sha)"
+        exit 0
+    fi
+    echo "WARNING: hf upload of $dir/$name failed (attempt $attempt of 3)" >&2
+    ((attempt == 3)) || sleep $((attempt * 15))
+done
+fail "could not upload $file to $PROOFS_DATASET as $dir/$name"
