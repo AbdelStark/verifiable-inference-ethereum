@@ -114,7 +114,7 @@ One transaction carrying `SegmentClaim[23]`, the four token arrays and one wrapp
 | Intrinsic tx gas | 21,000 | — |
 | Standard calldata: 4 × 4,077 + 16 × 4,151 | 82,724 | computed |
 | Dev-mode settle execution, 117,227, less the dev verifier's ~1,000 | ~116,230 | measured (§4: anvil `trace_transaction`, Osaka, Foundry 1.8.6) |
-| `Sp1SashSegmentVerifier` (BN254 wrap: ~270k Groth16, ~300k PLONK; the wrap is PLONK (decided)) | ~270,000 | estimate, M3 measures it |
+| `Sp1SashSegmentVerifier` (BN254 wrap: ~270k Groth16, ~300k PLONK; the wrap is PLONK (decided), but this row and the total still carry the Groth16 estimate until #82 measures the PLONK settlement) | ~270,000 | estimate, M3 measures it |
 | **Total single-tx gas** | **~490,000** (~2.9% of `EIP-7825`) | estimate, M3 measures it |
 
 The floor, 21,000 + 10 × 4,077 + 40 × 4,151 = 227,810 gas, is below the total, so it doesn't bind: the verifier's execution outweighs its 260 B of calldata.
