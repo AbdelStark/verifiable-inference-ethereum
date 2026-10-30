@@ -1,10 +1,11 @@
-.PHONY: help check rust-check vectors forge-test anvil-demo sp1-vendor sp1-check sp1-docker sash-synthetic sp1-guest-suite bundles-download bundles-check proofs-download sp1-execute sp1-fixture-check sp1-proofs-check clean
+.PHONY: help check rust-check vectors slither forge-test anvil-demo sp1-vendor sp1-check sp1-docker sash-synthetic sp1-guest-suite bundles-download bundles-check proofs-download sp1-execute sp1-fixture-check sp1-proofs-check clean
 
 help:
 	@echo "Targets:"
-	@echo "  make check       - Run Rust format, clippy, unit/negative tests, vector sync, Foundry format, lint, tests and anvil settlement (if forge is installed), the SP1 workspace checks (if cargo-prove is installed), and the segment guest on the 23 TinyLlama segments with the fixture check and the aggregator on their public values (if make sp1-docker's ELFs and the bundles are present), and the aggregator over the 23 published segment proofs (if those ELFs and the proofs are present)"
+	@echo "  make check       - Run Rust format, clippy, unit/negative tests, vector sync, Slither (if forge and slither are installed), Foundry format, lint, tests and anvil settlement (if forge is installed), the SP1 workspace checks (if cargo-prove is installed), and the segment guest on the 23 TinyLlama segments with the fixture check and the aggregator on their public values (if make sp1-docker's ELFs and the bundles are present), and the aggregator over the 23 published segment proofs (if those ELFs and the proofs are present)"
 	@echo "  make rust-check  - Run cargo fmt --check, then clippy -D warnings and cargo test --workspace with --locked"
 	@echo "  make vectors     - Regenerate contracts/src/sash/TinyLlamaFixture.sol from the Rust TinyLlama fixture"
+	@echo "  make slither     - Run Slither on contracts/src (contracts/slither.config.json: fail on Low or above); fails unless slither is the pinned $(SLITHER_VERSION)"
 	@echo "  make forge-test  - Check Solidity format, build against foundry.lock, lint, run the Foundry suite with gas report, and check the gas snapshots against the index"
 	@echo "  make anvil-demo  - Mine the TinyLlama-1.1B 23-segment settlement on a local Osaka anvil node twice, dev mode (DeployDevAnvil.s.sol) and with the committed PLONK proof through SP1VerifierPlonk (DeployAnvilSp1.s.sol, below 600,000 gas), check the receipts and print their gas"
 	@echo "  make sp1-vendor  - Build sp1/vendor/sash: SASH eb95bfa from its sha256-pinned tarball plus sp1/patches"
@@ -36,6 +37,14 @@ rust-check:
 vectors:
 	cargo run --locked --quiet -p sash-evm-primitives --bin export_vectors -- contracts/src/sash/TinyLlamaFixture.sol
 
+# The pinned Slither: `uv tool install slither-analyzer==0.11.6 --with crytic-compile==0.4.2`, as the CI
+# slither job installs it. crytic-compile runs `forge clean` first, which wipes contracts/out and contracts/cache.
+SLITHER_VERSION := 0.11.6
+
+slither:
+	@v="$$(slither --version)"; [ "$$v" = "$(SLITHER_VERSION)" ] || { echo "ERROR: slither $$v found; the gate is pinned to $(SLITHER_VERSION) (uv tool install slither-analyzer==$(SLITHER_VERSION) --with crytic-compile==0.4.2)"; exit 1; }
+	cd contracts && slither .
+
 forge-test:
 	cd contracts && forge fmt --check && forge build --locked --sizes && forge lint --deny warnings
 	cd contracts && rm -rf snapshots && forge test -vvv --gas-report
@@ -47,7 +56,13 @@ check: rust-check
 	cargo run --locked --quiet -p sash-evm-primitives --bin export_vectors -- "$$tmp" || { rm -f "$$tmp"; exit 1; }; \
 	cmp -s "$$tmp" contracts/src/sash/TinyLlamaFixture.sol || { rm -f "$$tmp"; echo "ERROR: TinyLlamaFixture.sol drift detected; run 'make vectors'"; exit 1; }; \
 	rm -f "$$tmp"
+	@# Slither before forge-test: the forge clean it runs is then followed by a full build.
 	@if command -v forge >/dev/null 2>&1; then \
+		if command -v slither >/dev/null 2>&1; then \
+			$(MAKE) slither || exit 1; \
+		else \
+			echo "NOTE: 'slither' not found in PATH; Slither runs in CI or after 'uv tool install slither-analyzer==$(SLITHER_VERSION) --with crytic-compile==0.4.2'."; \
+		fi; \
 		$(MAKE) forge-test && $(MAKE) anvil-demo; \
 	else \
 		echo "NOTE: 'forge' not found in PATH; Solidity suite runs in CI or after installing Foundry."; \

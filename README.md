@@ -76,7 +76,7 @@ forge script script/DeployTestnet.s.sol:DeployTestnet --rpc-url "$HOODI_RPC_URL"
 ## Documentation
 
 - [SPEC.md](SPEC.md): Proved statement, sha256 digest layouts, contract interfaces, and the negative-control table (§2.1).
-- [SECURITY.md](SECURITY.md): Threat model, transparent-STARK vs BN254-wrapper assumption shift, and dev-verifier isolation.
+- [SECURITY.md](SECURITY.md): Threat model, transparent-STARK vs BN254-wrapper assumption shift, dev-verifier isolation, and the pre-deployment checklist with the Slither gate.
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): System dataflow across SASH, zkVM compression, and EVM contracts.
 - [docs/EVM-GAS-MODEL.md](docs/EVM-GAS-MODEL.md): Figures from the published 23-segment TinyLlama-1.1B SASH run, the Osaka / Amsterdam network rules, measured gas and estimates.
 - [docs/ROADMAP.md](docs/ROADMAP.md): Milestones `M0` through `M4`.

@@ -66,8 +66,74 @@ Every other `Fixed` field is pinned by `fixedHash`, and every `Claims` field is 
 | `VK_ROOT()` | `0x002f850ee998974d6cc00e50cd0814b098c05bfade466d28573240d057f25352`, `sp1-verifier` `6.10.0`'s `VK_ROOT_BYTES` |
 | Address | `0xc3c6dDDAc8829b233Dc6536Ec024775a57b0AF2A` on mainnet (`1`), Sepolia (`11155111`) and Hoodi (`560048`), one CREATE2 address (`V6_1_0_SP1_VERIFIER_PLONK` in sp1-contracts' `contracts/deployments/{1,11155111,560048}.json`) |
 
-- **No owner and no kill switch.** The verifier has no admin and `Sp1SashSegmentVerifier` binds it immutably. If v6.1.0 breaks, the adapter and the settlement are redeployed against a new verifier.
+- **No owner and no kill switch.** The verifier has no admin and `Sp1SashSegmentVerifier` binds it immutably. The registry has an owner (§7). If v6.1.0 breaks, the adapter and the settlement are redeployed against a new verifier.
 - **Never the `V6_1_0_BROKEN_*` Sepolia entries** (`deployments/11155111.json`). They were built from a stale `vk.bin` before sp1-contracts `2ac5ecb`. The broken PLONK one, `0xFaa0Ef4fC2d30bca021A982214E375cdeCFcc8f8`, returns the pinned `VERIFIER_HASH` and `VERSION` `v6.1.0` and differs only in `VK_ROOT` (`0x00995aa7753b437dfe98b936e602e002155914af1922d96e1af288578adc2251`): the address and `VK_ROOT` identify the verifier, not `VERIFIER_HASH` alone. It rejects every current proof with `InvalidVkRoot`, a liveness hole rather than a soundness one.
 - **Checked at deployment.** `Sp1SashSegmentVerifier`'s constructor reads the verifier's `VERIFIER_HASH()` and `VK_ROOT()` and reverts with `WrongSp1Verifier(verifierHash, vkRoot)` unless both are the values above ([SPEC.md](SPEC.md) §2). A wrong `SP1_VERIFIER` therefore fails at deploy: the v6.1.0 `SP1VerifierGroth16` on its `VERIFIER_HASH`, the broken Sepolia PLONK entry on its `VK_ROOT`, and the gateway, which has neither getter nor a fallback, or an address without code, with a bare revert (controls 28–30, [SPEC.md](SPEC.md) §2.1). The check catches a misconfigured address, not a hostile deployer: any contract can return these two values, so the address itself stays the binding. It pins the getters rather than the bytecode because the repository compiles the vendored verifier under its own settings (solc `0.8.38`, `via_ir`), whose bytecode differs from the deployed one. Both accept the committed TinyLlama proof: the deployed one on a local fork of Hoodi, for 4,687 more gas than the repository's compile ([docs/EVM-GAS-MODEL.md](docs/EVM-GAS-MODEL.md) §5).
 - **Not the `SP1VerifierGateway`.** Its owner can `addRoute` any contract reporting a fresh `VERIFIER_HASH`, which would put that owner key in the soundness trust base; on Hoodi and Sepolia the owner, `0xBaB2c2aF5b91695e65955DA60d63aD1b2aE81126`, is an EOA. Hoodi's gateways also sit at other addresses than mainnet's, and each call through a gateway costs about 6k more gas.
 - **Version coupling.** A proof from an SP1 SDK on another circuit version fails against this verifier, with `WrongVerifierSelector` or `InvalidVkRoot`. An SP1 bump therefore means a new pinned verifier, new proofs and a redeploy.
+
+## 7. Pre-deployment checklist
+
+Every public deployment (Hoodi `560048`; Sepolia `11155111`, optional) completes this checklist. Items 1-13 are completed before the broadcast, with evidence that predates it: a commit equal to the broadcast's, a CI run on that commit, block numbers below the first deployment block. The deployment's PR (#96 for Hoodi) commits them in §8 together with its record. Item 14 follows the broadcast. A completed checklist shows that the deployed stack is the reviewed one, wired as this file describes; it adds nothing to what an accepted proof guarantees (§1): quantized execution integrity for one declared run of an enrolled manifest under `y-attnout-w12`, never output safety, alignment, floating-point equivalence or hiding (§3).
+
+### 7.1 What a deployment trusts
+
+- **The registry has an owner.** `SashModelRegistry.OWNER` is immutable and is the deployer (`SashModelRegistry.sol:9`, `:17-21`). It can enroll any new `modelId` with a manifest of its choice, and `setModelActive(false)` makes `getManifest`, and with it every settlement of that model, revert until the owner reactivates it; with the key lost after that, only a redeploy restores settlement. It cannot change or remove an enrolled manifest (`:35-37`), and it cannot touch a settled run. §6's "No owner" covers only the verifier and the adapter. Relying parties check the `modelId` and its enrolled manifest, not only the event.
+- **`runId` is scoped to one settlement contract, not to a chain.** `settledRuns` lives in each `VerifiableInferenceSettlement`, and neither `publicDigest` nor `runId` names a chain or a contract ([SPEC.md](SPEC.md) §1.3). The same proof settles on Hoodi, on Sepolia and on any other deployment, once per deployment and prompt split: one proof yields up to 14 `runId`s, one per prompt length `19..32` ([SPEC.md](SPEC.md) §2).
+- **Relying parties bind to the emitter, not to `verifierKind`.** Anyone can deploy a lookalike settlement whose adapter reports `ZKVM_PLONK`, and its `InferenceVerified` events look like the real ones. An event counts only from the recorded settlement address (§8), whose immutables are checked: `REGISTRY` and `SEGMENT_VERIFIER` the recorded registry and adapter, `ALLOW_DEV_VERIFIER == false`, and the adapter's `SP1_VERIFIER` and `SASH_AGGREGATOR_VKEY` the pinned verifier (§6) and the aggregator vkey.
+- **A pending settle can be front-run by an exact copy.** The copy emits the same event, and the event names no submitter (`VerifiableInferenceSettlement.sol:20-27`): the run is settled all the same, and the original reverts with `RunAlreadySettled`. The recorder (#94) records the copy as the exit-gate transaction with `make testnet-record SETTLE_TX=<hash>`.
+- **No reentrancy surface.** All three external calls in `verifyAndSettle` are STATICCALLs, made before the `settledRuns` write at `:72`: `verifierKind` at `:48` (pure), `REGISTRY.getManifest` at `:53` and `verifyAggregatedSegments` at `:66` (both view). There are no proxies, no `delegatecall`, no `selfdestruct` and no payable function.
+- **The compiler.** solc `0.8.38` lists no known bug in `ethereum/solidity`'s `docs/bugs_by_version.json` (fetched 2026-10-30).
+
+### 7.2 Slither
+
+Slither is a gate of `make check` (`make slither`, when `slither` is installed) and of CI (the `slither` job): slither-analyzer `0.11.6` with crytic-compile `0.4.2`, through Foundry `v1.8.6` (solc `0.8.38`, `via_ir`, `osaka`, 200 runs), `slither .` in `contracts/` with `contracts/slither.config.json` (`filter_paths` `lib/|test/|script/`, `fail_on` `low`, no detector excluded). On `src/` it reports 11 contracts, 102 detectors, **0 High, 0 Medium, 0 Low, 0 Optimization and 11 Informational** findings, triaged here rather than hidden. A new finding of Low or above fails the gate; a new informational one is triaged in this table.
+
+| Detector | Count | Where | Triage |
+|---|---|---|---|
+| `assembly` | 2 | `SashGridVerifier.sol:17-32`, `:34-79` | `memory-safe` `mstore` blocks; the Rust and Foundry parity tests pin the digests to [SPEC.md](SPEC.md) §1.4. Accept. |
+| `cyclomatic-complexity` | 1 | `verifyGrid`, `SashGridVerifier.sol:81-150` (17) | A linear list of checks. Accept. |
+| `naming-convention` | 7 | `OWNER`, `VK_ROOT()`, `SP1_VERIFIER`, `SASH_AGGREGATOR_VKEY`, `REGISTRY`, `SEGMENT_VERIFIER`, `ALLOW_DEV_VERIFIER` | `forge lint`, a `make check` gate, requires SCREAMING_SNAKE for immutables, and `VK_ROOT` is SP1's ABI. Won't fix. |
+| `too-many-digits` | 1 | `TinyLlamaFixture.sol:134-320` | Generated by `make vectors`, never hand-edited. Accept. |
+
+### 7.3 The checklist
+
+1. **Commit.** The deployed commit is the `main` tip, with `make check` and CI green on it. The build is from a clean checkout, `forge clean && forge build --locked`: a stale `contracts/out` can hold older bytecode. Evidence: the commit and its CI run.
+2. **Toolchain.** solc `0.8.38` has no known bug (§7.1), Foundry is `v1.8.6` (`forge --version`), and `forge build --locked` passes against `contracts/foundry.lock`. Evidence: the CI run of item 1.
+3. **Slither.** As pinned (§7.2): 0 High, Medium or Low on `src/`, and every informational finding triaged in §7.2's table. Evidence: the `slither` job of item 1's CI run.
+4. **`EIP-170` sizes.** From `forge build --sizes`, runtime: `SashModelRegistry` 1,095 B, `Sp1SashSegmentVerifier` 826 B, `VerifiableInferenceSettlement` 3,773 B, all below 24,576 B. Evidence: the `solidity` job of item 1's CI run.
+5. **Privileges.** Every wiring is immutable; there is no proxy, `delegatecall`, `selfdestruct` or payable path (§7.1). The only privileged role is the registry `OWNER`, a fresh deployer key held in a Foundry keystore or on a Ledger, whose address is recorded. Evidence: the deployer address, and the source at item 1's commit.
+6. **No dev verifier.** `allowDevVerifier == false` in the script and read back on chain (`ALLOW_DEV_VERIFIER()`), and no `DevTranscriptSegmentVerifier` in the broadcast. Its chain-id guards are covered by `DeploymentGuards.t.sol` and control 19 ([SPEC.md](SPEC.md) §2.1). Evidence: the script at item 1's commit and the dry run's transactions.
+7. **The SP1 verifier on the target chain.** Its address, codehash, `VERSION`, `VERIFIER_HASH` and `VK_ROOT` equal §6's, from the fork tests (#92, `TestnetFork.t.sol`); Sepolia's broken entry is rejected (control 30 and its Sepolia-fork form). Evidence: the fork tests in item 1's CI run, at their pinned blocks.
+8. **The aggregator vkey.** The `SASH_AGGREGATOR_VKEY` deployed equals `programVKey` in `contracts/fixtures/tinyllama.plonk.json` and the `bytes32` in `sp1/aggregator-guest.vkey`. Evidence: both files at item 1's commit, and the dry run's adapter.
+9. **Replay.** Control 20 (the same run settled twice) and control F (single-field mutations) pass, and the `runId` scope (§7.1) is stated. Evidence: the `solidity` job of item 1's CI run.
+10. **The script's guards** (#93): the chain id, the pinned verifier and its codehash, a sender other than `DEFAULT_SENDER`, and the post-deploy asserts. Evidence: the guard tests in item 1's CI run, and the dry run passing them.
+11. **The rehearsal** (#94) passes on a fork of the target chain at its latest block with the real deployer as `--sender`: the settle at 525,585 gas on Hoodi, `gasLimit <= 16,777,216`, [SPEC.md](SPEC.md) §1.4's `runId`, `verifierKind == 1`. Its predicted addresses are in the preflight file, and the dry run's match them. `broadcast/DeployTestnet.s.sol/<chainid>/` is absent afterwards. Evidence: the preflight file (commit, fork block, predicted addresses).
+12. **The fork rules.** `eth_config` right before the broadcast reports `forkId` `0x23aa1351` and `next` null on Hoodi (Osaka); anything else stops the deployment for a new plan. Evidence: the reading and its block number, in the preflight file.
+13. **Keys.** No `--private-key` or `--password` on a command line, no key or RPC URL in the repository (CI reads the fork tests' URLs from repository variables), and `git status --ignored` reviewed before the broadcast. Evidence: the command run, and `git status --ignored` at item 1's commit.
+14. **After the broadcast.** The on-chain readbacks of every immutable (§7.1), the runtime code of each contract against the build with its immutables masked, and verification on Sourcify and Blockscout (with explicit approval). Evidence: the record (§8) and the verification links.
+
+## 8. Deployments
+
+Each public deployment is recorded in `contracts/deployments/<chainid>.json`, written by `contracts/script/testnet-settle.sh record` (#94), with its checklist (§7.3) in a table here. No deployment is recorded yet.
+
+**Hoodi (`560048`):** not deployed.
+
+| Item | Evidence | Commit or block |
+|---|---|---|
+| 1. Commit | — | — |
+| 2. Toolchain | — | — |
+| 3. Slither | — | — |
+| 4. `EIP-170` sizes | — | — |
+| 5. Privileges | — | — |
+| 6. No dev verifier | — | — |
+| 7. SP1 verifier | — | — |
+| 8. Aggregator vkey | — | — |
+| 9. Replay | — | — |
+| 10. Script guards | — | — |
+| 11. Rehearsal | — | — |
+| 12. Fork rules | — | — |
+| 13. Keys | — | — |
+| 14. After the broadcast | — | — |
+
+**Sepolia (`11155111`, optional):** not deployed; a deployment adds the same table.
