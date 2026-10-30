@@ -140,7 +140,7 @@ Unlike the dev settle, it is execution-bound, by 266,908 gas: the verifier's exe
 | `SashModelRegistry.getManifest` | 7,080 | forge snapshot; its frame in the settle's trace |
 | `SashGridVerifier.verifyGrid` | 40,000 | forge snapshot (`pure` harness, §4) |
 | `SashGridVerifier.computePublicDigest` | 28,961 | forge snapshot (`pure` harness, §4) |
-| `Sp1SashSegmentVerifier.verifyAggregatedSegments`, the verifier frame | 290,249 | forge snapshot; its frame in the settle's trace |
+| `Sp1SashSegmentVerifier.verifyAggregatedSegments`, the adapter frame | 290,249 | forge snapshot; its frame in the settle's trace |
 | of which `SP1VerifierPlonk.verifyProof` | 286,360 | the settle's trace |
 | of which `PlonkVerifier.Verify`, the self-call that checks the PLONK proof | 282,990 | the settle's trace |
 | Rest (derived: 406,702 − the four rows above): `runId` and the prompt / answer hashes, the `verifierKind()` call (150), calldata decoding, the `settledRuns` cold `SSTORE` and the `InferenceVerified` event | 40,412 | derived |

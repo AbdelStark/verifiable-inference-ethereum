@@ -18,7 +18,7 @@ Mainnet and Hoodi run Osaka, which binds this project; Amsterdam is tracked alon
    - A sha256 `publicDigest` over the segment claims and the `tok_in` / `tok_out` vectors, which the segment proof must attest, so the tokens are the ones SASH's own `embed_tok` / `head_tok` checks used; those checks bind the vectors only with SASH patch 0006, which mixes them into the Fiat-Shamir transcript (upstream `eb95bfa` does not: [SECURITY.md](SECURITY.md) §5, [SPEC.md](SPEC.md) §1),
    - Public prompt prefix matching, autoregressive teacher-forcing loop closure (`tok_in[P+j] == tok_out[P-1+j]`), and EOS (`2`) termination (`SashGridVerifier.sol`, ~40k gas measured, [docs/EVM-GAS-MODEL.md](docs/EVM-GAS-MODEL.md) §4).
 
-Aggregated single-transaction settlement of the TinyLlama run, with its real PLONK proof through the v6.1.0 `SP1VerifierPlonk` and `allowDevVerifier = false`, costs **520,898 gas** on Osaka (**3.1%** of the `EIP-7825` cap; anvil receipt, equal to its forge snapshot), below M3's 600,000 exit gate; the verifier's frame is 286,360 of it ([docs/EVM-GAS-MODEL.md](docs/EVM-GAS-MODEL.md) §5).
+Aggregated single-transaction settlement of the TinyLlama run, with its real PLONK proof through the v6.1.0 `SP1VerifierPlonk` and `allowDevVerifier = false`, costs **520,898 gas** on Osaka (**3.1%** of the `EIP-7825` cap; anvil receipt, equal to its forge snapshot), below M3's 600,000 exit gate; the `SP1VerifierPlonk` frame is 286,360 of it ([docs/EVM-GAS-MODEL.md](docs/EVM-GAS-MODEL.md) §5).
 
 ## Exact claim boundary
 

@@ -94,8 +94,8 @@ contract GasSnapshotsTest is TinyLlamaBase {
         assertLe(gasUsed, VERIFY_AND_SETTLE_PLONK_BUDGET);
     }
 
-    /// The adapter's frame alone: `SP1VerifierPlonk.verifyProof` on the committed proof, called as a view
-    /// call, so it holds neither intrinsic nor calldata gas.
+    /// The adapter's frame: `SP1VerifierPlonk.verifyProof` on the committed proof plus the adapter's call
+    /// overhead, called as a view call, so it holds neither intrinsic nor calldata gas.
     function testGasVerifyAggregatedSegments() public {
         sp1Adapter.verifyAggregatedSegments(TinyLlamaFixture.PUBLIC_DIGEST, plonkProof);
         uint256 gasUsed = vm.snapshotGasLastFrame("Sp1SashSegmentVerifier", "verifyAggregatedSegments");
