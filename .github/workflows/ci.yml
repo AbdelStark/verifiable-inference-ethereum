@@ -8,7 +8,8 @@ name: CI
 # run of the same PR). On a hit, sash checks the restored corpus without rebuilding upstream SASH, and
 # sp1-cached runs the executor suite on it without waiting for sash; on a miss, sash runs in full and
 # sp1 takes its artifact. sp1-bundles runs the segment guest on the published TinyLlama bundles with
-# sp1-workspace's Docker-built ELF: three segments on a PR, all 23 and the fixture check otherwise.
+# sp1-workspace's Docker-built ELFs: three segments on a PR, all 23, the fixture check and the
+# aggregator guest on their public values otherwise.
 on:
   push:
     branches: [main]
@@ -197,7 +198,7 @@ jobs:
         working-directory: sp1
         run: cargo fmt -- --check
       # Tests before clippy: they build the guest ELF, which sp1-build skips under clippy but `include_elf!` needs.
-      - name: The segment check's unit tests (the executor suite, which needs the corpus, runs in sp1 or sp1-cached)
+      - name: The segment check's and the aggregator's unit tests, and the aggregator and echo guests in the executor (the segment guest's executor suite, which needs the corpus, runs in sp1 or sp1-cached)
         working-directory: sp1
         run: cargo test --locked --workspace
       - name: stwo-bench in the profiling executor (cycle-tracker regions) and the BLAKE2s compression counter
@@ -216,6 +217,14 @@ jobs:
         with:
           name: segment-guest-elf
           path: sp1/target/elf-compilation/docker/riscv64im-succinct-zkvm-elf/release/segment-guest
+          retention-days: 30
+          if-no-files-found: warn
+      - name: Upload the Docker-built aggregator guest ELF
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: aggregator-guest-elf
+          path: sp1/target/elf-compilation/docker/riscv64im-succinct-zkvm-elf/release/aggregator-guest
           retention-days: 30
           if-no-files-found: warn
 
@@ -296,8 +305,8 @@ jobs:
   # The segment guest on the published TinyLlama bundles (sp1/scripts/tinyllama-bundles.sh), with the
   # Docker-built ELF from sp1-workspace in this run. A PR runs B0L0, B0L10 and head and the controls,
   # which use only those three; pushes to main, the schedule and a manual run take the main path: all
-  # 23, the controls and the fixture byte-identity check. One segment execution at a time: the native
-  # executor keeps guest memory in /dev/shm.
+  # 23, the controls, the fixture byte-identity check and the Docker-built aggregator guest on the 23
+  # public values. One segment execution at a time: the native executor keeps guest memory in /dev/shm.
   sp1-bundles:
     name: SP1 segment guest on the published TinyLlama bundles
     needs: [changes, sp1-workspace]
@@ -359,6 +368,13 @@ jobs:
         with:
           name: segment-guest-elf
           path: ${{ runner.temp }}/segment-guest-elf
+      # sp1-fixture-check.sh checks it against sp1/aggregator-guest.elf.sha256 and sp1/aggregator-guest.vkey.
+      - name: Download sp1-workspace's Docker-built aggregator guest ELF (main, schedule, manual)
+        if: github.event_name != 'pull_request'
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: aggregator-guest-elf
+          path: ${{ runner.temp }}/aggregator-guest-elf
       - name: Segment guest in the executor on B0L0, B0L10 and head, against native check_segment and the fixedHash pins, and the real-bundle controls (SPEC.md §2.1 G2, G7, G9, G10) (PRs)
         if: github.event_name == 'pull_request'
         env:
@@ -372,10 +388,11 @@ jobs:
           ELF: ${{ runner.temp }}/segment-guest-elf/segment-guest
           OUT: ${{ runner.temp }}/sp1-execute
         run: sp1/scripts/sp1-execute.sh
-      - name: TinyLlamaFixture.sol rendered from the 23 segments' executor public values is byte-identical to the committed one (main, schedule, manual)
+      - name: TinyLlamaFixture.sol rendered from the 23 segments' executor public values is byte-identical to the committed one, and the aggregator guest commits SPEC.md §1.4's publicDigest on them (main, schedule, manual)
         if: github.event_name != 'pull_request'
         env:
           ELF: ${{ runner.temp }}/segment-guest-elf/segment-guest
+          AGGREGATOR_ELF: ${{ runner.temp }}/aggregator-guest-elf/aggregator-guest
         run: sp1/scripts/sp1-fixture-check.sh
 
   sash:

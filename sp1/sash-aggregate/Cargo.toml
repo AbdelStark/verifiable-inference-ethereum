@@ -1,0 +1,17 @@
+[package]
+name = "sash-aggregate"
+description = "The aggregator guest's check and publicDigest (SPEC.md §1.2)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+# Its own crate, not a module of sash-evm-primitives or sash-segment-check: a module more in a crate
+# the segment guest links reorders that guest's code, and its pinned ELF and vkey would move.
+[dependencies]
+sash-evm-primitives.workspace = true
+sha2 = { version = "0.10.9", default-features = false }
+
+[dev-dependencies]
+hex = "0.4.3"

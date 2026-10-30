@@ -11,11 +11,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
-use sash_evm_primitives::segment::SegmentPublicValues;
-use sash_evm_primitives::tinyllama_fixture::{
-    TINYLLAMA_TOK_IN, TINYLLAMA_TOK_OUT, tinyllama_segments,
-};
-use sash_evm_primitives::token::compute_token_hash;
+use sash_evm_primitives::fixture::tinyllama_segment_public_values;
+use sash_evm_primitives::tinyllama_fixture::{TINYLLAMA_TOK_IN, TINYLLAMA_TOK_OUT};
 use serde_json::{Value, json};
 use sp1_host::prove::repo_root;
 use sp1_host::tinyllama_tags;
@@ -84,36 +81,6 @@ fn out_under_contracts_src_is_refused() {
     fs::remove_dir_all(inputs).unwrap();
 }
 
-/// The 23 TinyLlama segment claims from `tinyllama_fixture.rs` with the token hashes the guest commits
-/// on `B0L0` and `head` (`SPEC.md` §1.1), each `fixedHash` included.
-fn tinyllama_public_values() -> Vec<[u8; 226]> {
-    tinyllama_segments()
-        .iter()
-        .enumerate()
-        .map(|(i, c)| {
-            SegmentPublicValues {
-                segment_index: c.segment_index,
-                pre_root: c.pre_root,
-                model_root: c.model_root,
-                residual_in_root: c.residual_in_root,
-                residual_out_root: c.residual_out_root,
-                fixed_hash: c.fixed_hash,
-                tok_in_hash: if i == 0 {
-                    compute_token_hash(&TINYLLAMA_TOK_IN)
-                } else {
-                    [0; 32]
-                },
-                tok_out_hash: if i == 22 {
-                    compute_token_hash(&TINYLLAMA_TOK_OUT)
-                } else {
-                    [0; 32]
-                },
-            }
-            .encode()
-        })
-        .collect()
-}
-
 #[test]
 #[ignore = "needs the synthetic corpus in SASH_SYNTHETIC_CORPUS (sp1 or sp1-cached CI job)"]
 fn corpus_statement_and_tinyllama_public_values_render_the_committed_fixture() {
@@ -128,7 +95,10 @@ fn corpus_statement_and_tinyllama_public_values_render_the_committed_fixture() {
     let dir = temp_dir("corpus");
     fs::write(dir.join("B0L0.fixed.json"), &fixed).unwrap();
     fs::write(dir.join("head.fixed.json"), &fixed).unwrap();
-    for (tag, values) in tinyllama_tags().iter().zip(tinyllama_public_values()) {
+    for (tag, values) in tinyllama_tags()
+        .iter()
+        .zip(tinyllama_segment_public_values())
+    {
         fs::write(dir.join(format!("{tag}.public-values")), values).unwrap();
     }
     let out = dir.join("TinyLlamaFixture.sol");

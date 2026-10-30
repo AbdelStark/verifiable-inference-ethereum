@@ -1,8 +1,10 @@
-//! `sp1-host`: runs the segment guest on one bundle in the SP1 executor, prints a guest's vkey, runs
-//! the controls on the real TinyLlama bundles, prints their proof sizes, proves one segment on a GPU,
-//! or renders `TinyLlamaFixture.sol` from the 23 segments' public values.
+//! `sp1-host`: runs the segment guest on one bundle in the SP1 executor, runs the aggregator guest on
+//! the 23 segments' public values, prints a guest's vkey, runs the controls on the real TinyLlama
+//! bundles, prints their proof sizes, proves one segment on a GPU, or renders `TinyLlamaFixture.sol`
+//! from the 23 segments' public values.
 //!
 //! - `sp1-host execute [--elf PATH] --bundle DIR --tag T [--public-values PATH]`
+//! - `sp1-host execute-aggregator [--elf PATH] --public-values DIR`
 //! - `sp1-host vkey --elf PATH`
 //! - `sp1-host prove --elf PATH --bundle DIR --tag T --out FILE`
 //! - `sp1-host controls --elf PATH --bundles DIR --out DIR --pins FILE`
@@ -16,7 +18,10 @@ use std::process::ExitCode;
 use std::time::{Duration, Instant};
 
 use clap::{Parser, Subcommand};
+use sash_aggregate::aggregate;
+use sash_evm_primitives::tinyllama_fixture::tinyllama_model_id;
 use sha2::{Digest, Sha256};
+use sp1_host::aggregate::{aggregator_stdin, execute_aggregator, read_tinyllama_segment_values};
 use sp1_host::controls::CONTROLS;
 use sp1_host::fixture::{check_fixture_out, contracts_src, fixture_from_bundles};
 use sp1_host::prove::{
@@ -26,13 +31,13 @@ use sp1_host::prove::{
 use sp1_host::sizes::{Sizes, table};
 use sp1_host::trace::function_samples;
 use sp1_host::{
-    CYCLE_LIMIT, SEGMENT_GUEST_ELF, SegmentInput, execute, is_cycle_limit, peak_rss,
-    read_fixed_pins, tinyllama_tags,
+    AGGREGATOR_GUEST_ELF, CYCLE_LIMIT, SEGMENT_GUEST_ELF, SegmentInput, execute, is_cycle_limit,
+    peak_rss, read_fixed_pins, tinyllama_tags,
 };
 use sp1_sdk::blocking::{ProverClient, prelude::*};
 
 #[derive(Parser)]
-#[command(about = "Host of the SP1 segment guest (SPEC.md §1.1)")]
+#[command(about = "Host of the SP1 segment and aggregator guests (SPEC.md §1.1, §1.2)")]
 struct Cli {
     #[command(subcommand)]
     command: Command,
@@ -54,6 +59,18 @@ enum Command {
         /// On exit code 0, writes the 226 committed bytes here verbatim.
         #[arg(long)]
         public_values: Option<PathBuf>,
+    },
+    /// Runs the aggregator guest in the executor, without the segment proofs (deferred proof
+    /// verification off), on the TinyLlama `modelId` and the 23 segments' `<tag>.public-values` (as
+    /// `execute --public-values` writes them), and checks that it commits what `sash-aggregate`'s
+    /// `aggregate` computes natively (`SPEC.md` §1.2).
+    ExecuteAggregator {
+        /// The guest ELF to run instead of the one `build.rs` built (e.g. the Docker build).
+        #[arg(long)]
+        elf: Option<PathBuf>,
+        /// The directory holding `<tag>.public-values` for `B0L0..B0L21` and `head`.
+        #[arg(long)]
+        public_values: PathBuf,
     },
     /// Prints a guest's vkey, `vk.bytes32()` and `vk.hash_u32()`, from `LightProver::setup`.
     Vkey {
@@ -165,6 +182,34 @@ fn run(cli: Cli) -> Result<ExitCode, String> {
                 fs::write(&path, &run.public_values)
                     .map_err(|e| format!("{}: {e}", path.display()))?;
             }
+            Ok(ExitCode::SUCCESS)
+        }
+        Command::ExecuteAggregator { elf, public_values } => {
+            let elf = match elf {
+                Some(path) => read_elf(&path)?,
+                None => AGGREGATOR_GUEST_ELF,
+            };
+            let model_id = tinyllama_model_id();
+            let values = read_tinyllama_segment_values(&public_values)?;
+            let native = aggregate(&model_id, &values)
+                .map_err(|r| format!("aggregate rejects the public values: {r:?}"))?;
+            let run = execute_aggregator(elf, aggregator_stdin(&model_id, &values))?;
+            println!("exit code: {}", run.exit_code);
+            println!("public values: {}", hex::encode(&run.public_values));
+            println!("cycles: {}", run.cycles);
+            println!("PGU: {}", run.gas);
+            if run.exit_code != 0 {
+                println!("stderr:\n{}", run.stderr);
+                return Ok(ExitCode::FAILURE);
+            }
+            if run.public_values != native.public_digest {
+                return Err(format!(
+                    "the guest commits {}, not aggregate's publicDigest {}",
+                    hex::encode(&run.public_values),
+                    hex::encode(native.public_digest)
+                ));
+            }
+            println!("OK: the guest commits aggregate's publicDigest");
             Ok(ExitCode::SUCCESS)
         }
         Command::Vkey { elf } => {

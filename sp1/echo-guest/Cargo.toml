@@ -1,0 +1,12 @@
+[package]
+name = "echo-guest"
+description = "Control-only SP1 guest for binding control B2 (SPEC.md §2.1): commits its one input unchanged"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+# sp1-zkvm only, without `blake3`: its public values are hashed with sha256, as the segment guest's.
+[dependencies]
+sp1-zkvm.workspace = true

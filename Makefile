@@ -2,14 +2,14 @@
 
 help:
 	@echo "Targets:"
-	@echo "  make check       - Run Rust format, clippy, unit/negative tests, vector sync, Foundry format, lint, tests and anvil settlement (if forge is installed), the SP1 workspace checks (if cargo-prove is installed), and the segment guest on the 23 TinyLlama segments with the fixture check (if make sp1-docker's ELF and the bundles are present)"
+	@echo "  make check       - Run Rust format, clippy, unit/negative tests, vector sync, Foundry format, lint, tests and anvil settlement (if forge is installed), the SP1 workspace checks (if cargo-prove is installed), and the segment guest on the 23 TinyLlama segments with the fixture check and the aggregator on their public values (if make sp1-docker's ELFs and the bundles are present)"
 	@echo "  make rust-check  - Run cargo fmt --check, then clippy -D warnings and cargo test --workspace with --locked"
 	@echo "  make vectors     - Regenerate contracts/src/sash/TinyLlamaFixture.sol from the Rust TinyLlama fixture"
 	@echo "  make forge-test  - Check Solidity format, build against foundry.lock, lint, run the Foundry suite with gas report, and check the gas snapshots against the index"
 	@echo "  make anvil-demo  - Mine the dev-mode TinyLlama-1.1B 23-segment settlement (DeployDevAnvil.s.sol) on a local Osaka anvil node, check the receipts and print their gas"
 	@echo "  make sp1-vendor  - Build sp1/vendor/sash: SASH eb95bfa from its sha256-pinned tarball plus sp1/patches"
-	@echo "  make sp1-check   - Vendor SASH, check nitroo's Stwo (also with count-ops) and SASH's zk-prover library without the prover feature on stable, then cargo fmt --check, the segment check's unit tests, the executor tests and clippy -D warnings in sp1/ (needs SP1 v6.10.0 and protoc)"
-	@echo "  make sp1-docker  - Build the segment guest and stwo-bench reproducibly in the SP1 v6.10.0 Docker image pinned by digest, print their ELF sha256 and the segment guest's vkey, and compare both with sp1/segment-guest.elf.sha256 and sp1/segment-guest.vkey"
+	@echo "  make sp1-check   - Vendor SASH, check nitroo's Stwo (also with count-ops) and SASH's zk-prover library without the prover feature on stable, then cargo fmt --check, the segment check's and the aggregator's unit tests, the executor tests and clippy -D warnings in sp1/ (needs SP1 v6.10.0 and protoc)"
+	@echo "  make sp1-docker  - Build the segment guest, the aggregator guest and stwo-bench reproducibly in the SP1 v6.10.0 Docker image pinned by digest, print their ELF sha256 and the two guests' vkeys, and compare them with sp1/{segment,aggregator}-guest.elf.sha256 and sp1/{segment,aggregator}-guest.vkey"
 	@echo "  make sash-synthetic"
 	@echo "                  - Linux + CUDA 12.9 toolkit only: build SASH's prover (sp1/vendor/sash), check upstream's pinned digests, regenerate the synthetic corpus and its oracle records, and run the segment check's bundle and differential tests on it"
 	@echo "  make sp1-guest-suite"
@@ -20,8 +20,8 @@ help:
 	@echo "                  - Check the 69 TinyLlama proof bundle files in BUNDLES (default runs/tinyllama) against sp1/pins/tinyllama.sha256"
 	@echo "  make sp1-execute BUNDLES=runs/tinyllama OUT=<dir> [ELF=<path>] [PINS=write] [SEGMENTS=\"B0L0 B0L10 head\"]"
 	@echo "                  - Check the bundles, run the Docker-built segment guest (ELF, default make sp1-docker's) on the TinyLlama segments (SEGMENTS, default all 23) in the SP1 executor, check each against native check_segment and sp1/pins/tinyllama.fixed.sha256 (PINS=write writes it), print the per-segment metrics and run the controls on modified copies in OUT"
-	@echo "  make sp1-fixture-check BUNDLES=runs/tinyllama [ELF=<path>]"
-	@echo "                  - Check the bundles and the Docker-built segment guest (ELF), run it on all 23 TinyLlama segments in the SP1 executor, render TinyLlamaFixture.sol from its public values with sp1-host fixture-from-bundles, and compare it byte for byte with the committed fixture"
+	@echo "  make sp1-fixture-check BUNDLES=runs/tinyllama [ELF=<path>] [AGGREGATOR_ELF=<path>]"
+	@echo "                  - Check the bundles and the Docker-built segment guest (ELF), run it on all 23 TinyLlama segments in the SP1 executor, render TinyLlamaFixture.sol from its public values with sp1-host fixture-from-bundles, compare it byte for byte with the committed fixture, then run the Docker-built aggregator guest (AGGREGATOR_ELF) on those public values and require SPEC.md §1.4's publicDigest"
 	@echo "  make clean       - Clean build outputs"
 
 rust-check:
@@ -59,14 +59,14 @@ check: rust-check
 	else \
 		echo "NOTE: the reproducible guest build needs an x86_64 host with cargo-prove and the $(SP1_IMAGE) image; it runs in CI."; \
 	fi
-	@# The sp1-bundles CI job's main path, on bundles already in BUNDLES (make bundles-download) with make sp1-docker's ELF.
-	@if command -v cargo-prove >/dev/null 2>&1 && [ -f "$(ELF)" ] && [ -d "$(BUNDLES)" ]; then \
+	@# The sp1-bundles CI job's main path, on bundles already in BUNDLES (make bundles-download) with make sp1-docker's ELFs.
+	@if command -v cargo-prove >/dev/null 2>&1 && [ -f "$(ELF)" ] && [ -f "$(AGGREGATOR_ELF)" ] && [ -d "$(BUNDLES)" ]; then \
 		out="$$(mktemp -d)"; \
 		$(MAKE) sp1-execute BUNDLES="$(BUNDLES)" OUT="$$out"; rc=$$?; \
 		rm -rf "$$out"; [ $$rc = 0 ] || exit $$rc; \
 		$(MAKE) sp1-fixture-check BUNDLES="$(BUNDLES)" || exit 1; \
 	else \
-		echo "NOTE: the segment guest on the TinyLlama bundles needs cargo-prove, make sp1-docker's ELF and the bundles in $(BUNDLES) (make bundles-download); it runs in CI."; \
+		echo "NOTE: the segment and aggregator guests on the TinyLlama bundles need cargo-prove, make sp1-docker's ELFs and the bundles in $(BUNDLES) (make bundles-download); they run in CI."; \
 	fi
 	@if [ "$$(uname -s)" = Linux ] && command -v nvcc >/dev/null 2>&1 && [ -e /usr/local/cuda/lib64/libcudart.so ]; then \
 		$(MAKE) sash-synthetic || exit 1; \
@@ -131,9 +131,10 @@ bundles-check:
 	cd "$(BUNDLES)" && shasum -a 256 --strict --quiet -c "$(CURDIR)/sp1/pins/tinyllama.sha256"
 	@echo "OK: the 69 bundle files in $(BUNDLES) match sp1/pins/tinyllama.sha256"
 
-# The segment guest from `make sp1-docker`; sp1-execute and sp1-fixture-check check it against the
-# committed sha256 and vkey.
+# The segment and aggregator guests from `make sp1-docker`; sp1-execute and sp1-fixture-check check
+# them against the committed sha256 and vkey.
 ELF ?= $(CURDIR)/sp1/target/elf-compilation/docker/riscv64im-succinct-zkvm-elf/release/segment-guest
+AGGREGATOR_ELF ?= $(CURDIR)/sp1/target/elf-compilation/docker/riscv64im-succinct-zkvm-elf/release/aggregator-guest
 
 sp1-execute: sp1-vendor
 	$(MAKE) bundles-check BUNDLES="$(BUNDLES)"
@@ -141,7 +142,7 @@ sp1-execute: sp1-vendor
 
 sp1-fixture-check: sp1-vendor
 	$(MAKE) bundles-check BUNDLES="$(BUNDLES)"
-	BUNDLES="$(BUNDLES)" ELF="$(ELF)" sp1/scripts/sp1-fixture-check.sh
+	BUNDLES="$(BUNDLES)" ELF="$(ELF)" AGGREGATOR_ELF="$(AGGREGATOR_ELF)" sp1/scripts/sp1-fixture-check.sh
 
 clean:
 	cargo clean
