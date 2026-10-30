@@ -44,9 +44,10 @@ set -euo pipefail
 
 root="$(cd "$(dirname "$0")/../.." && pwd -P)"
 
-# The public dataset of the ELFs and proofs, and its commit holding elf/ (pinned once published).
+# The public dataset of the ELFs and proofs, and its commit holding elf/: the Docker builds of CI run
+# 41051189040 (commit 96f8d3b), which match sp1/<guest>.elf.sha256.
 DATASET=0xchqrles/sash-tinyllama-sp1-proofs
-ELF_REVISION=
+ELF_REVISION=29d003c1a7f6e94c6bcdf9e9473955cbf41dc768
 # sp1-sdk 6.10.0 downloads this asset on the first CUDA client build (sp1-cuda src/server.rs); its
 # sha256 as downloaded on 2026-10-28 (docs/EVM-GAS-MODEL.md §8).
 GPU_SERVER_URL=https://github.com/succinctlabs/sp1/releases/download/v6.10.0/sp1_gpu_server_v6.10.0_x86_64.tar.gz
