@@ -9,11 +9,12 @@
 #                                  directories into that temp dir, and writes deployments/<chainid>.preflight.json
 #                                  (gitignored): the commit, Foundry, RPC_URL's eth_config and the block it was read
 #                                  at, the fork block, the deployer and the predicted addresses.
-#   record [SETTLE_TX=<hash>]      Checks broadcast/DeployTestnet.s.sol/<chainid>/run-latest.json against RPC_URL,
-#                                  waits for the settle to finalize, reproduces the settle's receipt under EIP-7623
+#   record [SETTLE_TX=<hash>]      Checks broadcast/DeployTestnet.s.sol/<chainid>/run-latest.json against RPC_URL
+#                                  and the deployed code against HEAD's build (`forge build --locked`), waits for
+#                                  the transactions to finalize, reproduces the settle's receipt under EIP-7623
 #                                  and writes deployments/<chainid>.json (jq -S), folding in and deleting the
 #                                  preflight file. Against an anvil node (a rehearsal) it writes OUT instead, never
-#                                  under deployments/, and folds in no preflight file. SETTLE_TX records a
+#                                  in or under deployments/, and folds in no preflight file. SETTLE_TX records a
 #                                  front-run exact copy of the settle as the settle, with the four deployments from
 #                                  the broadcast and the broadcast's own settle reverted with RunAlreadySettled or
 #                                  never sent.
@@ -105,6 +106,26 @@ check_eth_config() {
     [[ "$next" == null ]] || fail "eth_config schedules a next fork ($next): a new fork means a new plan, not a record"
 }
 
+# check_runtime_code NAME ADDRESS RPC: ADDRESS's runtime code is out/NAME.sol/NAME.json's deployedBytecode, the
+# immutables' bytes (immutableReferences) masked on both sides; the metadata hash at its end binds the sources.
+check_runtime_code() {
+    local name=$1 address=$2 rpc=$3 artifact want got start len zeros
+    artifact="out/$name.sol/$name.json"
+    [[ -f "$artifact" ]] || fail "no $artifact"
+    want=$(jq -r .deployedBytecode.object "$artifact" | lower)
+    got=$(c code "$address" --rpc-url "$rpc" | lower)
+    want=${want#0x}
+    got=${got#0x}
+    [[ ${#got} == "${#want}" ]] \
+        || fail "$name at $address is $((${#got} / 2)) bytes, not the $((${#want} / 2)) of HEAD's build: not HEAD's code"
+    while read -r start len; do
+        zeros=$(printf "%0$((2 * len))d" 0)
+        want=${want:0:2*start}$zeros${want:2*(start+len)}
+        got=${got:0:2*start}$zeros${got:2*(start+len)}
+    done < <(jq -r '.deployedBytecode.immutableReferences // {} | .[][] | "\(.start) \(.length)"' "$artifact")
+    [[ "$got" == "$want" ]] || fail "$name at $address is not HEAD's build of src/sash/$name.sol (immutables aside)"
+}
+
 # calldata_counts HEX: prints the byte count, the zero bytes and the non-zero bytes
 calldata_counts() {
     local input=$1 bytes zero
@@ -135,7 +156,8 @@ record() {
             || fail "transaction $h of $broadcast does not exist on RPC_URL (a rehearsal's broadcast, or another chain's)"
     done
 
-    # The commit the broadcast was built from is HEAD, clean, and on a live chain reachable from origin/main
+    # The commit the broadcast was built from is HEAD, clean, and on a live chain reachable from origin/main; the
+    # deployed code is checked against HEAD's build below, since the tree is only clean now, not at the broadcast
     local commit head
     commit=$(jq -r .commit "$broadcast")
     head=$(git rev-parse HEAD)
@@ -146,6 +168,7 @@ record() {
         git merge-base --is-ancestor HEAD origin/main \
             || fail "HEAD $head is not on origin/main (git fetch origin main, then check out the deployed commit)"
     fi
+    forge build --locked >/dev/null || fail "forge build --locked failed"
 
     # The five transactions, in order, and nothing else (no DevTranscriptSegmentVerifier)
     local got_txs
@@ -195,8 +218,9 @@ record() {
     if [[ -n "$own_settle" ]]; then mined+=("$own_settle"); fi
     if [[ -n "$settle_tx" ]]; then mined+=("$settle"); fi
 
-    # Live: wait until every block involved is finalized, then read the canonical receipts.
-    local receipt last_block=0 b
+    # Live: wait until every block involved is finalized, then read the canonical receipts, each checked below to
+    # be in a finalized block of the canonical chain (a reorg during the wait can move a transaction).
+    local receipt last_block=0 b finalized=0
     for h in "${mined[@]}"; do
         while [[ "$(c rpc eth_getTransactionReceipt "$h" --rpc-url "$rpc")" == null ]]; do
             [[ "$mode" == live ]] || fail "transaction $h is not mined"
@@ -207,7 +231,6 @@ record() {
         if ((b > last_block)); then last_block=$b; fi
     done
     if [[ "$mode" == live ]]; then
-        local finalized
         while :; do
             finalized=$(c block finalized -f number --rpc-url "$rpc")
             ((finalized >= last_block)) && break
@@ -254,6 +277,12 @@ record() {
         to=$(jq -r '.to // empty' <<<"$tx" | lower)
         read -r bytes zero nonzero <<<"$(calldata_counts "$(jq -r .input <<<"$tx")")"
         ((gas_limit <= tx_gas_cap)) || fail "transaction $h has gas limit $gas_limit > $tx_gas_cap"
+        if [[ "$mode" == live ]]; then
+            ((block <= finalized)) || fail "transaction $h is now in block $block, after the finalized block $finalized" \
+                "(a reorg during the wait): run the record again"
+            [[ "$(c block "$block" -f hash --rpc-url "$rpc")" == "$(jq -r .blockHash <<<"$receipt")" ]] \
+                || fail "transaction $h's block $block is not the canonical one: run the record again"
+        fi
         if ((i < 4)); then
             label=${labels[$i]}
             [[ "$from" == "$deployer" ]] || fail "transaction $h is not from the deployer $deployer"
@@ -261,6 +290,7 @@ record() {
             if [[ -n "${addresses[$i]}" ]]; then
                 [[ -z "$to" && "$(jq -r .contractAddress <<<"$receipt" | lower)" == "${addresses[$i]}" ]] \
                     || fail "transaction $h did not create ${addresses[$i]}"
+                check_runtime_code "${keys[$i]}" "${addresses[$i]}" "$rpc"
                 local code
                 code=$(c code "${addresses[$i]}" --rpc-url "$rpc")
                 rows=$(jq --arg k "${keys[$i]}" --arg a "$(cast to-check-sum-address "${addresses[$i]}")" --arg h "$h" \
@@ -423,8 +453,10 @@ record_cmd() {
     chain=$(c chain-id --rpc-url "$rpc_url")
     if is_anvil "$rpc_url"; then
         [[ -n "${OUT:-}" ]] || fail "RPC_URL is an anvil node (a rehearsal): set OUT to the file to write, outside deployments/"
-        [[ "$(cd "$(dirname "$OUT")" && pwd -P)" != "$(mkdir -p deployments && cd deployments && pwd -P)" ]] \
-            || fail "a rehearsal is never recorded under deployments/"
+        local out_dir deployments_dir
+        out_dir=$(cd "$(dirname "$OUT")" 2>/dev/null && pwd -P) || fail "OUT's directory $(dirname "$OUT") does not exist"
+        deployments_dir=$(mkdir -p deployments && cd deployments && pwd -P)
+        [[ "$out_dir/" != "$deployments_dir/"* ]] || fail "a rehearsal is never recorded in or under deployments/"
         record "$rpc_url" fork "$OUT"
     else
         mkdir -p deployments
@@ -442,7 +474,8 @@ rehearse_cmd() {
     ((chain == hoodi)) || fail "RPC_URL serves chain $chain; only Hoodi ($hoodi) is pinned"
     local dir
     for dir in "broadcast/$script/$chain" "cache/$script/$chain"; do
-        [[ ! -e "$dir" ]] || fail "contracts/$dir exists: record a live broadcast first; a dry run's dry-run/ can be deleted"
+        [[ ! -e "$dir" ]] || fail "contracts/$dir exists: record a live broadcast first; a dry run's files are" \
+            "cleared with rm -rf contracts/$dir/dry-run && rmdir contracts/$dir (README §3, step 5)"
     done
     check_clean_tree
 
