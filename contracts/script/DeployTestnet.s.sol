@@ -2,36 +2,61 @@
 pragma solidity ^0.8.38;
 
 import {Script} from "forge-std/Script.sol";
-import {Sp1SashSegmentVerifier} from "../src/sash/Sp1SashSegmentVerifier.sol";
-import {SashModelRegistry} from "../src/sash/SashModelRegistry.sol";
-import {VerifiableInferenceSettlement} from "../src/sash/VerifiableInferenceSettlement.sol";
-import {TinyLlamaFixture} from "../src/sash/TinyLlamaFixture.sol";
+import {SP1Verifier as SP1VerifierPlonk} from "@sp1-contracts/v6.1.0/SP1VerifierPlonk.sol";
+import {SettlementStack} from "./SettlementStack.sol";
+
+// `V6_1_0_SP1_VERIFIER_PLONK` on Hoodi, Sepolia and mainnet: the same runtime code on all three (`SECURITY.md` §6).
+address constant SP1_VERIFIER_PLONK = 0xc3c6dDDAc8829b233Dc6536Ec024775a57b0AF2A;
+bytes32 constant SP1_VERIFIER_PLONK_CODEHASH = 0xa5c9448eec43538d11533b207300fd13277c14c0800d33549a9492e7e8bdf84b;
+string constant SP1_VERIFIER_PLONK_VERSION = "v6.1.0";
+uint256 constant HOODI_CHAIN_ID = 560048;
+uint256 constant SEPOLIA_CHAIN_ID = 11155111;
 
 /// @title DeployTestnet
-/// @notice Deploys the production-gated SASH EVM settlement stack (`allowDevVerifier = false`)
-///         to Ethereum Sepolia (`11155111`) or Hoodi (`560048`), reading from the environment `SP1_VERIFIER`, the
-///         pinned SP1 v6.1.0 `SP1VerifierPlonk` (`SECURITY.md` §6), and `SASH_AGGREGATOR_VKEY`.
-contract DeployTestnet is Script {
-    function run() external returns (address registryAddr, address adapterAddr, address settlementAddr) {
-        address sp1Verifier = vm.envAddress("SP1_VERIFIER");
-        bytes32 sashVKey = vm.envBytes32("SASH_AGGREGATOR_VKEY");
+/// @notice Deploys the production SASH settlement stack (`SettlementStack`, `allowDevVerifier = false`) on Hoodi
+///         (`560048`) or Sepolia (`11155111`) over the pinned SP1 v6.1.0 `SP1VerifierPlonk`, and settles the
+///         committed TinyLlama PLONK proof: five transactions, the registry, `enrollModel`, the adapter, the
+///         settlement and `verifyAndSettle`. It reads no environment variable: the verifier is pinned here, and
+///         the aggregator vkey and the proof come from `contracts/fixtures/tinyllama.plonk.json`.
+/// @dev Before the broadcast it checks the chain id, a sender other than forge's `DEFAULT_SENDER`, the
+///      verifier's codehash and `VERSION`, and that the RPC's `eth_chainId` equals `block.chainid`. Forge takes
+///      `block.chainid` from `--chain`, `--chain-id` or `FOUNDRY_CHAIN_ID` when one is given, not from the RPC:
+///      without the last check, a mainnet RPC with `--chain hoodi` passes every other guard (mainnet has the same
+///      verifier at the same address) and forge signs chain-1 transactions. After the broadcast it checks the
+///      stack's immutables, manifest and settled `runId` (`_checkStack`), so a dry run runs every check before
+///      anything is signed. The deployer (`--sender`) becomes the registry's immutable `OWNER`, which can enroll
+///      new `modelId`s and deactivate TinyLlama (`SashModelRegistry`). A broadcast cut short is recovered with
+///      `forge script … --resume`, not a second entry point.
+contract DeployTestnet is Script, SettlementStack {
+    error UnsupportedChain(uint256 chainId);
+    error DefaultSender();
+    error Sp1VerifierCodehashMismatch(bytes32 got);
+    error Sp1VerifierVersionMismatch(string got);
+    error RpcChainIdMismatch(uint256 rpcChainId, uint256 chainId);
+
+    function run() external returns (address registry, address adapter, address settlement, bytes32 runId) {
+        if (block.chainid != HOODI_CHAIN_ID && block.chainid != SEPOLIA_CHAIN_ID) {
+            revert UnsupportedChain(block.chainid);
+        }
+        if (msg.sender == DEFAULT_SENDER) revert DefaultSender();
+        if (SP1_VERIFIER_PLONK.codehash != SP1_VERIFIER_PLONK_CODEHASH) {
+            revert Sp1VerifierCodehashMismatch(SP1_VERIFIER_PLONK.codehash);
+        }
+        string memory version = SP1VerifierPlonk(SP1_VERIFIER_PLONK).VERSION();
+        if (keccak256(bytes(version)) != keccak256(bytes(SP1_VERIFIER_PLONK_VERSION))) {
+            revert Sp1VerifierVersionMismatch(version);
+        }
+        // `eth_chainId` returns the id as a big-endian quantity of at most 32 bytes, which `vm.rpc` hands back raw.
+        bytes memory rpcId = vm.rpc("eth_chainId", "[]");
+        uint256 rpcChainId = uint256(bytes32(rpcId)) >> (8 * (32 - rpcId.length));
+        if (rpcChainId != block.chainid) revert RpcChainIdMismatch(rpcChainId, block.chainid);
+        (bytes32 programVKey, bytes memory proofBytes) = _readPlonkFixture();
 
         vm.startBroadcast();
-
-        SashModelRegistry registry = new SashModelRegistry(msg.sender);
-        registry.enrollModel(
-            TinyLlamaFixture.MODEL_ID,
-            TinyLlamaFixture.NUM_SEGMENTS,
-            TinyLlamaFixture.SEQ_LEN,
-            TinyLlamaFixture.EOS_TOKEN_ID,
-            TinyLlamaFixture.MANIFEST_ROOTS_HASH
-        );
-
-        Sp1SashSegmentVerifier adapter = new Sp1SashSegmentVerifier(sp1Verifier, sashVKey);
-        VerifiableInferenceSettlement settlement =
-            new VerifiableInferenceSettlement(address(registry), address(adapter), false);
-
+        Stack memory s = _deployAndSettle(msg.sender, SP1_VERIFIER_PLONK, programVKey, proofBytes);
         vm.stopBroadcast();
-        return (address(registry), address(adapter), address(settlement));
+
+        _checkStack(s, msg.sender, SP1_VERIFIER_PLONK, programVKey);
+        return (address(s.registry), address(s.adapter), address(s.settlement), s.runId);
     }
 }

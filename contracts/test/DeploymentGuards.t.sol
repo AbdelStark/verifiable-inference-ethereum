@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 pragma solidity ^0.8.38;
 
+import {Test} from "forge-std/Test.sol";
+import {DeployTestnet, SP1_VERIFIER_PLONK, SP1_VERIFIER_PLONK_CODEHASH} from "../script/DeployTestnet.s.sol";
 import {DevTranscriptSegmentVerifier} from "../src/sash/DevTranscriptSegmentVerifier.sol";
 import {SashModelRegistry} from "../src/sash/SashModelRegistry.sol";
 import {SashTypes} from "../src/sash/SashTypes.sol";
@@ -43,5 +45,52 @@ contract DeploymentGuardsTest is TinyLlamaBase {
             vm.expectRevert(abi.encodeWithSelector(SashTypes.DevChainOnly.selector, chainIds[i]));
             new DevTranscriptSegmentVerifier();
         }
+    }
+}
+
+/// `DeployTestnet`'s guards that need no RPC, each of which reverts before `vm.startBroadcast()`. The RPC chain-id
+/// guard is `DeployTestnetForkGuardTest`'s, and the post-deploy checks are `SettlementStackChecksTest`'s. The script
+/// is deployed with `deployCode`, so this file does not embed its initcode.
+contract DeployTestnetGuardsTest is Test {
+    DeployTestnet internal script;
+
+    function setUp() public {
+        script = DeployTestnet(deployCode("DeployTestnet.s.sol:DeployTestnet"));
+    }
+
+    /// Only Hoodi and Sepolia: mainnet, where the same verifier is deployed, and the dev chain revert.
+    function testRejectsOtherChains() public {
+        uint256[2] memory chainIds = [uint256(1), 31337];
+        for (uint256 i = 0; i < chainIds.length; i++) {
+            vm.chainId(chainIds[i]);
+            vm.expectRevert(abi.encodeWithSelector(DeployTestnet.UnsupportedChain.selector, chainIds[i]));
+            script.run();
+        }
+    }
+
+    /// Without a wallet or `--sender`, forge runs the script as `DEFAULT_SENDER`, which would become `OWNER`.
+    function testRejectsDefaultSender() public {
+        vm.chainId(560048);
+        vm.prank(DEFAULT_SENDER);
+        vm.expectRevert(DeployTestnet.DefaultSender.selector);
+        script.run();
+    }
+
+    function testRejectsMissingSp1Verifier() public {
+        vm.chainId(560048);
+        assertEq(SP1_VERIFIER_PLONK.code.length, 0);
+        vm.expectRevert(abi.encodeWithSelector(DeployTestnet.Sp1VerifierCodehashMismatch.selector, bytes32(0)));
+        script.run();
+    }
+
+    /// The repository's compile of the v6.1.0 `SP1VerifierPlonk` returns the pinned getters, but its bytecode, and
+    /// so its codehash, differ from the deployed one's (`SECURITY.md` §6).
+    function testRejectsWrongSp1VerifierCode() public {
+        vm.chainId(560048);
+        bytes memory code = vm.getDeployedCode("SP1VerifierPlonk.sol:SP1Verifier");
+        vm.etch(SP1_VERIFIER_PLONK, code);
+        assertNotEq(keccak256(code), SP1_VERIFIER_PLONK_CODEHASH);
+        vm.expectRevert(abi.encodeWithSelector(DeployTestnet.Sp1VerifierCodehashMismatch.selector, keccak256(code)));
+        script.run();
     }
 }
