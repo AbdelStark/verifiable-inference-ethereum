@@ -19,9 +19,9 @@ gas_limit = 16777216
 # Each top-level state-changing call runs as its own transaction, so its gas includes intrinsic and
 # calldata gas and matches an anvil receipt; view and pure calls aren't isolated.
 isolate = true
-# The tests and DeployAnvilSp1.s.sol read the committed PLONK proof, contracts/fixtures/tinyllama.plonk.json, and
-# the fork tests the SP1 deployment addresses; `out` is Foundry's default, which `deployCode` reads, and a set
-# `fs_permissions` replaces it.
+# The tests, DeployAnvilSp1.s.sol and DeployTestnet.s.sol read the committed PLONK proof,
+# contracts/fixtures/tinyllama.plonk.json, and the fork tests the SP1 deployment addresses; `out` is Foundry's
+# default, which `deployCode` reads, and a set `fs_permissions` replaces it.
 fs_permissions = [
     { access = "read", path = "./out" },
     { access = "read", path = "./fixtures" },

@@ -3,18 +3,15 @@ pragma solidity ^0.8.38;
 
 import {Vm} from "forge-std/Vm.sol";
 import {SP1Verifier as SP1VerifierPlonk} from "@sp1-contracts/v6.1.0/SP1VerifierPlonk.sol";
-import {SashModelRegistry} from "../src/sash/SashModelRegistry.sol";
 import {SashTypes} from "../src/sash/SashTypes.sol";
 import {Sp1SashSegmentVerifier} from "../src/sash/Sp1SashSegmentVerifier.sol";
 import {TinyLlamaBase} from "./TinyLlamaBase.sol";
-import {TinyLlamaFixture} from "../src/sash/TinyLlamaFixture.sol";
 import {VerifiableInferenceSettlement} from "../src/sash/VerifiableInferenceSettlement.sol";
 import {BROKEN_VK_ROOT, PLONK_VERIFIER_HASH, VK_ROOT} from "./Sp1VerifierBinding.t.sol";
 import {SPEC_RUN_ID} from "./TinyLlamaSettlement.t.sol";
+import {SettlementStack} from "../script/SettlementStack.sol";
+import {SP1_VERIFIER_PLONK, SP1_VERIFIER_PLONK_CODEHASH} from "../script/DeployTestnet.s.sol";
 
-// `V6_1_0_SP1_VERIFIER_PLONK` on Hoodi, Sepolia and mainnet: the same runtime code on all three.
-address constant SP1_VERIFIER_PLONK = 0xc3c6dDDAc8829b233Dc6536Ec024775a57b0AF2A;
-bytes32 constant SP1_VERIFIER_PLONK_CODEHASH = 0xa5c9448eec43538d11533b207300fd13277c14c0800d33549a9492e7e8bdf84b;
 // Sepolia's `V6_1_0_BROKEN_SP1_VERIFIER_PLONK`: the pinned `VERSION` and `VERIFIER_HASH`, a stale `VK_ROOT`.
 address constant BROKEN_SP1_VERIFIER_PLONK = 0xFaa0Ef4fC2d30bca021A982214E375cdeCFcc8f8;
 bytes32 constant BROKEN_SP1_VERIFIER_PLONK_CODEHASH =
@@ -52,6 +49,7 @@ abstract contract TestnetForkTest is TinyLlamaBase {
         return vm.parseJsonAddress(json, string.concat(".", name));
     }
 
+    /// `DeployTestnet`'s pinned address and codehash against sp1-contracts' deployments file and the live chain.
     function testForkPinnedSp1VerifierPlonk() public view {
         assertEq(_deployment("V6_1_0_SP1_VERIFIER_PLONK"), SP1_VERIFIER_PLONK);
         assertEq(SP1_VERIFIER_PLONK.codehash, SP1_VERIFIER_PLONK_CODEHASH);
@@ -73,8 +71,10 @@ abstract contract TestnetForkTest is TinyLlamaBase {
 }
 
 /// Hoodi (`560048`), the exit-gate chain: a fresh stack settles the committed PLONK proof against the live
-/// `V6_1_0_SP1_VERIFIER_PLONK`. Runs when `HOODI_RPC_URL` is set.
-contract HoodiForkTest is TestnetForkTest {
+/// `V6_1_0_SP1_VERIFIER_PLONK`, through `SettlementStack`, the code `DeployTestnet` broadcasts, and passes its
+/// post-deploy checks. Runs when `HOODI_RPC_URL` is set. The script's own `run()` is never called here: its
+/// `msg.sender` would be this contract while `vm.startBroadcast()` sends from `DEFAULT_SENDER`.
+contract HoodiForkTest is TestnetForkTest, SettlementStack {
     uint256 internal constant HOODI_CHAIN_ID = 560048;
     uint256 internal constant HOODI_FORK_BLOCK = 3_919_000;
 
@@ -83,48 +83,26 @@ contract HoodiForkTest is TestnetForkTest {
     }
 
     function testForkSettlesTinyLlamaPlonkProof() public {
-        registry = SashModelRegistry(deployCode("SashModelRegistry.sol:SashModelRegistry", abi.encode(address(this))));
-        registry.enrollModel(
-            TinyLlamaFixture.MODEL_ID,
-            TinyLlamaFixture.NUM_SEGMENTS,
-            TinyLlamaFixture.SEQ_LEN,
-            TinyLlamaFixture.EOS_TOKEN_ID,
-            TinyLlamaFixture.MANIFEST_ROOTS_HASH
-        );
-        Sp1SashSegmentVerifier adapter = _deploySp1Adapter(SP1_VERIFIER_PLONK, programVKey);
-        VerifiableInferenceSettlement prodSettlement = _deploySettlement(address(adapter), false);
-        assertFalse(prodSettlement.ALLOW_DEV_VERIFIER());
-
         vm.recordLogs();
-        bytes32 runId = _settle(prodSettlement);
-        assertEq(runId, SPEC_RUN_ID);
+        Stack memory s = _deployAndSettle(address(this), SP1_VERIFIER_PLONK, programVKey, proofBytes);
+        _checkStack(s, address(this), SP1_VERIFIER_PLONK, programVKey);
+        assertEq(s.runId, SPEC_RUN_ID);
+
         Vm.Log[] memory logs = vm.getRecordedLogs();
         uint256 settled;
         for (uint256 i = 0; i < logs.length; i++) {
             if (logs[i].topics[0] != VerifiableInferenceSettlement.InferenceVerified.selector) continue;
             settled++;
-            assertEq(logs[i].emitter, address(prodSettlement));
+            assertEq(logs[i].emitter, address(s.settlement));
             assertEq(logs[i].topics[1], SPEC_RUN_ID);
             (,, SashTypes.VerifierKind kind) = abi.decode(logs[i].data, (bytes32, bytes32, SashTypes.VerifierKind));
             assertEq(uint8(kind), uint8(SashTypes.VerifierKind.ZKVM_PLONK));
         }
         assertEq(settled, 1);
-        assertTrue(prodSettlement.settledRuns(SPEC_RUN_ID));
+        assertTrue(s.settlement.settledRuns(SPEC_RUN_ID));
 
         vm.expectRevert(abi.encodeWithSelector(SashTypes.RunAlreadySettled.selector, SPEC_RUN_ID));
-        _settle(prodSettlement);
-    }
-
-    function _settle(VerifiableInferenceSettlement target) internal returns (bytes32) {
-        return target.verifyAndSettle(
-            TinyLlamaFixture.MODEL_ID,
-            TinyLlamaFixture.segments(),
-            TinyLlamaFixture.tokIn(),
-            TinyLlamaFixture.tokOut(),
-            TinyLlamaFixture.promptIds(),
-            TinyLlamaFixture.answerIds(),
-            proofBytes
-        );
+        _settleTinyLlama(s.settlement, proofBytes);
     }
 }
 
