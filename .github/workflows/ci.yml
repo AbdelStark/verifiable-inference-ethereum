@@ -147,7 +147,7 @@ jobs:
           HOODI_RPC_URL: ${{ vars.HOODI_RPC_URL || secrets.HOODI_RPC_URL }}
           SEPOLIA_RPC_URL: ${{ vars.SEPOLIA_RPC_URL || secrets.SEPOLIA_RPC_URL }}
         run: |
-          [ -n "$HOODI_RPC_URL" ] || echo "::warning::HOODI_RPC_URL is unset: HoodiForkTest (TestnetFork.t.sol) skipped"
+          [ -n "$HOODI_RPC_URL" ] || echo "::warning::HOODI_RPC_URL is unset: HoodiForkTest and DeployTestnetForkGuardTest (TestnetFork.t.sol) skipped"
           [ -n "$SEPOLIA_RPC_URL" ] || echo "::warning::SEPOLIA_RPC_URL is unset: SepoliaForkTest (TestnetFork.t.sol) skipped"
           rm -rf snapshots
           forge test -vvv --gas-report | tee "$RUNNER_TEMP/gas-report.txt"

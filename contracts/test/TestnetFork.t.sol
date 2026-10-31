@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 pragma solidity ^0.8.38;
 
+import {Test} from "forge-std/Test.sol";
 import {Vm} from "forge-std/Vm.sol";
 import {SP1Verifier as SP1VerifierPlonk} from "@sp1-contracts/v6.1.0/SP1VerifierPlonk.sol";
 import {SashTypes} from "../src/sash/SashTypes.sol";
@@ -10,12 +11,21 @@ import {VerifiableInferenceSettlement} from "../src/sash/VerifiableInferenceSett
 import {BROKEN_VK_ROOT, PLONK_VERIFIER_HASH, VK_ROOT} from "./Sp1VerifierBinding.t.sol";
 import {SPEC_RUN_ID} from "./TinyLlamaSettlement.t.sol";
 import {SettlementStack} from "../script/SettlementStack.sol";
-import {SP1_VERIFIER_PLONK, SP1_VERIFIER_PLONK_CODEHASH} from "../script/DeployTestnet.s.sol";
+import {
+    DeployTestnet,
+    HOODI_CHAIN_ID,
+    SEPOLIA_CHAIN_ID,
+    SP1_VERIFIER_PLONK,
+    SP1_VERIFIER_PLONK_CODEHASH
+} from "../script/DeployTestnet.s.sol";
 
 // Sepolia's `V6_1_0_BROKEN_SP1_VERIFIER_PLONK`: the pinned `VERSION` and `VERIFIER_HASH`, a stale `VK_ROOT`.
 address constant BROKEN_SP1_VERIFIER_PLONK = 0xFaa0Ef4fC2d30bca021A982214E375cdeCFcc8f8;
 bytes32 constant BROKEN_SP1_VERIFIER_PLONK_CODEHASH =
     0x413a62f179f67c0ca0ec1ee42b7bf4cee2cd1d68b420165ec673876658824465;
+
+uint256 constant HOODI_FORK_BLOCK = 3_919_000;
+uint256 constant SEPOLIA_FORK_BLOCK = 12_029_000;
 
 /// The live SP1 v6.1.0 PLONK verifier on a public testnet, at a pinned block. Each fork test contract reads its RPC
 /// URL from the environment and is skipped when it is unset. The URL must be an archive endpoint that serves state at
@@ -75,9 +85,6 @@ abstract contract TestnetForkTest is TinyLlamaBase {
 /// post-deploy checks. Runs when `HOODI_RPC_URL` is set. The script's own `run()` is never called here: its
 /// `msg.sender` would be this contract while `vm.startBroadcast()` sends from `DEFAULT_SENDER`.
 contract HoodiForkTest is TestnetForkTest, SettlementStack {
-    uint256 internal constant HOODI_CHAIN_ID = 560048;
-    uint256 internal constant HOODI_FORK_BLOCK = 3_919_000;
-
     function setUp() public override {
         _selectFork("HOODI_RPC_URL", HOODI_FORK_BLOCK, HOODI_CHAIN_ID);
     }
@@ -110,9 +117,6 @@ contract HoodiForkTest is TestnetForkTest, SettlementStack {
 /// `VK_ROOT` differs from the pinned one. Runs when `SEPOLIA_RPC_URL` is set. The adapter is deployed with `new`,
 /// so that its expected constructor revert stays inside the test.
 contract SepoliaForkTest is TestnetForkTest {
-    uint256 internal constant SEPOLIA_CHAIN_ID = 11155111;
-    uint256 internal constant SEPOLIA_FORK_BLOCK = 12_029_000;
-
     function setUp() public override {
         _selectFork("SEPOLIA_RPC_URL", SEPOLIA_FORK_BLOCK, SEPOLIA_CHAIN_ID);
     }
@@ -130,5 +134,28 @@ contract SepoliaForkTest is TestnetForkTest {
             )
         );
         new Sp1SashSegmentVerifier(BROKEN_SP1_VERIFIER_PLONK, programVKey);
+    }
+}
+
+/// `DeployTestnet`'s RPC chain-id guard on a Hoodi fork: `block.chainid` overridden to Sepolia's, as `--chain
+/// sepolia` or `FOUNDRY_CHAIN_ID` would, passes the chain-id and verifier guards (the pinned verifier is on Hoodi),
+/// and the script then reverts on the RPC's own `eth_chainId` before `vm.startBroadcast()`. Runs when
+/// `HOODI_RPC_URL` is set. The script is deployed with `deployCode`, so this file does not embed its initcode.
+contract DeployTestnetForkGuardTest is Test {
+    function testForkRejectsChainIdOverride() public {
+        string memory url = vm.envOr("HOODI_RPC_URL", string(""));
+        if (bytes(url).length == 0) {
+            vm.skip(true);
+            return;
+        }
+        vm.createSelectFork(url, HOODI_FORK_BLOCK);
+        assertEq(block.chainid, HOODI_CHAIN_ID);
+        DeployTestnet script = DeployTestnet(deployCode("DeployTestnet.s.sol:DeployTestnet"));
+
+        vm.chainId(SEPOLIA_CHAIN_ID);
+        vm.expectRevert(
+            abi.encodeWithSelector(DeployTestnet.RpcChainIdMismatch.selector, HOODI_CHAIN_ID, SEPOLIA_CHAIN_ID)
+        );
+        script.run();
     }
 }

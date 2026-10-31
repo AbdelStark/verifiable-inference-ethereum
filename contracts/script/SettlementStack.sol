@@ -93,11 +93,12 @@ abstract contract SettlementStack is CommonBase {
     function _checkStack(Stack memory s, address owner, address sp1Verifier, bytes32 programVKey) internal view {
         if (s.registry.OWNER() != owner) revert RegistryOwnerMismatch(s.registry.OWNER(), owner);
 
+        // `getManifest` reverts with `ModelNotActive` unless the model is enrolled and active.
         SashTypes.ModelManifest memory m = s.registry.getManifest(TinyLlamaFixture.MODEL_ID);
         if (
             m.numSegments != TinyLlamaFixture.NUM_SEGMENTS || m.seqLen != TinyLlamaFixture.SEQ_LEN
                 || m.eosTokenId != TinyLlamaFixture.EOS_TOKEN_ID
-                || m.manifestRootsHash != TinyLlamaFixture.MANIFEST_ROOTS_HASH || !m.active
+                || m.manifestRootsHash != TinyLlamaFixture.MANIFEST_ROOTS_HASH
         ) revert ManifestMismatch();
 
         if (address(s.adapter.SP1_VERIFIER()) != sp1Verifier) {

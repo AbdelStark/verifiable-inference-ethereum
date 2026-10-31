@@ -18,17 +18,21 @@ uint256 constant SEPOLIA_CHAIN_ID = 11155111;
 ///         committed TinyLlama PLONK proof: five transactions, the registry, `enrollModel`, the adapter, the
 ///         settlement and `verifyAndSettle`. It reads no environment variable: the verifier is pinned here, and
 ///         the aggregator vkey and the proof come from `contracts/fixtures/tinyllama.plonk.json`.
-/// @dev Before the broadcast it checks the chain id, a sender other than forge's `DEFAULT_SENDER`, and the
-///      verifier's codehash and `VERSION`; after it, the stack's immutables, manifest and settled `runId`
-///      (`_checkStack`), so a dry run runs every check before anything is signed. The deployer (`--sender`)
-///      becomes the registry's immutable `OWNER`, which can enroll new `modelId`s and deactivate TinyLlama
-///      (`SashModelRegistry`). A broadcast cut short is recovered with `forge script … --resume`, not a second
-///      entry point.
+/// @dev Before the broadcast it checks the chain id, a sender other than forge's `DEFAULT_SENDER`, the
+///      verifier's codehash and `VERSION`, and that the RPC's `eth_chainId` equals `block.chainid`. Forge takes
+///      `block.chainid` from `--chain`, `--chain-id` or `FOUNDRY_CHAIN_ID` when one is given, not from the RPC:
+///      without the last check, a mainnet RPC with `--chain hoodi` passes every other guard (mainnet has the same
+///      verifier at the same address) and forge signs chain-1 transactions. After the broadcast it checks the
+///      stack's immutables, manifest and settled `runId` (`_checkStack`), so a dry run runs every check before
+///      anything is signed. The deployer (`--sender`) becomes the registry's immutable `OWNER`, which can enroll
+///      new `modelId`s and deactivate TinyLlama (`SashModelRegistry`). A broadcast cut short is recovered with
+///      `forge script … --resume`, not a second entry point.
 contract DeployTestnet is Script, SettlementStack {
     error UnsupportedChain(uint256 chainId);
     error DefaultSender();
     error Sp1VerifierCodehashMismatch(bytes32 got);
     error Sp1VerifierVersionMismatch(string got);
+    error RpcChainIdMismatch(uint256 rpcChainId, uint256 chainId);
 
     function run() external returns (address registry, address adapter, address settlement, bytes32 runId) {
         if (block.chainid != HOODI_CHAIN_ID && block.chainid != SEPOLIA_CHAIN_ID) {
@@ -42,6 +46,10 @@ contract DeployTestnet is Script, SettlementStack {
         if (keccak256(bytes(version)) != keccak256(bytes(SP1_VERIFIER_PLONK_VERSION))) {
             revert Sp1VerifierVersionMismatch(version);
         }
+        // `eth_chainId` returns the id as a big-endian quantity of at most 32 bytes, which `vm.rpc` hands back raw.
+        bytes memory rpcId = vm.rpc("eth_chainId", "[]");
+        uint256 rpcChainId = uint256(bytes32(rpcId)) >> (8 * (32 - rpcId.length));
+        if (rpcChainId != block.chainid) revert RpcChainIdMismatch(rpcChainId, block.chainid);
         (bytes32 programVKey, bytes memory proofBytes) = _readPlonkFixture();
 
         vm.startBroadcast();

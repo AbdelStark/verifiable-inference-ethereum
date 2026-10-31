@@ -47,7 +47,7 @@ slither:
 
 forge-test:
 	cd contracts && forge fmt --check && forge build --locked --sizes && forge lint --deny warnings
-	@[ -n "$$HOODI_RPC_URL" ] || echo "NOTE: HOODI_RPC_URL is unset; fork tests skipped (HoodiForkTest, contracts/test/TestnetFork.t.sol)."
+	@[ -n "$$HOODI_RPC_URL" ] || echo "NOTE: HOODI_RPC_URL is unset; fork tests skipped (HoodiForkTest and DeployTestnetForkGuardTest, contracts/test/TestnetFork.t.sol)."
 	@[ -n "$$SEPOLIA_RPC_URL" ] || echo "NOTE: SEPOLIA_RPC_URL is unset; fork tests skipped (SepoliaForkTest, contracts/test/TestnetFork.t.sol)."
 	cd contracts && rm -rf snapshots && forge test -vvv --gas-report
 	@git diff --exit-code -- contracts/snapshots || { echo "ERROR: gas snapshots differ from the index; stage them if the change is intended"; exit 1; }

@@ -48,9 +48,9 @@ contract DeploymentGuardsTest is TinyLlamaBase {
     }
 }
 
-/// `DeployTestnet`'s guards, each of which reverts before `vm.startBroadcast()` (`SettlementStack` holds the
-/// post-deploy checks, which `HoodiForkTest` runs). The script is deployed with `deployCode`, so this file does not
-/// embed its initcode.
+/// `DeployTestnet`'s guards that need no RPC, each of which reverts before `vm.startBroadcast()`. The RPC chain-id
+/// guard is `DeployTestnetForkGuardTest`'s, and the post-deploy checks are `SettlementStackChecksTest`'s. The script
+/// is deployed with `deployCode`, so this file does not embed its initcode.
 contract DeployTestnetGuardsTest is Test {
     DeployTestnet internal script;
 
