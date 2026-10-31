@@ -116,6 +116,8 @@ jobs:
         uses: foundry-rs/foundry-toolchain@dba66c27052e63476d886f22216e119ba7e615bf # v1.9.2
         with:
           version: v1.8.6
+          # The next step is the job's only cache of the fork tests' RPC state.
+          cache: false
       - name: Print toolchain versions
         working-directory: contracts
         run: |
@@ -130,10 +132,23 @@ jobs:
       - name: Lint
         working-directory: contracts
         run: forge lint --deny warnings
-      - name: Run TinyLlama 23-segment settlement, gas snapshots & Foundry rows of the SPEC.md §2.1 negative-control table
+      # Foundry's RPC cache holds the fork tests' state at their pinned blocks, which TestnetFork.t.sol sets. The
+      # key names the forks that run, so that a cache saved while a URL was unset is not restored once it is set.
+      - name: Cache the fork tests' RPC state
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.foundry/cache/rpc
+          key: foundry-rpc-${{ hashFiles('contracts/test/TestnetFork.t.sol') }}-hoodi-${{ (vars.HOODI_RPC_URL || secrets.HOODI_RPC_URL) != '' }}-sepolia-${{ (vars.SEPOLIA_RPC_URL || secrets.SEPOLIA_RPC_URL) != '' }}
+      - name: Run TinyLlama 23-segment settlement, gas snapshots, the Hoodi and Sepolia fork tests & Foundry rows of the SPEC.md §2.1 negative-control table
         working-directory: contracts
         shell: bash
+        # Repository variables (a keyed URL would be a secret of the same name); unset, the fork tests skip.
+        env:
+          HOODI_RPC_URL: ${{ vars.HOODI_RPC_URL || secrets.HOODI_RPC_URL }}
+          SEPOLIA_RPC_URL: ${{ vars.SEPOLIA_RPC_URL || secrets.SEPOLIA_RPC_URL }}
         run: |
+          [ -n "$HOODI_RPC_URL" ] || echo "::warning::HOODI_RPC_URL is unset: HoodiForkTest (TestnetFork.t.sol) skipped"
+          [ -n "$SEPOLIA_RPC_URL" ] || echo "::warning::SEPOLIA_RPC_URL is unset: SepoliaForkTest (TestnetFork.t.sol) skipped"
           rm -rf snapshots
           forge test -vvv --gas-report | tee "$RUNNER_TEMP/gas-report.txt"
       - name: Upload gas report
