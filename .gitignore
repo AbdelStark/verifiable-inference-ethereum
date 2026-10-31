@@ -8,6 +8,8 @@
 /contracts/out/
 /contracts/cache/
 /contracts/broadcast/
+# the rehearsal's pre-broadcast evidence, which testnet-settle.sh record folds into deployments/<chainid>.json
+/contracts/deployments/*.preflight.json
 /contracts/lcov.info
 
 # Vendored upstream source (sp1/scripts/vendor-sash.sh) and the synthetic corpus it proves

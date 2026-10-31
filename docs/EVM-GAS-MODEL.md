@@ -154,7 +154,26 @@ As in §4, the harness snapshots include their own ABI decoding, so the split be
 | The repository's compile (the settlement's) | 8,966 B | 286,360 | Hoodi fork; equal to its frame in the anvil settle |
 | The canonical deployment `0xc3c6…AF2A` | 10,125 B | 291,047 | Hoodi fork only |
 
-The canonical deployment costs 4,687 more execution gas, so a settlement bound to it would cost about 525,585 gas on Osaka (derived, not measured). M4 measures it on Hoodi.
+The canonical deployment costs 4,687 more execution gas, and a settlement bound to it costs 525,585 gas on Osaka. `make testnet-rehearsal` (`contracts/script/testnet-settle.sh rehearse`, README §3) measures it: it forks Hoodi at its latest block on `anvil --hardfork osaka --enable-tx-gas-limit`, broadcasts `DeployTestnet.s.sol` there over `0xc3c6…AF2A` from an impersonated deployer, and records it as the live deployment is recorded. The deployment rows move by a few gas with the deployer's address bytes (here anvil's first account, at nonce 316), so the script prints them; it pins the settle's receipt, execution and floor. The live Hoodi row comes with the deployment (#96).
+
+| Transaction (Hoodi fork (anvil, Foundry 1.8.6), canonical verifier, fork block 3,920,622) | `gasUsed` | Gas limit | Calldata | Zero | Non-zero |
+|---|---:|---:|---:|---:|---:|
+| `SashModelRegistry` deployment | 291,740 | 379,262 | 1,292 B | 129 | 1,163 |
+| `SashModelRegistry.enrollModel` | 92,053 | 127,147 | 164 B | 95 | 69 |
+| `Sp1SashSegmentVerifier` deployment | 243,287 | 316,273 | 1,410 B | 155 | 1,255 |
+| `VerifiableInferenceSettlement` deployment | 877,319 | 1,140,514 | 4,305 B | 330 | 3,975 |
+| `VerifiableInferenceSettlement.verifyAndSettle` | **525,585** | 768,667 | 8,932 B | 4,143 | 4,789 |
+
+| Part of the settle | Gas |
+|---|---:|
+| Intrinsic | 21,000 |
+| Standard calldata: 4 × 4,143 + 16 × 4,789 | 93,196 |
+| Execution: the top frame of `cast run <hash>`, equal to `trace_transaction`'s top call `gasUsed` on the fork | 411,389 |
+| Standard + execution: 21,000 + 93,196 + 411,389 | **525,585** |
+| Floor: 21,000 + 10 × 4,143 + 40 × 4,789 | 253,990 |
+| **`gasUsed`**: the larger of the two | **525,585** |
+
+Execution is 4,687 above the local settle's 406,702, the canonical verifier's difference above. Public RPCs serve no `trace_*`, so the recorder takes execution from `cast run`, which replays the transaction locally after the block's earlier ones; its `Gas used` line prints the receipt's total, which the recorder only cross-checks.
 
 ### Amsterdam (provisional)
 
