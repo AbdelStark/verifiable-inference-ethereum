@@ -66,12 +66,59 @@ make anvil-demo
 
 ### 3. Deploy to Hoodi (`560048`) (M4)
 
-Testnet deployment is M4. It targets Hoodi; Sepolia (`11155111`) is optional. `contracts/script/DeployTestnet.s.sol` reads no environment variable. It refuses any other chain, an RPC whose `eth_chainId` differs from the chain forge simulates (so `--chain hoodi` with a mainnet RPC fails), and forge's `DEFAULT_SENDER` (a run without `--sender`), and requires the pinned SP1 v6.1.0 `SP1VerifierPlonk` at `0xc3c6dDDAc8829b233Dc6536Ec024775a57b0AF2A` (never the `SP1VerifierGateway`: [SECURITY.md](SECURITY.md) §6), with its codehash and `VERSION`. It reads the aggregator vkey and the proof from `contracts/fixtures/tinyllama.plonk.json`. It then sends five transactions: the registry, whose immutable `OWNER` is the sender, `enrollModel`, `Sp1SashSegmentVerifier`, `VerifiableInferenceSettlement` with `allowDevVerifier = false`, and `verifyAndSettle` of the committed PLONK proof. After them it reads every immutable back and checks the settled `runId`. Without `--broadcast` it is a dry run against the live chain, which needs no wallet:
+Testnet deployment is M4. It targets Hoodi; Sepolia (`11155111`) is optional. `contracts/script/DeployTestnet.s.sol` reads no environment variable. It refuses any other chain, an RPC whose `eth_chainId` differs from the chain forge simulates (so `--chain hoodi` with a mainnet RPC fails), and forge's `DEFAULT_SENDER` (a run without `--sender`), and requires the pinned SP1 v6.1.0 `SP1VerifierPlonk` at `0xc3c6dDDAc8829b233Dc6536Ec024775a57b0AF2A` (never the `SP1VerifierGateway`: [SECURITY.md](SECURITY.md) §6), with its codehash and `VERSION`. It reads the aggregator vkey and the proof from `contracts/fixtures/tinyllama.plonk.json`. It then sends five transactions: the registry, whose immutable `OWNER` is the sender, `enrollModel`, `Sp1SashSegmentVerifier`, `VerifiableInferenceSettlement` with `allowDevVerifier = false`, and `verifyAndSettle` of the committed PLONK proof. After them it reads every immutable back and checks the settled `runId`.
 
-```bash
-cd contracts
-forge script script/DeployTestnet.s.sol:DeployTestnet --rpc-url "$HOODI_RPC_URL" --sender <deployer address>
-```
+`contracts/script/testnet-settle.sh` rehearses, records and verifies the deployment, through `make testnet-rehearsal`, `make testnet-record` and `make testnet-verify`. None of them is in `make check` or CI: they need the network and the chain at its latest block (the fork tests in `contracts/test/TestnetFork.t.sol` are the CI gate). The script reads `RPC_URL`, default `HOODI_RPC_URL`, never takes a key and never prints the URL. Keep the URL in your shell's environment, never in a file in the repository; it must be an archive endpoint, since `cast run` replays the settle on the state of its parent block (`https://hoodi.drpc.org` is one). The runbook:
+
+1. **The deployer.** A fresh Hoodi-only address, which becomes the registry's immutable `OWNER` and is public once recorded. Either a Foundry keystore, `cast wallet import hoodi-deployer --interactive` (then `--account hoodi-deployer --sender <address>` below), or a Ledger with no import (`cast wallet import` has no `--ledger`; then `--ledger --sender <address>`, adding `--mnemonic-derivation-paths <path>` when the address is not the Ledger's first). Never pass `--private-key` or `--password` on a command line.
+2. **Funding.** About 0.01 HodETH is enough: the five transactions take about 2.03M gas, about 0.002-0.004 HodETH at 1-2 gwei. The faucet `https://hoodi-faucet.pk910.de` takes a proof of work and a captcha, with a minimum claim of 0.1 (the ethpandaops faucet was out of funds on 2026-10-30).
+3. **The rehearsal**, from a clean checkout of the commit to deploy, with `HOODI_RPC_URL` exported:
+
+   ```bash
+   make testnet-rehearsal DEPLOYER=<address>
+   ```
+
+   It reads `eth_config` (Hoodi must be on Osaka, `forkId` `0x23aa1351`, with no next fork scheduled), forks the chain at its latest block on a local `anvil --hardfork osaka --enable-tx-gas-limit` (port `8578`, or `ANVIL_PORT`), impersonates and funds `DEPLOYER` (default anvil's first account), runs `forge clean && forge build --locked`, broadcasts `DeployTestnet.s.sol` on the fork with `--unlocked --sender <address> --slow`, and records it as below into a temp file, printing the five transactions and the settle's `EIP-7623` breakdown: the settle must cost 525,585 gas, with execution 411,389. With the real deployer, the addresses it predicts are the live ones at the deployer's current nonce. It then moves its `broadcast/` and `cache/` directories for `DeployTestnet.s.sol` on `560048` into the temp dir, since a fork keeps the chain id and the live broadcast writes to the same path, and writes `contracts/deployments/560048.preflight.json` (gitignored): the commit, Foundry, the `eth_config` reading and the block it was read at, the fork block, the deployer and the predicted addresses, the pre-broadcast evidence for [SECURITY.md](SECURITY.md) §7. It refuses to run while either directory exists.
+4. **The dry run** against the live chain, which needs no wallet. It must simulate the five transactions with the addresses the rehearsal predicted:
+
+   ```bash
+   cd contracts
+   forge script script/DeployTestnet.s.sol:DeployTestnet --rpc-url "$HOODI_RPC_URL" --sender <address>
+   ```
+
+5. **Clear the dry run's files and check that no broadcast is left.** The dry run writes `dry-run/` under both directories, and its `cache/` file holds the RPC URL. `record` and `forge script --resume` read `broadcast/DeployTestnet.s.sol/560048/run-latest.json`, so nothing may be there before the live broadcast:
+
+   ```bash
+   rm -rf broadcast/DeployTestnet.s.sol/560048/dry-run cache/DeployTestnet.s.sol/560048/dry-run
+   test ! -e broadcast/DeployTestnet.s.sol/560048 && test ! -e cache/DeployTestnet.s.sol/560048
+   ```
+
+6. **The broadcast**, five transactions under one approval. `--slow` sends each after the previous one's receipt, so the settle follows the settlement's deployment by one block. A run cut short is finished with the same command and `--resume`.
+
+   ```bash
+   forge script script/DeployTestnet.s.sol:DeployTestnet --rpc-url "$HOODI_RPC_URL" \
+     --account hoodi-deployer --sender <address> --broadcast --slow
+   # or
+   forge script script/DeployTestnet.s.sol:DeployTestnet --rpc-url "$HOODI_RPC_URL" \
+     --ledger --sender <address> --broadcast --slow
+   ```
+
+7. **The record**, from the same commit, with the tree clean and the commit on `origin/main`:
+
+   ```bash
+   make testnet-record
+   ```
+
+   It checks `broadcast/DeployTestnet.s.sol/560048/run-latest.json` against the chain: the chain id, every transaction hash present on it (a rehearsal's never is), the file's `commit` equal to `HEAD`, exactly the five expected transactions from one sender and no `DevTranscriptSegmentVerifier`, every receipt with status 1 and `gasLimit <= 16,777,216`, exactly one `InferenceVerified` from the settlement with [SPEC.md](SPEC.md) §1.4's `runId` and `verifierKind == 1`, and the stack's immutables read back (`OWNER` the deployer, the pinned verifier and its codehash, the fixture's vkey, `ALLOW_DEV_VERIFIER() == false`). It waits until the settle's block is finalized (about 15 minutes on Hoodi), and checks `eth_config` again. It reproduces the settle's receipt as `max(21,000 + standard + execution, floor)`, with execution from the top frame of `cast run <hash>`, and requires the pins above. It folds in the preflight file, after checking its commit, its blocks below the first deployment's and its predicted addresses against the deployed ones, deletes it, and writes `contracts/deployments/560048.json` (`jq -S`; no RPC URL and no timestamp of its own). That file is only ever written by `record`, never by hand, and `broadcast/` and `cache/` are never committed (`git add -f`).
+
+   **If an exact copy front-ran the settle,** the run is settled by the copy, which emits the same event, and the broadcast's own settle reverts with `RunAlreadySettled`; `--resume` cannot recover that. `make testnet-record SETTLE_TX=<the copy's hash>` records the four deployments from the broadcast and the copy as the settle, with the same checks and its sender as `settle.from`.
+8. **Verification** on Sourcify and on Hoodi's Blockscout, neither of which needs a key, from the recorded commit:
+
+   ```bash
+   make testnet-verify
+   ```
+
+   It runs `forge verify-contract --watch` for the three contracts with their ABI-encoded constructor arguments and adds the explorer links to the record. Etherscan needs an API key; with `ETHERSCAN_API_KEY` exported in your own shell, never written to a file, it is, per contract, `forge verify-contract <address> src/sash/<Name>.sol:<Name> --chain 560048 --constructor-args <the same encoding> --verifier etherscan --watch`.
 
 ## Documentation
 

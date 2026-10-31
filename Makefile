@@ -1,4 +1,4 @@
-.PHONY: help check rust-check vectors slither forge-test anvil-demo sp1-vendor sp1-check sp1-docker sash-synthetic sp1-guest-suite bundles-download bundles-check proofs-download sp1-execute sp1-fixture-check sp1-proofs-check clean
+.PHONY: help check rust-check vectors slither forge-test anvil-demo testnet-rehearsal testnet-record testnet-verify sp1-vendor sp1-check sp1-docker sash-synthetic sp1-guest-suite bundles-download bundles-check proofs-download sp1-execute sp1-fixture-check sp1-proofs-check clean
 
 help:
 	@echo "Targets:"
@@ -8,6 +8,12 @@ help:
 	@echo "  make slither     - Run Slither on contracts/src (contracts/slither.config.json: fail on Low or above); fails unless slither is the pinned $(SLITHER_VERSION)"
 	@echo "  make forge-test  - Check Solidity format, build against foundry.lock, lint, run the Foundry suite with gas report (the Hoodi and Sepolia fork tests when HOODI_RPC_URL and SEPOLIA_RPC_URL are set), and check the gas snapshots against the index"
 	@echo "  make anvil-demo  - Mine the TinyLlama-1.1B 23-segment settlement on a local Osaka anvil node twice, dev mode (DeployDevAnvil.s.sol) and with the committed PLONK proof through SP1VerifierPlonk (DeployAnvilSp1.s.sol, below 600,000 gas), check the receipts and print their gas"
+	@echo "  make testnet-rehearsal [DEPLOYER=<address>]"
+	@echo "                  - Not in make check or CI: fork RPC_URL (default HOODI_RPC_URL) at its latest block on a local Osaka anvil, broadcast DeployTestnet.s.sol from DEPLOYER (default anvil's first account) on the fork, record it into a temp file with the settle's pins, move the rehearsal's broadcast/ and cache/ away, and write contracts/deployments/<chainid>.preflight.json"
+	@echo "  make testnet-record [SETTLE_TX=<hash>]"
+	@echo "                  - Not in make check or CI: check the live broadcast of DeployTestnet.s.sol against RPC_URL, wait for finality, check the settle's EIP-7623 identity and pins, and write contracts/deployments/<chainid>.json with the preflight file folded in; SETTLE_TX records a front-run exact copy as the settle"
+	@echo "  make testnet-verify"
+	@echo "                  - Not in make check or CI: verify the three recorded contracts on Sourcify and Blockscout (no key) and add the links to contracts/deployments/<chainid>.json"
 	@echo "  make sp1-vendor  - Build sp1/vendor/sash: SASH eb95bfa from its sha256-pinned tarball plus sp1/patches"
 	@echo "  make sp1-check   - Vendor SASH, check nitroo's Stwo (also with count-ops) and SASH's zk-prover library without the prover feature on stable, then cargo fmt --check, the segment check's and the aggregator's unit tests, the executor tests and clippy -D warnings in sp1/ (needs SP1 v6.10.0 and protoc)"
 	@echo "  make sp1-docker  - Build the segment guest, the aggregator guest and stwo-bench reproducibly in the SP1 v6.10.0 Docker image pinned by digest, print their ELF sha256 and the two guests' vkeys, and compare them with sp1/{segment,aggregator}-guest.elf.sha256 and sp1/{segment,aggregator}-guest.vkey"
@@ -108,6 +114,17 @@ check: rust-check
 
 anvil-demo:
 	contracts/script/anvil-settle.sh
+
+# The Hoodi deployment (contracts/script/testnet-settle.sh): on demand, never in check or CI, since they need the
+# network and the chain at its latest block; the fork tests are the CI gate.
+testnet-rehearsal:
+	contracts/script/testnet-settle.sh rehearse
+
+testnet-record:
+	contracts/script/testnet-settle.sh record
+
+testnet-verify:
+	contracts/script/testnet-settle.sh verify
 
 # The SP1 v6.10.0 image, by the digest sp1/scripts/docker-guests.sh pins.
 SP1_IMAGE := $(shell sed -n 's/^export SP1_DOCKER_IMAGE=//p' sp1/scripts/docker-guests.sh)
